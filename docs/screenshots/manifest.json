@@ -3,35 +3,131 @@
     {
       "path": "add-member.png",
       "sha256": "7d3e61bddeb9a8a01a2abdbff423a10d4680c5e33b2871ecb0d76a4f570eaeba",
-      "bytes": 227944
+      "bytes": 227944,
+      "source": "self-rendered fixtures",
+      "captured_on": "2026-10-19",
+      "viewport": {
+        "width": 1600,
+        "height": 1000
+      },
+      "application_code_sha256": "5fe04b562c17e23603063bca395d4d83eb5e42f5f302fb6dc1c16a4019e74cd2",
+      "provenance": "Actual local RetroOne frontend rendered in headless Chromium using fictional API data. Built-in SVG avatars and fallback cards only. No ROM, firmware, keys, third-party artwork or production service access. No game was launched. PNGs copied unchanged from task screenshot captures.",
+      "kind": "fixture"
     },
     {
       "path": "display-settings.png",
       "sha256": "a830737e12cc43a7ccd9a78c518dcab09fa24391a5c25de10690baa9f82c6297",
-      "bytes": 160068
+      "bytes": 160068,
+      "source": "self-rendered fixtures",
+      "captured_on": "2026-10-19",
+      "viewport": {
+        "width": 1600,
+        "height": 1000
+      },
+      "application_code_sha256": "5fe04b562c17e23603063bca395d4d83eb5e42f5f302fb6dc1c16a4019e74cd2",
+      "provenance": "Actual local RetroOne frontend rendered in headless Chromium using fictional API data. Built-in SVG avatars and fallback cards only. No ROM, firmware, keys, third-party artwork or production service access. No game was launched. PNGs copied unchanged from task screenshot captures.",
+      "kind": "fixture"
     },
     {
       "path": "invitation.png",
       "sha256": "70db2ac4a74fb389df1a75cfbd8c36d3ec50f764016d1c8bd02c093cf78ec84d",
-      "bytes": 136827
+      "bytes": 136827,
+      "source": "self-rendered fixtures",
+      "captured_on": "2026-10-19",
+      "viewport": {
+        "width": 1600,
+        "height": 1000
+      },
+      "application_code_sha256": "5fe04b562c17e23603063bca395d4d83eb5e42f5f302fb6dc1c16a4019e74cd2",
+      "provenance": "Actual local RetroOne frontend rendered in headless Chromium using fictional API data. Built-in SVG avatars and fallback cards only. No ROM, firmware, keys, third-party artwork or production service access. No game was launched. PNGs copied unchanged from task screenshot captures.",
+      "kind": "fixture"
     },
     {
       "path": "library.png",
       "sha256": "66ec7017a1dde77cfbc6be56c70e797a89ba80b49bbc45792121deb5fe850610",
-      "bytes": 700631
+      "bytes": 700631,
+      "source": "self-rendered fixtures",
+      "captured_on": "2026-10-19",
+      "viewport": {
+        "width": 1600,
+        "height": 1000
+      },
+      "application_code_sha256": "5fe04b562c17e23603063bca395d4d83eb5e42f5f302fb6dc1c16a4019e74cd2",
+      "provenance": "Actual local RetroOne frontend rendered in headless Chromium using fictional API data. Built-in SVG avatars and fallback cards only. No ROM, firmware, keys, third-party artwork or production service access. No game was launched. PNGs copied unchanged from task screenshot captures.",
+      "kind": "fixture"
     },
     {
       "path": "members.png",
       "sha256": "be75db4b57bb7d3dfbc99e72ab8d6e868b284b5c28af246249dea11957073290",
-      "bytes": 260524
+      "bytes": 260524,
+      "source": "self-rendered fixtures",
+      "captured_on": "2026-10-19",
+      "viewport": {
+        "width": 1600,
+        "height": 1000
+      },
+      "application_code_sha256": "5fe04b562c17e23603063bca395d4d83eb5e42f5f302fb6dc1c16a4019e74cd2",
+      "provenance": "Actual local RetroOne frontend rendered in headless Chromium using fictional API data. Built-in SVG avatars and fallback cards only. No ROM, firmware, keys, third-party artwork or production service access. No game was launched. PNGs copied unchanged from task screenshot captures.",
+      "kind": "fixture"
+    },
+    {
+      "path": "library-recent.png",
+      "sha256": "8239f01fe9323613178d332ae62bd7e8b714789a5bc47f5607bbf2d4e92929df",
+      "bytes": 1456750,
+      "kind": "real-library",
+      "source": "actual private LAN deployment; unchanged catalog GET responses",
+      "captured_at": "2026-10-19T14:15:13+00:00",
+      "viewport": {
+        "width": 1600,
+        "height": 1080
+      },
+      "application_code_sha256": "93536b3861c71861bf5763b628a3dd787ba66eb5cf7fd61afa40ed91e8f9606b",
+      "view": "recent",
+      "view_heading": "最近游玩 28 款",
+      "displayed_items": 28,
+      "catalog_count_at_capture": "35,238",
+      "platform_count_at_capture": "61",
+      "provenance": "Actual browser screenshot of existing library records and cover artwork. Member names anonymized only in the DOM; original titles, covers, counts and ordering preserved. Read-only browsing; presence acknowledged locally without server writes. No game launched or stopped; no ROM, BIOS, firmware, keys or saves requested. PNG copied unchanged from capture. Background catalog scan was active."
+    },
+    {
+      "path": "library-platform.png",
+      "sha256": "f28ebdb48c1e1183c165cf0793d0b274a3f16cb9932969618ba94806a9663dab",
+      "bytes": 1458378,
+      "kind": "real-library",
+      "source": "actual private LAN deployment; unchanged catalog GET responses",
+      "captured_at": "2026-10-19T14:15:25+00:00",
+      "viewport": {
+        "width": 1600,
+        "height": 1080
+      },
+      "application_code_sha256": "93536b3861c71861bf5763b628a3dd787ba66eb5cf7fd61afa40ed91e8f9606b",
+      "view": "platform:nes",
+      "view_heading": "FC · 红白机 4,347 款",
+      "displayed_items": 60,
+      "catalog_count_at_capture": "35,244",
+      "platform_count_at_capture": "61",
+      "provenance": "Actual browser screenshot of existing library records and cover artwork. Member names anonymized only in the DOM; original titles, covers, counts and ordering preserved. Read-only browsing; presence acknowledged locally without server writes. No game launched or stopped; no ROM, BIOS, firmware, keys or saves requested. PNG copied unchanged from capture. Background catalog scan was active."
+    },
+    {
+      "path": "library-favorites.png",
+      "sha256": "ad4ecc571c4edd8d256c3c34a91b31f86d830842c9a181ba4245bc1797c75c67",
+      "bytes": 1009659,
+      "kind": "real-library",
+      "source": "actual private LAN deployment; unchanged catalog GET responses",
+      "captured_at": "2026-10-19T14:15:32+00:00",
+      "viewport": {
+        "width": 1600,
+        "height": 1080
+      },
+      "application_code_sha256": "93536b3861c71861bf5763b628a3dd787ba66eb5cf7fd61afa40ed91e8f9606b",
+      "view": "favorites",
+      "view_heading": "我的收藏 5 款",
+      "displayed_items": 5,
+      "catalog_count_at_capture": "35,244",
+      "platform_count_at_capture": "61",
+      "provenance": "Actual browser screenshot of existing library records and cover artwork. Member names anonymized only in the DOM; original titles, covers, counts and ordering preserved. Read-only browsing; presence acknowledged locally without server writes. No game launched or stopped; no ROM, BIOS, firmware, keys or saves requested. PNG copied unchanged from capture. Background catalog scan was active."
     }
   ],
-  "source": "self-rendered fixtures",
-  "captured_on": "2026-10-19",
-  "viewport": {
-    "width": 1600,
-    "height": 1000
-  },
-  "application_code_sha256": "5fe04b562c17e23603063bca395d4d83eb5e42f5f302fb6dc1c16a4019e74cd2",
-  "provenance": "Actual local RetroOne frontend rendered in headless Chromium using fictional API data. Built-in SVG avatars and fallback cards only. No ROM, firmware, keys, third-party artwork or production service access. No game was launched. PNGs copied unchanged from task screenshot captures."
+  "source": "mixed: real-library captures and self-rendered fixtures; see each file entry",
+  "provenance": "See README.md in this directory. Real-library screenshots are explicitly reviewed documentation assets; standalone artwork, game content and private runtime data remain excluded."
 }

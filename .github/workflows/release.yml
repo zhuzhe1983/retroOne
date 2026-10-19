@@ -138,7 +138,7 @@ jobs:
 
           Immutable digest: `{image}@{digest}`
 
-          This release contains source code and the public application image. It does not include private emulator-core caches, EmulatorJS binaries, AppImages, ROMs, BIOS/firmware, keys, covers, saves, or commercial game screenshots. Uninstalled platform runtimes are reported as unavailable. Prepare the complete runtime locally as described in `docs/releasing.md`; do not upload private runtime backups to this release.
+          This release contains source code and the public application image. It does not include private emulator-core caches, EmulatorJS binaries, AppImages, ROMs, BIOS/firmware, keys, standalone cover caches, or saves. Source documentation includes individually reviewed UI screenshots, some displaying real game covers; provenance is recorded in `docs/screenshots/`. Documentation screenshots are excluded from the public image build context. Uninstalled platform runtimes are reported as unavailable. Prepare the complete runtime locally as described in `docs/releasing.md`; do not upload private runtime backups to this release.
           ''')
           PY
           if gh release view "$VERSION" >/dev/null 2>&1; then

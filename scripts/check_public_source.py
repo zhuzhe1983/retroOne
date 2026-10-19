@@ -42,7 +42,7 @@ def violations(paths, root):
         if any(suffix.lower() in BINARY_EXTENSIONS for suffix in path.suffixes):
             errors.append((name, 'runtime binary, archive or game/state/key extension')); continue
         if path.suffix.lower() in IMAGES and name not in screenshots:
-            errors.append((name, 'image/video absent from reviewed self-rendered screenshot manifest'))
+            errors.append((name, 'image/video absent from reviewed UI screenshot manifest'))
         candidate = root / path
         if candidate.is_symlink(): errors.append((name, 'source symlink is not allowed'))
         elif candidate.is_file():

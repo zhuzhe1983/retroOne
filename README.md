@@ -16,9 +16,21 @@ Library management keeps metadata, ROM-linked launch configurations, and persona
 
 The interface supports **English**, **简体中文**, and **Browser default**. Use the language selector in the top bar or on the player selection screen. Each player’s preference is saved on the server; switching languages keeps the current game running. Game titles, descriptions, and save identities retain their original values.
 
-![RetroOne 游戏库示例：平台导航、搜索、运行方式筛选与家人动态](docs/screenshots/library.png)
+下面三张截图来自实际家庭游戏库，展示已有的最近游玩、单个平台和个人收藏。游戏标题、封面、排序与数量取自真实目录；成员昵称仅在截图页面中作匿名化处理，没有修改服务器资料。
 
-> 本页是当前应用在浏览器中的实际界面截图，使用明确标注的虚构目录和成员资料，仅展示操作流程，不代表游戏运行或性能验证。图片不含第三方游戏封面或商业游戏画面。仓库及公开镜像不提供 ROM、BIOS、固件或密钥，也不会替用户下载游戏。
+**最近游玩：接着上次的冒险。**
+
+![RetroOne 真实游戏库：最近游玩记录与游戏封面](docs/screenshots/library-recent.png)
+
+**按平台浏览：集中查看一台主机的收藏。**
+
+![RetroOne 真实游戏库：单个平台的分类浏览](docs/screenshots/library-platform.png)
+
+**我的收藏：把常玩的游戏放在一起。**
+
+![RetroOne 真实游戏库：已有个人收藏与游戏封面](docs/screenshots/library-favorites.png)
+
+> 这些截图展示游戏库浏览，不代表其中每款游戏均通过运行或性能验证。后文的成员、邀请和画面设置截图使用虚构演示资料，并标为“示例”。封面仅随界面截图展示；仓库及公开镜像不提供 ROM、BIOS、固件或密钥，也不会替用户下载游戏。
 
 ## 可以用它做什么
 
@@ -129,7 +141,7 @@ docker compose ps
 
 选择游戏后查看详情中的运行方式和原因。先试一款熟悉的游戏，验证输入、保存和恢复，再继续扩充收藏。移动或重命名已入库文件可能改变游戏 ID，进而影响收藏、最近记录及按游戏 ID 保存的数据关联；已有进度请先备份。
 
-已有 Pegasus 收藏可以保留 `metadata.pegasus.txt` 和媒体目录。自己的封面可按 `media/<ROM文件名去掉扩展名>/boxFront.png` 放在收藏目录内，或在元数据中明确引用；没有图片时仍能正常浏览。封面缓存不应随项目代码或公开镜像发布。
+已有 Pegasus 收藏可以保留 `metadata.pegasus.txt` 和媒体目录。自己的封面可按 `media/<ROM文件名去掉扩展名>/boxFront.png` 放在收藏目录内，或在元数据中明确引用；没有图片时仍能正常浏览。独立封面缓存不应随项目代码或公开镜像发布；文档中经确认的界面截图单独记录来源。
 
 ## 和家人一起使用
 
@@ -209,6 +221,6 @@ docker compose ps
 - [联机能力及验证边界](NETWORK_REVIEW.md)
 - [Switch 模拟器、依赖准备与验证边界](docs/switch-runtime.md)
 - [上游组件、版本与许可证记录](container/UPSTREAM.md)
-- [示例截图来源说明](docs/screenshots/README.md)
+- [真实图库与示例截图的来源说明](docs/screenshots/README.md)
 
-本地开发可以在 macOS / Linux 启动目录 API 与网页；云端模拟和串流需要 Linux 容器环境。开发启动、检查命令见维护指南。游戏、固件、封面、用户数据和本地验收录屏均应留在自己的存储中，不随代码提交或公开发布。
+本地开发可以在 macOS / Linux 启动目录 API 与网页；云端模拟和串流需要 Linux 容器环境。开发启动、检查命令见维护指南。游戏、固件、独立封面缓存、用户数据和本地验收录屏均应留在自己的存储中，不随代码提交或公开发布。文档仅收录截图清单中逐张确认的界面图片。

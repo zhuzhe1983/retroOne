@@ -1,0 +1,23 @@
+#!/usr/bin/with-contenv bash
+set -e
+for gid in ${RETROONE_SUPPLEMENTARY_GIDS//,/ }; do
+  [[ "$gid" =~ ^[0-9]+$ ]] || continue
+  getent group "$gid" >/dev/null || groupadd -g "$gid" "retroone-host-$gid"
+  usermod -aG "$gid" abc
+done
+mkdir -p /config/retroone/system /config/retroone/saves /config/retroone/work /config/retroone/logs /config/retroone/profile-control
+mkdir -p "${RETROONE_ARTWORK_ROOT:-/artwork}"
+chown abc:abc "${RETROONE_ARTWORK_ROOT:-/artwork}"
+cp -an /opt/retroone/system/. /config/retroone/system/
+chown -R abc:abc /config/retroone
+mkdir -p /config/.config/PCSX2/bios
+chown -R abc:abc /config/.config/PCSX2
+cp /opt/retroone/stream-input.js /usr/share/selkies/web/retroone-input.js
+python3 - <<'PY'
+from pathlib import Path
+p = Path('/usr/share/selkies/web/index.html')
+s = p.read_text()
+if 'retroone-input.js' not in s:
+    s = s.replace('<head>', '<head><script src="./retroone-input.js"></script>', 1)
+    p.write_text(s)
+PY

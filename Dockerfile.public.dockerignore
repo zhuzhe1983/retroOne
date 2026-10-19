@@ -1,0 +1,18 @@
+# Public build context is an allowlist. Runtime caches and user data never enter it.
+**
+!Dockerfile.public
+!requirements.txt
+!retroone/
+!retroone/**
+!web/
+!web/**
+!container/
+!container/**
+**/__pycache__
+**/*.pyc
+**/.DS_Store
+**/._*
+**/*.pem
+**/*.key
+**/prod.keys
+**/title.keys

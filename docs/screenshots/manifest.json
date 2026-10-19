@@ -1,0 +1,37 @@
+{
+  "files": [
+    {
+      "path": "add-member.png",
+      "sha256": "7d3e61bddeb9a8a01a2abdbff423a10d4680c5e33b2871ecb0d76a4f570eaeba",
+      "bytes": 227944
+    },
+    {
+      "path": "display-settings.png",
+      "sha256": "a830737e12cc43a7ccd9a78c518dcab09fa24391a5c25de10690baa9f82c6297",
+      "bytes": 160068
+    },
+    {
+      "path": "invitation.png",
+      "sha256": "70db2ac4a74fb389df1a75cfbd8c36d3ec50f764016d1c8bd02c093cf78ec84d",
+      "bytes": 136827
+    },
+    {
+      "path": "library.png",
+      "sha256": "66ec7017a1dde77cfbc6be56c70e797a89ba80b49bbc45792121deb5fe850610",
+      "bytes": 700631
+    },
+    {
+      "path": "members.png",
+      "sha256": "be75db4b57bb7d3dfbc99e72ab8d6e868b284b5c28af246249dea11957073290",
+      "bytes": 260524
+    }
+  ],
+  "source": "self-rendered fixtures",
+  "captured_on": "2026-10-19",
+  "viewport": {
+    "width": 1600,
+    "height": 1000
+  },
+  "application_code_sha256": "5fe04b562c17e23603063bca395d4d83eb5e42f5f302fb6dc1c16a4019e74cd2",
+  "provenance": "Actual local RetroOne frontend rendered in headless Chromium using fictional API data. Built-in SVG avatars and fallback cards only. No ROM, firmware, keys, third-party artwork or production service access. No game was launched. PNGs copied unchanged from task screenshot captures."
+}

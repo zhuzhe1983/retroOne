@@ -1,0 +1,3 @@
+#!/usr/bin/with-contenv bash
+cd /opt/retroone
+exec s6-setuidgid abc /lsiopy/bin/python -m uvicorn retroone.api:app --host 127.0.0.1 --port 8080 --proxy-headers --timeout-graceful-shutdown 15

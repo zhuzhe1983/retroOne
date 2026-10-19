@@ -1,0 +1,238 @@
+{
+  "fceumm_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/fceumm_libretro.so.zip",
+    "sha256": "dcb7bd6e4809c268b90bbc456097c008748440cb14fc26a3751dd10213c1fe9e",
+    "binary_sha256": "238f0d0de6a17e43b8ef65b51eb56fe7e1f7786a054dd4114ed1a60a5ba33078"
+  },
+  "nestopia_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/nestopia_libretro.so.zip",
+    "sha256": "e2538a9a0d464333087089b0b5ba69bb0d43490f34786ad6bbc8684b9e6395a0",
+    "binary_sha256": "57d98d1937dc1f7168f9868a94613f9c42447a6b0fb4eaea51297d5763b5d890"
+  },
+  "snes9x_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/snes9x_libretro.so.zip",
+    "sha256": "edcd321c64ce7acd244cd06b7309af9b87652b7c1d56f295793073566f943558",
+    "binary_sha256": "9b2b6ea9d88f96c156590443ddd05ee56aaf4e495329a889c979921942717a31"
+  },
+  "gambatte_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/gambatte_libretro.so.zip",
+    "sha256": "2f4f11a7a43250e171ae34f66d3f6a7507923d6f9a170724f4a8cbf73c62e203",
+    "binary_sha256": "b8fba61ecbb840723a7c64d771196b37931c50ba4d98874cccedfd69a8aa27a6"
+  },
+  "mgba_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/mgba_libretro.so.zip",
+    "sha256": "4ceaaf629755f8730c4b528e7f56684480a7ec283f8399ce3b16550bf79b11e8",
+    "binary_sha256": "c840f305825d07c9bec7a6ec18841073c4b539fd234f73623474f97c507f1cdc"
+  },
+  "genesis_plus_gx_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/genesis_plus_gx_libretro.so.zip",
+    "sha256": "36d45ca9b55f2f26f321297d4e16360da7bda921a2e7e22896b7cdf0cc046ac1",
+    "binary_sha256": "ca43fe7e4252d21d0cc230fe1f3a1b82d54781f5d72d194ff66e257db6943044"
+  },
+  "mupen64plus_next_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/mupen64plus_next_libretro.so.zip",
+    "sha256": "77cfdaa73025609652c2a1f9b4efd7812ffaab0878e89c783d6d146ee434361f",
+    "binary_sha256": "beb4598e0999e022fac0ff206bf9728d3210adfdaa93468bcaa8e81ad64fdc72"
+  },
+  "melonds_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/melonds_libretro.so.zip",
+    "sha256": "016228df6c627ee1d0c57b441a161405eae1e65092927369536af42c228cbf14",
+    "binary_sha256": "92cc20bd4d654e24af29ff59f042288b9ed100f8ed5f3d94aeea007e210c27f7"
+  },
+  "pcsx_rearmed_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/pcsx_rearmed_libretro.so.zip",
+    "sha256": "c2206db8ab717d6853d0ad60e3d54868d11ccfb947577f49ffcbfe85e732a838",
+    "binary_sha256": "f78d512ce3e223a863b1c3c04423dd4d502b554f0bb4307874c48bb9075edb6f"
+  },
+  "mednafen_psx_hw_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/mednafen_psx_hw_libretro.so.zip",
+    "sha256": "77d9e05e3fbc2024d45bcac6cc94bed639f216ce6afb080937481b52fc0b1948",
+    "binary_sha256": "bb763fcaee2c8811d2b7923c77ab3b4e7d432b6f41f04a3bf0575c9c5cfc8f55"
+  },
+  "ppsspp_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/ppsspp_libretro.so.zip",
+    "sha256": "1d53bb10c577e784f42e31256964f476044e10950dc3d284dc6ba4c15b847dca",
+    "binary_sha256": "19a25baeff92127d4cc4dc6c995182dc70efd3a16f4ab7954a9bfdce6ffb4237"
+  },
+  "flycast_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/flycast_libretro.so.zip",
+    "sha256": "95a91a4b859ecc5da9f67f3dbe444dfa2080d1867a4a07b730015b838423df87",
+    "binary_sha256": "0e85508fbc63920ea7a4c9f5ce16e779b236f115a1580e178a6d3c9bfd9512a0"
+  },
+  "yabause_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/yabause_libretro.so.zip",
+    "sha256": "7b9bbac4c34346a4956849a2463d6d8d11abf33d311fdfbbc343910fa2a9313c",
+    "binary_sha256": "974a4cc700ed7eef80b8a33abd33ed07ab317f2123a1014b78c57e043b923296"
+  },
+  "fbneo_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/fbneo_libretro.so.zip",
+    "sha256": "e60c4a46410062302e17f364bf1593812a5846218115a428149399c2070e11de",
+    "binary_sha256": "f57481a6bf4c7896a9e35c45ca5f78c8c784916da7d685fd6f32720b85caa704"
+  },
+  "mame2003_plus_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/mame2003_plus_libretro.so.zip",
+    "sha256": "f1add66900ddd6d0d54b24b6e34b20e586d792070e0f150ead36e4a582be68eb",
+    "binary_sha256": "13c011c9af5b0901d4399a410c0983c09e927deedf5c7d0397af275da797e698"
+  },
+  "mednafen_pce_fast_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/mednafen_pce_fast_libretro.so.zip",
+    "sha256": "3e45c2211dbd10405733ccf7909efea2cc2975e54c31192a1b532e00bd931f20",
+    "binary_sha256": "9f08c601bd84e6d63d4a1fbbaca05d5c1ce4719219e751751da8d44c59c11fd8"
+  },
+  "mednafen_ngp_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/mednafen_ngp_libretro.so.zip",
+    "sha256": "6dc8dee40027c46f12e5ca078122d2a08b5ffc9e5d9cd2b875ee51558b8cf4a7",
+    "binary_sha256": "76c214571948388493807f25966056058fda65450db666f10d58d2d084bab124"
+  },
+  "mednafen_wswan_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/mednafen_wswan_libretro.so.zip",
+    "sha256": "ea56e1f1f4f7e5ebd3fa1458214645538d39a9f0b6f005898ce68256d3dd2ce0",
+    "binary_sha256": "e181289190fee462ad6d8f2cf6b0df2ab7f094710257995c50f95d2bf2baa174"
+  },
+  "stella_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/stella_libretro.so.zip",
+    "sha256": "296eda310d49e178e6435ab82fe8a90d0f8d7ab81262e73c346056dc7c3d8ac5",
+    "binary_sha256": "9aeb38f00614865ad56c56729252f1a0cc0be4017ede8bffaf6cf1175ca0c4bf"
+  },
+  "a5200_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/a5200_libretro.so.zip",
+    "sha256": "9232751d4227fa4624556269cfd9f1a72b27fb3d0f0331fab1cd873ebe4774b2",
+    "binary_sha256": "c4db0b8a6b8f7731d4944bda9c8125d7c074d0494c5201aa78abad1ec003675e"
+  },
+  "prosystem_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/prosystem_libretro.so.zip",
+    "sha256": "5532329b7fc3bc273e8f2f44fca3bb13a8650a0fcee451cd68a4cfba62a061d4",
+    "binary_sha256": "5e11828417eaeafef64e842d6a1e2ddb8cd0b210b3daf7cba82d7a74b8efbe23"
+  },
+  "vecx_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/vecx_libretro.so.zip",
+    "sha256": "cec21b197c73270c2648d125551f623898b6779fcdfac0d8cb848f568c7513fe",
+    "binary_sha256": "50ea1e02ec2a8df0b6b7c91c996de849e90928d706cb5c2ab5906b237e40b153"
+  },
+  "bluemsx_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/bluemsx_libretro.so.zip",
+    "sha256": "92a42dc377a04dd8fbbbf3c4d7e70ecd24be5c484b94a330fe3c62228f519d73",
+    "binary_sha256": "98cb8b24de653c4be49a6da36822b472e6d5ffbba5f2fb6ae2ef63cb8605133c"
+  },
+  "dosbox_pure_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/dosbox_pure_libretro.so.zip",
+    "sha256": "de725755243f0ad34f6f058f50821fc78770b4d84b334adc3cefc574a4c3d6c8",
+    "binary_sha256": "c4019b9ad9de9eea0cb7ac9f0fb94592d9cb566ad9845a9ad43f38b8edf9788b"
+  },
+  "mednafen_vb_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/mednafen_vb_libretro.so.zip",
+    "sha256": "29b378ec69bd29d042bf46c907a1617eaf49641d9e5ec2da77b3c1b6b802d75e",
+    "binary_sha256": "a0be527a66796feefbdfea6403a60a11fc2b5490d4c95d963166c085c640085a"
+  },
+  "pokemini_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/pokemini_libretro.so.zip",
+    "sha256": "0a781e0aab16c27934c4d052fd9c4725fe66efa8a916ccab22c4c4f879885838",
+    "binary_sha256": "5ebf26b2f4eab0fd5fc00c7a5f72d1e31beb5528cc476597ea8ba81081ddf379"
+  },
+  "picodrive_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/picodrive_libretro.so.zip",
+    "sha256": "0a2ad24a4d5c1820e97e5e8010447a652a2b1969ba06283849ee6a99c564181d",
+    "binary_sha256": "fd4010afa91f69d3c61be49c95e14a5c37117c4d0899d3e593ccc4339c1417d5"
+  },
+  "mednafen_saturn_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/mednafen_saturn_libretro.so.zip",
+    "sha256": "27a05f0ec81f71a5aa4c4dfa12d832edf0c837533b571a382fdd2b591047fe36",
+    "binary_sha256": "032ff37d75c4e1a5cab3c85f22241e1cc6afb99a4a4feea485a52832f3b8d2dc"
+  },
+  "opera_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/opera_libretro.so.zip",
+    "sha256": "da2c1eb077b10ec5644aff30e1d4a0f147139d16e1b8eb3d359d760174b733e3",
+    "binary_sha256": "b012c04e55ee0c9257f92a740edf042cf3d4a561922a1dec188d21732e8884d9"
+  },
+  "virtualjaguar_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/virtualjaguar_libretro.so.zip",
+    "sha256": "cd93fd1d67f97ffcf596bc59a013641b3f6c83da9ec043a776d62dc0daa7cc3f",
+    "binary_sha256": "f0de0d2d3473afe2e9fcda0886dfb357707af13e826712cdbc03bfd8579dcfec"
+  },
+  "handy_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/handy_libretro.so.zip",
+    "sha256": "33039d37e3faaed9fe08870fa0dcf328f7f818a55125a15b663afb4c0cc3ea5f",
+    "binary_sha256": "8732475e7398129afd77a55f70a33a98808f6967caeb7363e495d9a4923e43cf"
+  },
+  "neocd_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/neocd_libretro.so.zip",
+    "sha256": "1fde9ad8bec01344ffde7034f10aa03f6170a2bb7648e3bcff34faaf3f297790",
+    "binary_sha256": "068bcb38f3551bd8b8cf1f13c2e9c2262963de0f82a9a7ae01d06eeb1c2be854"
+  },
+  "mednafen_pcfx_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/mednafen_pcfx_libretro.so.zip",
+    "sha256": "3802bc7502691f7301b366e56b7df64134d06ba08acc96e0a732a2cdbd5114c5",
+    "binary_sha256": "4a75c7154d26b815858bf43676d6a1acbda3736e48b984b35795dd4b2deaf7c3"
+  },
+  "gearcoleco_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/gearcoleco_libretro.so.zip",
+    "sha256": "1c3cbffc04c6ce2a069645a5e1ae5d4749599b0fa8bfb64034a6b3df8091378c",
+    "binary_sha256": "e80edaec13aacda538c810c8903479b1c0322a068f891ce419e3542e006c63e2"
+  },
+  "freechaf_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/freechaf_libretro.so.zip",
+    "sha256": "e35af5dec67077aeb1a2c5b85a0f7fc6e20e1a0bba92335224c74ee7387f8bdd",
+    "binary_sha256": "206ea245e0132a7b95612886fed0cae3f14a2cd2b987ba5f3b9a6f9f47de5ea4"
+  },
+  "o2em_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/o2em_libretro.so.zip",
+    "sha256": "512be68f802fe09321bd5458416d9e4c6d4d4e1b0e74a30d63ee3409f6ad73ba",
+    "binary_sha256": "5f2e8cd457072ec1c9a7a8094c540b33db55f532f947952a3c1c0e5777e3b215"
+  },
+  "potator_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/potator_libretro.so.zip",
+    "sha256": "857f895fbdb5022e6bb94dcf230307c52d66e8762e0f5cbe071aec703346feaf",
+    "binary_sha256": "5ee114d05e54680ef5bbda81df39d76806f20424ee7a99c6c7fc5f3cfffc8a43"
+  },
+  "gw_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/gw_libretro.so.zip",
+    "sha256": "88f6804acc56d717881937fac70f091be987a0400695baa5a97b816460d3377c",
+    "binary_sha256": "080bd412e832da69dc60c19ab0676fb15c96c2d17fb647cea89ce0e89cbabe9f"
+  },
+  "fbalpha2012_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/fbalpha2012_libretro.so.zip",
+    "sha256": "62e986b6f0c834c564dc3e76d71b0bccac8406b720d9b82f62284299abf522d7",
+    "binary_sha256": "13908b14d9010e6f9d733d4f53412e0051dbd04bfce2932f14cbdec9b634dc5a"
+  },
+  "mame2003_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/mame2003_libretro.so.zip",
+    "sha256": "325b05d3ce4ccec99ab09f8dad3be252013d72a4fd1be768d4b79d4cc9078d89",
+    "binary_sha256": "0f8c1452233eb1c410b982edfcddb5f52e7e3b7cff295e31b9eac3ebef1fab30"
+  },
+  "mame2010_libretro.so.zip": {
+    "url": "https://buildbot.libretro.com/nightly/linux/x86_64/latest/mame2010_libretro.so.zip",
+    "sha256": "01692bb543a6daa1450077bd33c5c720d55d948949b85895b87821d750a508db",
+    "binary_sha256": "86f62945b32500659800e8d93528e255a3988be579a47fb3062b3d8fb67d9062"
+  },
+  "pcsx2-2.8.2.AppImage": {
+    "url": "https://github.com/PCSX2/pcsx2/releases/download/v2.8.2/pcsx2-v2.8.2-linux-appimage-x64-Qt.AppImage",
+    "sha256": "0c46bb6a88aa2782b10853a7b07cf3387ba99cbef2b966372cd2315b8571abea"
+  },
+  "PPSSPP.zip": {
+    "url": "https://buildbot.libretro.com/assets/system/PPSSPP.zip",
+    "sha256": "849c5a59ca02a0e65328e9716a4884fff23266d5010d5785fe5fa70e7744f4ed"
+  },
+  "EmulatorJS-4.2.3.7z": {
+    "url": "https://github.com/EmulatorJS/EmulatorJS/releases/download/v4.2.3/4.2.3.7z",
+    "sha256": "07d451bc06fa3ad04ab30d9b94eb63ac34ad0babee52d60357b002bde8f3850b"
+  },
+  "SDLPAL-3.0.2025.0616.AppImage": {
+    "url": "https://github.com/sdlpal/sdlpal/releases/download/v3.0.2025.0616/SDLPal-366bc36-x86_64.AppImage",
+    "sha256": "089796f9eddc032da280505fd2a2aca5f9f4d823a84499eb7693064d123dc5fe"
+  },
+  "azahar-libretro-linux-x86_64-2126.2.zip": {
+    "url": "https://github.com/azahar-emu/azahar/releases/download/2126.2/azahar-libretro-linux-x86_64-2126.2.zip",
+    "sha256": "2223444b74de2c922bae1efcfed60002f696b3c2aaf4fc73fc03e66a395dc26e",
+    "binary_sha256": "ee4eea0979809e7d3eb262e1e0863231b441abfc4042d9936b478f907b5cb1b6"
+  },
+  "runtime_transforms": [
+    {
+      "binary": "melonds_libretro.so",
+      "operation": "clear-execstack",
+      "input_sha256": "92cc20bd4d654e24af29ff59f042288b9ed100f8ed5f3d94aeea007e210c27f7",
+      "output_sha256": "000795e9307a6fdc871a0c6587abdcf77463ac8bffbfec514313a46fd39a1743",
+      "reason": "GNU_STACK RWE metadata from assembly missing .note.GNU-stack; glibc 2.41 rejects dlopen. patchelf changes only byte348 from7 to6; separate runtime gameplay validation required.",
+      "reference": "https://sourceware.org/glibc/manual/2.41/html_node/Dynamic-Linking-Tunables.html"
+    }
+  ]
+}

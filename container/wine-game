@@ -1,0 +1,10 @@
+#!/bin/sh
+# Every invocation has its own WINEPREFIX. Never stop another game's wineserver.
+trap 'wineserver -k >/dev/null 2>&1 || true' EXIT
+trap 'exit 143' TERM INT
+wine "$@" &
+launcher=$!
+wait "$launcher"
+result=$?
+wineserver -w
+exit "$result"

@@ -1,0 +1,111 @@
+x-runtime: &runtime
+  image: "${RETROONE_IMAGE:-retroone:local}"
+  platform: linux/amd64
+  restart: unless-stopped
+  devices:
+    - /dev/dri/renderD128:/dev/dri/renderD128
+  shm_size: 2gb
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+x-environment: &environment
+  PUID: "${PUID:-1026}"
+  PGID: "${PGID:-100}"
+  RETROONE_SUPPLEMENTARY_GIDS: "${RETROONE_SUPPLEMENTARY_GIDS:-101}"
+  RETROONE_MAX_PROFILES: "${RETROONE_MAX_PROFILES:-16}"
+  TZ: Asia/Shanghai
+  DRI_NODE: /dev/dri/renderD128
+  DRINODE: /dev/dri/renderD128
+  RETROONE_GPU_BACKEND: "${RETROONE_GPU_BACKEND:-intel}"
+  SELKIES_USE_CPU: "false"
+  SELKIES_VIDEO_STREAMING_MODE: "true"
+  SELKIES_FRAMERATE: "60-60"
+  SELKIES_MANUAL_WIDTH: "0"
+  SELKIES_MANUAL_HEIGHT: "0"
+  SELKIES_MANUAL_RESOLUTION: "false|locked"
+  SELKIES_ENABLE_RESIZE: "false|locked"
+  RETROONE_ARTWORK_ROOT: /artwork
+
+services:
+  retroone:
+    <<: *runtime
+    build: .
+    container_name: retroone
+    ports:
+      - "${RETROONE_HTTP_PORT:-8780}:3000"
+      - "${RETROONE_HTTPS_PORT:-8781}:3001"
+    environment:
+      <<: *environment
+      RETROONE_PROFILE_ID: player1
+      RETROONE_BASE_PATH: /p/player1
+      RETROONE_GATEWAY: "true"
+      SUBFOLDER: /p/player1/stream/
+    volumes:
+      # Keep the existing player's entire config/save directory in place.
+      - "${RETROONE_ROM_PATH:-/volume2/rom/one}:/roms:ro"
+      - "${RETROONE_ARTWORK_PATH:-/volume1/docker/retroOne/data/retroone/artwork}:/artwork:rw"
+      - "${RETROONE_CONFIG_PATH:-./data}:/config"
+
+  retroone-player2:
+    <<: *runtime
+    container_name: retroone-player2
+    environment:
+      <<: *environment
+      RETROONE_PROFILE_ID: player2
+      RETROONE_BASE_PATH: /p/player2
+      RETROONE_GATEWAY: "false"
+      SUBFOLDER: /p/player2/stream/
+    volumes:
+      - "${RETROONE_ROM_PATH:-/volume2/rom/one}:/roms:ro"
+      - "${RETROONE_ARTWORK_PATH:-/volume1/docker/retroOne/data/retroone/artwork}:/artwork:rw"
+      - "${RETROONE_PLAYER2_CONFIG_PATH:-./profiles/player2}:/config"
+
+  # A queue-only helper owns the Docker socket. Neither web worker can access it.
+  # Additional member containers are created once and retained across restarts.
+  provisioner:
+    image: "${RETROONE_IMAGE:-retroone:local}"
+    platform: linux/amd64
+    container_name: retroone-provisioner
+    entrypoint: ["/usr/bin/python3", "/opt/retroone/provisioner.py"]
+    user: "${PUID:-1026}:${PGID:-100}"
+    group_add:
+      - "${RETROONE_DOCKER_GID:-65536}"
+      - "${RETROONE_SUPPLEMENTARY_GIDS:-101}"
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=16m"]
+    healthcheck:
+      disable: true
+    depends_on:
+      retroone:
+        condition: service_healthy
+    environment:
+      PUID: "${PUID:-1026}"
+      PGID: "${PGID:-100}"
+      RETROONE_SUPPLEMENTARY_GIDS: "${RETROONE_SUPPLEMENTARY_GIDS:-101}"
+      RETROONE_RUNTIME_IMAGE: "${RETROONE_IMAGE:-retroone:local}"
+      RETROONE_GPU_BACKEND: "${RETROONE_GPU_BACKEND:-intel}"
+      RETROONE_HOST_PROFILES_ROOT: "${RETROONE_HOST_PROFILES_ROOT:-/volume1/docker/retroOne/profiles}"
+      RETROONE_HOST_ARTWORK_ROOT: "${RETROONE_ARTWORK_PATH:-/volume1/docker/retroOne/data/retroone/artwork}"
+      RETROONE_HOST_ROM_ROOT: "${RETROONE_ROM_PATH:-/volume2/rom/one}"
+      RETROONE_DOCKER_NETWORK: "${RETROONE_DOCKER_NETWORK:-retroone_default}"
+      RETROONE_GATEWAY_URL: http://retroone:3000
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - "${RETROONE_CONFIG_PATH:-./data}/retroone:/registry:ro"
+      - "${RETROONE_CONFIG_PATH:-./data}/retroone/profile-control:/control:rw"
+      - "${RETROONE_PROFILES_PATH:-./profiles}:/profiles:rw"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  default:
+    name: "${RETROONE_DOCKER_NETWORK:-retroone_default}"

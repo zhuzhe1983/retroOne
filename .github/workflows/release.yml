@@ -1,0 +1,146 @@
+name: Source checks and public image release
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the tested public-app image to GHCR (no private runtime)
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: retroone-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - run: python -m pip install -r requirements-dev.txt
+      - name: Public source and reviewed runtime-lock checks
+        run: |
+          python scripts/check_public_source.py
+          python -c 'import json; from scripts.fetch_runtime import records, LOCK; print(len(records(json.loads(LOCK.read_text()))), "reviewed local assets; no download")'
+          docker compose config --quiet
+          node --check web/app.js
+          node --check container/stream-input.js
+      - name: Unit and API regression tests (no copyrighted fixtures)
+        env:
+          RETROONE_FETCH_ARTWORK: '0'
+        run: python -m pytest -q
+
+  build:
+    needs: checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.metadata.outputs.image }}
+      version: ${{ steps.metadata.outputs.version }}
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build only the public image from clean source
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: Dockerfile.public
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: retroone:ci
+          build-args: |
+            VCS_REF=${{ github.sha }}
+            SOURCE_URL=${{ github.server_url }}/${{ github.repository }}
+            VERSION=${{ github.ref_name }}
+          cache-from: type=gha,scope=retroone-public-amd64
+          cache-to: type=gha,mode=max,scope=retroone-public-amd64
+      - name: Boot public image without GPU, ROMs, keys or private runtime
+        run: python3 scripts/smoke_public_image.py retroone:ci
+
+      - name: Derive repository-local lowercase image and validated tag
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish)
+        id: metadata
+        shell: bash
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          version="sha-${GITHUB_SHA:0:12}"
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            python3 -c 'import os,re; assert re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?", os.environ["GITHUB_REF_NAME"]), "Use a semantic version tag such as v0.1.0"'
+            version="$GITHUB_REF_NAME"
+          fi
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish)
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish the exact image that passed the boot test
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish)
+        id: push
+        env:
+          IMAGE: ${{ steps.metadata.outputs.image }}
+          VERSION: ${{ steps.metadata.outputs.version }}
+        run: |
+          docker tag retroone:ci "$IMAGE:$VERSION"
+          docker push "$IMAGE:$VERSION"
+          digest=$(docker image inspect "$IMAGE:$VERSION" --format '{{index .RepoDigests 0}}')
+          echo "digest=${digest#*@}" >> "$GITHUB_OUTPUT"
+
+  source-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Create source-only GitHub release with public image digest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.build.outputs.version }}
+          IMAGE: ${{ needs.build.outputs.image }}
+          DIGEST: ${{ needs.build.outputs.digest }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          image = os.environ['IMAGE']; version = os.environ['VERSION']; digest = os.environ['DIGEST']
+          Path('release-notes.md').write_text(f'''Public application image: `{image}:{version}`
+
+          Immutable digest: `{image}@{digest}`
+
+          This release contains source code and the public application image. It does not include private emulator-core caches, EmulatorJS binaries, AppImages, ROMs, BIOS/firmware, keys, covers, saves, or commercial game screenshots. Uninstalled platform runtimes are reported as unavailable. Prepare the complete runtime locally as described in `docs/releasing.md`; do not upload private runtime backups to this release.
+          ''')
+          PY
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "Release already exists; preserving its notes and assets."
+          else
+            gh release create "$VERSION" --verify-tag --title "$VERSION" --notes-file release-notes.md
+          fi

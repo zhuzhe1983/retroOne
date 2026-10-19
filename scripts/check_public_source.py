@@ -1,0 +1,56 @@
+#!/usr/bin/env python3
+"""Fail closed if a public source commit contains runtime/user-content artifacts."""
+import argparse
+import hashlib
+import json
+from pathlib import Path
+import subprocess
+
+PRIVATE_ROOTS = {'vendor', 'data', 'profiles', 'artifacts', 'output', 'backups', 'logs', 'roms', 'firmware', 'bios', 'display-test', 'network-test', '.venv', 'test-data'}
+BINARY_EXTENSIONS = {'.so', '.dll', '.exe', '.appimage', '.zip', '.7z', '.rar', '.tar', '.gz', '.xz', '.iso', '.cso', '.chd', '.nes', '.fds', '.smc', '.sfc', '.gb', '.gbc', '.gba', '.nds', '.3ds', '.cia', '.nsp', '.xci', '.sav', '.srm', '.state', '.bin', '.rom', '.pem', '.key'}
+IMAGES = {'.png', '.jpg', '.jpeg', '.webp', '.gif', '.mp4', '.webm'}
+
+
+def violations(paths, root):
+    manifest = root / 'docs/screenshots/manifest.json'
+    document = json.loads(manifest.read_text()) if manifest.is_file() else {}
+    errors = []
+    screenshots = set()
+    for entry in document.get('files', []):
+        if not isinstance(entry, dict):
+            errors.append(('docs/screenshots/manifest.json', 'each reviewed screenshot needs path and SHA256')); continue
+        name = entry.get('path', '')
+        if not isinstance(name, str) or not name or '/' in name or '\\' in name or name in {'.', '..'}:
+            errors.append(('docs/screenshots/manifest.json', 'invalid screenshot basename')); continue
+        target = root / 'docs/screenshots' / name
+        expected = entry.get('sha256')
+        if not target.is_file() or target.is_symlink() or hashlib.sha256(target.read_bytes()).hexdigest() != expected:
+            errors.append((str(target.relative_to(root)), 'reviewed screenshot SHA256 mismatch')); continue
+        screenshots.add('docs/screenshots/' + name)
+    for name in paths:
+        path = Path(name)
+        if path.parts[0] in PRIVATE_ROOTS or (path.name.startswith('.env') and path.name != '.env.example') or path.name in {'prod.keys', 'title.keys'}:
+            errors.append((name, 'private runtime or user data path')); continue
+        if path.suffix.lower() in BINARY_EXTENSIONS:
+            errors.append((name, 'runtime binary, archive or game/state/key extension')); continue
+        if path.suffix.lower() in IMAGES and name not in screenshots:
+            errors.append((name, 'image/video absent from reviewed self-rendered screenshot manifest'))
+        candidate = root / path
+        if candidate.is_symlink(): errors.append((name, 'source symlink is not allowed'))
+        elif candidate.is_file():
+            with candidate.open('rb') as stream: head = stream.read(1024)
+            if b'\0' in head and name not in screenshots: errors.append((name, 'unexpected binary content'))
+    return errors
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--root', type=Path, default=Path(__file__).resolve().parents[1])
+    args = parser.parse_args()
+    names = subprocess.check_output(['git', 'ls-files', '-z'], cwd=args.root).decode().split('\0')
+    names = [name for name in names if name]
+    if not names: raise SystemExit('No tracked files: stage source files before auditing')
+    errors = violations(names, args.root)
+    for name, reason in errors: print(name + ': ' + reason)
+    if errors: raise SystemExit(1)
+    print('Public source allowlist passed: ' + str(len(names)) + ' tracked files; no runtime/user artifacts')

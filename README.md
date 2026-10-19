@@ -6,6 +6,12 @@ RetroOne 是面向家庭局域网的怀旧游戏库。它读取你自己的 ROM 
 
 界面采用主机式导航，打开即支持键盘和手柄。底层复用 EmulatorJS、RetroArch、Selkies 等开源项目；运行环境封装为 Docker 镜像，由多个家庭成员实例复用。
 
+**English overview**
+
+RetroOne is a self-hosted retro gaming hub for families on a home network. Browse your own ROM collection through a console-style web interface with search, favorites, and keyboard or gamepad controls. Supported lightweight games run locally in the browser; other games run on the server and stream to your browser when the required emulator is configured. Each family member has a separate profile, saves, and display preferences, with online activity visible from the home screen.
+
+Built on EmulatorJS, RetroArch, and Selkies, RetroOne uses Docker for deployment. Bring your own games and any required BIOS, firmware, or keys—none are included. The public image provides the application and streaming foundation; additional emulator runtimes must be prepared locally as described in the [build and release guide](docs/releasing.md).
+
 ![RetroOne 游戏库示例：平台导航、搜索、运行方式筛选与家人动态](docs/screenshots/library.png)
 
 > 本页是当前应用在浏览器中的实际界面截图，使用明确标注的虚构目录和成员资料，仅展示操作流程，不代表游戏运行或性能验证。图片不含第三方游戏封面或商业游戏画面。仓库及公开镜像不提供 ROM、BIOS、固件或密钥，也不会替用户下载游戏。

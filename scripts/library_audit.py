@@ -6,6 +6,8 @@ an evidence manifest plus CSV, never a deletion/migration plan. Default mode
 hashes only same-platform size/layout candidates; --hash-all reads all eligible
 files. A SHA256 is emitted only after every byte was read (or a matching stat
 identity was found in this tool's SQLite cache). ZIP CRCs are never fingerprints.
+Hash plans run smallest estimated uncached read first, including ZIP expansion;
+the manifest retains catalog order and large entries remain eligible on resume.
 --max-read-gib is a hard limit unless --finish-unit is explicit. That batch mode
 admits whole uncached files/ZIP trees and permits the first oversized unit to
 finish, so a fixed budget cannot repeatedly restart the same large file.
@@ -202,6 +204,12 @@ class Cache:
         row = self.db.execute('SELECT payload FROM audit_hashes_v1 WHERE path=? AND identity=? AND kind=?',
                               (str(path), canonical(info), kind)).fetchone()
         return json.loads(row[0]) if row else None
+
+    def contains(self, path, info, kind):
+        # Scheduling does not need to load/deserialise a potentially large ZIP
+        # member manifest. This uses the same exact stat identity as hash reads.
+        return self.db.execute('SELECT 1 FROM audit_hashes_v1 WHERE path=? AND identity=? AND kind=?',
+                               (str(path), canonical(info), kind)).fetchone() is not None
 
     def put(self, path, info, kind, payload):
         self.db.execute('INSERT OR REPLACE INTO audit_hashes_v1 VALUES(?,?,?,?)',
@@ -601,6 +609,31 @@ class Auditor:
         result['content'] = {'status': 'verified', 'kind': kind, 'sha256': fingerprint,
                              'hash_scope': 'single_payload' if kind == 'single_cartridge_payload' else 'complete_resource_manifest'}
 
+    def estimated_read_bytes(self, plan, targets):
+        """Schedule whole plans using already discovered metadata and the cache.
+
+        Includes every uncached resource file, plus all expanded ZIP members
+        when content hashing is selected. A small launcher EXE or compressed ZIP
+        must not disguise a large resource closure. No new source I/O occurs.
+        """
+        identifier = plan['result']['id']
+        content_needed = identifier in targets['content']
+        if identifier not in targets['raw'] and not content_needed:
+            return 0
+        total = 0
+        for path, item in zip(plan['paths'], plan['result']['source_manifest']):
+            info = {key: item[key] for key in ('size', 'mtime_ns', 'dev', 'ino', 'ctime_ns', 'executable')}
+            if not self.cache.contains(path, info, 'raw-sha256'):
+                total += info['size']
+        if content_needed and 'zip' in plan:
+            item = plan['result']['source_manifest'][0]
+            info = {key: item[key] for key in ('size', 'mtime_ns', 'dev', 'ino', 'ctime_ns', 'executable')}
+            kind = 'zip-members-sha256:' + signature(plan['zip'])
+            if not self.cache.contains(plan['paths'][0], info, kind):
+                total += plan['zip']['size']
+        self.progress.tick()
+        return total
+
     def run(self, records, platforms=None):
         selected = [g for g in records if not platforms or g.get('platform') in platforms]
         ids = [g.get('id') for g in selected]
@@ -625,9 +658,13 @@ class Auditor:
                 if kind + '_key' in plan: candidates[kind][plan[kind + '_key']].append(plan)
         targets = {kind: {p['result']['id'] for group in groups.values() if self.hash_all or len(group) > 1 for p in group}
                    for kind, groups in candidates.items()}
-        self.progress.state.update(phase='hash', candidate_games=len(targets['raw'] | targets['content']))
+        self.progress.state.update(phase='hash', candidate_games=len(targets['raw'] | targets['content']),
+                                   hash_order='smallest_estimated_uncached_bytes_first')
+        # Stable sort preserves catalog order for equal costs. Only execution is
+        # reordered: final manifests and per-game scopes keep their original order.
+        hash_plans = sorted(plans, key=lambda plan: self.estimated_read_bytes(plan, targets))
         stopped = False
-        for plan in plans:
+        for plan in hash_plans:
             result = plan['result']; self.progress.state['current'] = result['id']
             for kind in ('raw', 'content'):
                 if kind + '_key' not in plan: continue
@@ -669,6 +706,7 @@ class Auditor:
                 'read_only': True, 'deletion_authorized': False, 'catalog_entries': len(records),
                 'selected_platforms': sorted(platforms) if platforms else None,
                 'hash_policy': 'all_eligible' if self.hash_all else 'same_platform_size_layout_candidates',
+                'hash_order': 'smallest_estimated_uncached_bytes_first',
                 'read_budget': {'limit_bytes': self.progress.budget,
                     'policy': 'finish_unit' if self.progress.finish_unit else 'hard',
                     'actual_hash_bytes': self.progress.state['bytes_hashed'],

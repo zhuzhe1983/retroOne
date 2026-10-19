@@ -222,6 +222,78 @@ def test_finish_unit_does_not_start_nonfitting_unit_after_smaller_file(tmp_path)
     assert second['completed'] and second['progress']['bytes_hashed'] == 9
 
 
+def test_small_hash_plans_finish_before_large_first_catalog_entry_and_resume(tmp_path):
+    root = tmp_path / 'roms'
+    records = [game(root, file(root, 'large.3ds', b'0123456789'), 'large', '3ds'),
+               game(root, file(root, 'tiny.nes', b'abcd'), 'tiny')]
+    first = audit(tmp_path, records, hash_all=True, max_read_bytes=6, finish_unit=True)
+    assert not first['completed'] and first['progress']['bytes_hashed'] == 4
+    assert first['hash_order'] == 'smallest_estimated_uncached_bytes_first'
+    assert [g['id'] for g in first['games']] == ['large', 'tiny']  # Manifest order is unchanged.
+    assert first['games'][0]['raw']['reason'] == 'read_budget_reached'
+    assert first['games'][1]['content']['status'] == 'verified'
+    second = audit(tmp_path, records, hash_all=True, max_read_bytes=6, finish_unit=True)
+    assert second['completed'] and second['progress']['bytes_hashed'] == 10
+    assert second['games'][0]['raw']['status'] == 'verified'  # Large entry was deferred, not lost.
+
+
+def test_default_candidate_batches_publish_tiny_duplicate_before_large_pair(tmp_path):
+    root = tmp_path / 'roms'
+    records = [game(root, file(root, name + '.3ds', b'large-data'), name, '3ds') for name in ('large-a', 'large-b')]
+    records += [game(root, file(root, name + '.nes', b'OK'), name) for name in ('tiny-a', 'tiny-b')]
+    first = audit(tmp_path, records, max_read_bytes=5, finish_unit=True)
+    assert first['progress']['bytes_hashed'] == 4 and not first['completed']
+    assert first['duplicates']['content_exact'][0]['game_ids'] == ['tiny-a', 'tiny-b']
+    second = audit(tmp_path, records, max_read_bytes=5, finish_unit=True)
+    assert not second['completed'] and second['progress']['files_hashed'] == 1
+    third = audit(tmp_path, records, max_read_bytes=5, finish_unit=True)
+    assert third['completed']
+    assert any(group['game_ids'] == ['large-a', 'large-b'] for group in third['duplicates']['raw_exact'])
+
+
+def test_cached_large_plan_is_zero_cost_and_precedes_uncached_tiny_plan(tmp_path, monkeypatch):
+    from scripts import library_audit as module
+    root = tmp_path / 'roms'
+    large = game(root, file(root, 'large.iso', b'A' * 1000), 'large', 'ps2')
+    audit(tmp_path, [large], hash_all=True)
+    tiny = game(root, file(root, 'tiny.nes', b'1234'), 'tiny')
+    calls = []
+    real_hash = module.hash_file
+    def observed(path, *args):
+        calls.append(path.name)
+        return real_hash(path, *args)
+    monkeypatch.setattr(module, 'hash_file', observed)
+    report = audit(tmp_path, [tiny, large], hash_all=True, max_read_bytes=4, finish_unit=True)
+    assert report['completed'] and report['progress']['bytes_hashed'] == 4
+    assert calls == ['large.iso', 'tiny.nes']
+
+
+def test_hash_order_counts_zip_expansion_not_only_compressed_bytes(tmp_path):
+    root = tmp_path / 'roms'
+    archive = zipped(root, 'compressed.zip', [('data.bin', b'A' * 8192)], zipfile.ZIP_DEFLATED)
+    assert archive.stat().st_size < 512
+    records = [game(root, archive, 'compressed', 'dos'),
+               game(root, file(root, 'small.iso', b'S' * 512), 'small', 'psp')]
+    report = audit(tmp_path, records, hash_all=True, max_read_bytes=600, finish_unit=True)
+    assert not report['completed'] and report['progress']['bytes_hashed'] == 512
+    assert report['games'][1]['raw']['status'] == 'verified'
+    assert report['games'][0]['raw']['status'] == 'unverified'
+    assert report['progress']['zip_members_hashed'] == 0
+
+
+def test_hash_order_counts_complete_pc_resources_not_only_launcher(tmp_path):
+    root = tmp_path / 'roms'
+    executable = file(root, 'game/main.exe', b'x')
+    file(root, 'game/data.dat', b'D' * 4096)
+    records = [game(root, executable, 'pc', 'windows', resource_root='/roms/game'),
+               game(root, file(root, 'small.iso', b'S' * 512), 'small', 'psp')]
+    report = audit(tmp_path, records, hash_all=True, max_read_bytes=600, finish_unit=True)
+    assert not report['completed'] and report['progress']['bytes_hashed'] == 512
+    assert report['games'][1]['raw']['status'] == 'verified'
+    assert report['games'][0]['raw']['status'] == 'unverified'
+    assert len(report['games'][0]['source_manifest']) == 2
+
+
 def test_finish_unit_zip_reserves_all_expanded_members_and_resumes_after_raw_cache(tmp_path):
     root = tmp_path / 'roms'
     path = zipped(root, 'game.zip', [('a.bin', b'A' * 4096), ('b.bin', b'B' * 4096)], zipfile.ZIP_DEFLATED)

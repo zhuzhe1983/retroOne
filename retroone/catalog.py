@@ -627,13 +627,15 @@ class Catalog:
             where.append("coalesce(r.status,'unverified') NOT IN ('dependency_error','load_failed','boot_observed','input_observed','gameplay_observed')")
         clause = ' AND '.join(where)
         joins = 'FROM games g LEFT JOIN favorites f ON f.game_id=g.id LEFT JOIN history h ON h.game_id=g.id LEFT JOIN game_reviews r ON r.game_id=g.id'
-        selection = f'''WITH ranked AS (SELECT g.*,coalesce(f.favorite,0) favorite,h.played_at,r.payload review_payload,r.group_id,r.status review_status,
+        selection = f'''WITH ranked AS (SELECT g.id,coalesce(f.favorite,0) favorite,h.played_at,
             row_number() OVER (PARTITION BY coalesce(r.group_id,g.id),g.mode ORDER BY h.played_at DESC,coalesce(f.favorite,0) DESC,g.id) choice
             {joins} WHERE {clause})'''
-        order = "played_at DESC,id" if recent else "platform,collection,json_extract(payload,'$.sort_by'),title,id"
+        order = "ranked.played_at DESC,g.id" if recent else "g.platform,g.collection,json_extract(g.payload,'$.sort_by'),g.title,g.id"
         with self.connect() as db:
-            total = db.execute(f'{selection} SELECT count(*) FROM ranked WHERE choice=1', values).fetchone()[0]
-            rows = db.execute(f'{selection} SELECT * FROM ranked WHERE choice=1 ORDER BY {order} LIMIT ? OFFSET ?', [*values, limit, offset]).fetchall()
+            total = db.execute(f'SELECT count(DISTINCT coalesce(r.group_id,g.id)||g.mode) {joins} WHERE {clause}', values).fetchone()[0]
+            rows = db.execute(f'''{selection} SELECT g.*,ranked.favorite,ranked.played_at,r.payload review_payload,r.group_id,r.status review_status
+                FROM ranked JOIN games g ON g.id=ranked.id LEFT JOIN game_reviews r ON r.game_id=g.id
+                WHERE choice=1 ORDER BY {order} LIMIT ? OFFSET ?''', [*values, limit, offset]).fetchall()
         return {'games': [self._decode(row) for row in rows], 'total': total, 'offset': offset, 'limit': limit}
 
     def platforms(self) -> list[dict]:

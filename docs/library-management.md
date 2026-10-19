@@ -7,6 +7,7 @@ RetroOne 将资料展示、游戏资产与启动配置、玩家数据分开管�
 | 内容 | 容器路径 | 管理方式 |
 | --- | --- | --- |
 | 自己的 ROM、光盘轨道、PC 资源、BIOS | `/roms` | 只读挂载 |
+| 标题、简介、排序与媒体引用 | `/library-data/metadata/games.sqlite3` | 全家共享；导入资料与人工修改分开 |
 | 检测记录、指纹报告、管理任务 | `/library-data/metadata/` | 全家共享，独立于 ROM |
 | 每游戏生成配置与人工覆写 | `/library-data/runtime/game-configs/<游戏ID>.json` | 全家共享；生成与覆写分开 |
 | 封面缓存 | `/artwork` | 独立媒体缓存 |
@@ -15,6 +16,19 @@ RetroOne 将资料展示、游戏资产与启动配置、玩家数据分开管�
 `RETROONE_LIBRARY_DATA_ROOT` 指定共享数据根目录；未设置时使用 `<CONFIG_ROOT>/library-data`。Compose 使用 `/library-data` 挂载。`RETROONE_LIBRARY_DATA_PATH` 与 provisioner 的 `RETROONE_HOST_LIBRARY_DATA_ROOT` 必须指向同一个宿主机绝对路径。先创建目录并授予运行用户写权限，再升级容器。已有额外成员也要增加该挂载，保留原 `/config`。
 
 Pegasus 元数据和媒体目录仍可作为只读导入来源，服务不会改写它们。玩家索引保留原 ID 和标题以兼容现有存档；本次不重新编号、不自动搬迁存档。**移动、重命名 ROM 仍可能改变路径派生的游戏 ID**，请先备份并保留映射。显示名称、封面不能作为内容判重依据。
+
+游戏资料由共享 metadata 库管理；每位玩家的 catalog 只是用于搜索和展示的本地索引。更新资料后，各玩家在下次读取时同步。重新扫描更新导入资料，保留人工修改；不会覆盖每游戏的模拟器配置。显示标题可修改，浏览器原有存档名称保持不变。
+
+资料与启动配置使用不同接口。资料接口目前支持修改标题、简介和排序；媒体引用从只读导入源读取，封面图片仍使用独立缓存：
+
+```sh
+curl 'http://localhost:8780/p/player1/api/games/<游戏ID>/metadata'
+curl -X PATCH 'http://localhost:8780/p/player1/api/games/<游戏ID>/metadata' \
+  -H 'Content-Type: application/json' \
+  -d '{"title":"家里熟悉的游戏名","description":"游戏介绍"}'
+```
+
+传 `null` 恢复对应导入字段。此接口不能修改 ROM 路径、模拟器、启动参数或存档。
 
 ## 网页管理流程
 

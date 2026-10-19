@@ -79,6 +79,77 @@ class LibraryCase(unittest.TestCase):
         self.library.scan()
         self.assertTrue(self.library.list()['games'][0]['browser_eligible'])
 
+    def test_shared_metadata_does_not_change_runtime_or_player_saves(self):
+        directory = self.collection()
+        (directory / 'original.nes').write_bytes(b'synthetic game')
+        with patch.dict(os.environ, {'RETROONE_LIBRARY_DATA_ROOT': str(self.root / 'shared')}):
+            first = Catalog(self.roms, self.config)
+            second = Catalog(self.roms, self.root / 'player2')
+            first.scan()
+            second.scan()
+            game = first.list()['games'][0]
+            first.set_favorite(game['id'], True)
+            first.game_configs.update_overrides(game, {'notes': 'Keep this runtime setting'})
+            config_path = first.game_configs.root / (game['id'] + '.json')
+            original_config = config_path.read_bytes()
+            first.game_metadata.update_overrides(game['id'], {'title': '家庭收藏', 'description': '共享资料'})
+            for catalog in (first, second):
+                updated = catalog.list(q='家庭收藏')['games'][0]
+                self.assertEqual(updated['id'], game['id'])
+                self.assertEqual(updated['_save_title'], 'original')
+                self.assertEqual(updated['description'], '共享资料')
+            self.assertFalse(second.get(game['id'])['favorite'])
+            first.scan()
+            self.assertTrue(first.get(game['id'])['favorite'])
+            self.assertEqual(first.get(game['id'])['title'], '家庭收藏')
+            self.assertEqual(config_path.read_bytes(), original_config)
+            self.assertEqual(Catalog(self.roms, self.config).get(game['id'])['_save_title'], 'original')
+
+    def test_metadata_api_preserves_browser_storage_name(self):
+        directory = self.collection()
+        (directory / 'original.nes').write_bytes(b'synthetic game')
+        browser = self.root / 'emulatorjs'
+        browser.mkdir()
+        (browser / 'loader.js').write_text('// synthetic fixture')
+        (browser / 'cores').mkdir()
+        (browser / 'cores/fceumm-wasm.data').write_bytes(b'synthetic availability marker')
+        app = create_app(self.roms, self.config, runner=FakeRunner(), browser_data=browser, auto_scan=False)
+        app.state.catalog.scan()
+        with TestClient(app) as client:
+            game_id = client.get('/api/games').json()['games'][0]['id']
+            result = client.patch(f'/api/games/{game_id}/metadata', json={'title': 'New title'})
+            self.assertEqual(result.status_code, 200, result.text)
+            detail = client.get(f'/api/games/{game_id}').json()
+            self.assertEqual(detail['title'], 'New title')
+            self.assertNotIn('_save_title', detail)
+            page = client.get(f'/play/{game_id}')
+            self.assertEqual(page.status_code, 200, page.text)
+            self.assertIn('"EJS_gameName": "original"', page.text)
+            for body in ({'rom_path': '/tmp/a'}, {'native_core': 'wrong'}, {'title': 123}):
+                self.assertEqual(client.patch(f'/api/games/{game_id}/metadata', json=body).status_code, 422)
+            metadata = client.get(f'/api/games/{game_id}/metadata')
+            self.assertEqual(metadata.status_code, 200)
+            self.assertNotIn(str(self.roms), metadata.text)
+
+    def test_interrupted_scan_keeps_metadata_override_searchable(self):
+        directory = self.collection()
+        for number in range(250):
+            (directory / f'game-{number:03d}.nes').write_bytes(b'synthetic')
+        self.library.scan()
+        original = self.library.list()['games'][0]
+        self.library.game_metadata.update_overrides(original['id'], {'title': 'Family name'})
+        self.assertEqual(self.library.list(q='Family name')['total'], 1)
+        discover = self.library.discover
+
+        def interrupted():
+            yield from discover()
+            raise OSError('synthetic disconnected library')
+
+        with patch.object(self.library, 'discover', interrupted):
+            result = self.library.scan()
+        self.assertIn('disconnected', result['last_error'])
+        self.assertEqual(self.library.list(q='Family name')['games'][0]['id'], original['id'])
+
     def test_zip_traversal_and_symlinks_rejected(self):
         directory = self.collection()
         self.archive(directory / 'unsafe.zip', {'../secret.nes': b'bad'})

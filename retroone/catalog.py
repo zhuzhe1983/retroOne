@@ -18,6 +18,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Iterator
 from .library_review import ReviewIndex
 from .game_config import GameConfigStore, GameConfigError
+from .game_metadata import GameMetadataStore
 
 BROWSER_LIMIT = 20 * 1024 * 1024
 MAX_METADATA = 32 * 1024 * 1024
@@ -245,6 +246,9 @@ class Catalog:
         self._runtime_key = None
         self.library_data_root = Path(os.getenv('RETROONE_LIBRARY_DATA_ROOT', str(self.config_root / 'library-data'))).resolve()
         self.game_configs = GameConfigStore(self.library_data_root / 'runtime', self.rom_root)
+        self.game_metadata = GameMetadataStore(self.library_data_root / 'metadata', self.rom_root)
+        self._metadata_revision = -1
+        self._metadata_lock = threading.RLock()
         self._reviews = ReviewIndex(self.rom_root, self.library_data_root / 'metadata' / 'library-review.json')
         self._review_key = object()
         self._review_lock = threading.RLock()
@@ -270,6 +274,34 @@ class Catalog:
             if row:
                 self.scan_status.update(json.loads(row[0]))
                 self.scan_status['running'] = False
+            # Existing profile catalogs are import caches. Never let an older
+            # member cache replace metadata already managed in the shared store.
+            self.game_metadata.import_many((json.loads(row[0]) for row in db.execute('SELECT payload FROM games')), only_missing=True)
+
+    def _sync_metadata(self, *, force=False):
+        """Materialize shared display fields for profile-local search/sorting.
+
+        Runtime fields, original browser save names and member preferences are
+        not owned by the metadata store and must survive every refresh.
+        """
+        with self._metadata_lock:
+            revision, changes = self.game_metadata.changes_since(-1 if force else self._metadata_revision)
+            if not force and revision == self._metadata_revision:
+                return
+            with self.connect() as db:
+                for fields in changes:
+                    row = db.execute('SELECT payload FROM games WHERE id=?', (fields['id'],)).fetchone()
+                    if row is None:
+                        continue
+                    game = json.loads(row[0])
+                    if '_save_title' in game and all(game.get(key) == fields[key] for key in ('title', 'description', 'sort_by', 'media')):
+                        continue
+                    game.setdefault('_save_title', game['title'])
+                    game.update({key: fields[key] for key in ('title', 'description', 'sort_by', 'media')})
+                    for kind in ('cover', 'video', 'logo'):
+                        game[kind + '_url'] = f"/api/games/{game['id']}/media/{kind}" if kind in game['media'] else None
+                    db.execute('UPDATE games SET title=?,payload=? WHERE id=?', (game['title'], json.dumps(game, ensure_ascii=False), game['id']))
+            self._metadata_revision = revision
 
     def connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.db_path, timeout=30)
@@ -329,7 +361,11 @@ class Catalog:
             if not (self.rom_root / 'library').is_dir():
                 raise FileNotFoundError('one/library 尚未就绪；保留现有索引')
             with self.connect() as db:
+                save_titles = {row['id']: json.loads(row['payload']).get('_save_title', row['title']) for row in db.execute('SELECT id,title,payload FROM games')}
+                metadata_batch = []
                 for game in self.discover():
+                    game['_save_title'] = save_titles.get(game['id'], game['title'])
+                    metadata_batch.append(game)
                     try:
                         self.game_configs.generate(game)
                     except GameConfigError:
@@ -342,14 +378,26 @@ class Catalog:
                     self.scan_status['scanned'] += 1
                     if self.scan_status['scanned'] % 250 == 0:
                         db.commit()
+                        self.game_metadata.import_many(metadata_batch)
+                        metadata_batch = []
                 db.execute('DELETE FROM games WHERE scan_id != ?', (scan_id,))
                 db.commit()
+                self.game_metadata.import_many(metadata_batch)
             self._runtime_key = None
             self._review_key = object()
         except Exception as error:
             self.scan_status['last_error'] = str(error)[:500]
             self.scan_status['errors'] += 1
         finally:
+            # A partially committed scan may have refreshed imported display
+            # fields before discovery failed. Reapply shared overrides even on
+            # that failure path, so cached revisions cannot conceal the edits.
+            self._metadata_revision = -1
+            try:
+                self._sync_metadata(force=True)
+            except Exception as error:
+                self.scan_status['last_error'] = str(error)[:500]
+                self.scan_status['errors'] += 1
             self.scan_status.update(running=False, finished_at=time.time())
             with self.connect() as db:
                 db.execute("INSERT OR REPLACE INTO settings VALUES('last_scan',?)", (json.dumps(self.scan_status),))
@@ -596,6 +644,7 @@ class Catalog:
         return game
 
     def get(self, game_id: str) -> dict | None:
+        self._sync_metadata()
         self._sync_reviews()
         with self.connect() as db:
             row = db.execute('''SELECT g.*,coalesce(f.favorite,0) favorite,h.played_at,r.payload review_payload,r.group_id,r.status review_status FROM games g
@@ -603,6 +652,7 @@ class Catalog:
             return self._decode(row) if row else None
 
     def list(self, *, q: str = '', platform: str = '', mode: str = '', favorite: bool = False, recent: bool = False, review_filter: str = '', offset: int = 0, limit: int = 60) -> dict:
+        self._sync_metadata()
         self._sync_reviews()
         where, values = ['1=1'], []
         if q:
@@ -656,5 +706,5 @@ class Catalog:
 
 
 def public_game(game: dict) -> dict:
-    hidden = {'rom_path', 'files', 'launch_files', 'media', 'browser_eligible', 'blocked_reason'}
+    hidden = {'rom_path', 'files', 'launch_files', 'media', 'browser_eligible', 'blocked_reason', '_save_title'}
     return {key: value for key, value in game.items() if key not in hidden}

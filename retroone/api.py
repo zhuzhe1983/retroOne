@@ -26,6 +26,7 @@ from .profiles import PROFILE_ID, ProfileError, ProfileRegistry
 from .presence import PresenceStore
 from .network import INSTRUCTIONS, VERIFIED_GAMES, NetworkError, NetworkStore, WorkerGateway
 from .settings import DisplaySettings, DisplaySettingsError, StreamResolution, display_view
+from .game_metadata import GameMetadataError
 
 ROOT = Path(__file__).resolve().parent.parent
 MAX_SAVE_SIZE = 32 * 1024 * 1024
@@ -111,6 +112,13 @@ class GameConfigBody(BaseModel):
     input_profile: Literal['default'] | None = None
     disabled: bool | None = None
     notes: str | None = None
+
+
+class GameMetadataBody(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    title: str | None = None
+    description: str | None = None
+    sort_by: str | None = None
 
 
 class LeavePresenceBody(BaseModel):
@@ -567,6 +575,19 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
     def game_configuration(game_id: str):
         return game_or_404(game_id).get('launch_config')
 
+    @app.get('/api/games/{game_id}/metadata')
+    def game_metadata(game_id: str):
+        game_or_404(game_id)
+        return catalog.game_metadata.summary(game_id)
+
+    @app.patch('/api/games/{game_id}/metadata')
+    def update_game_metadata(game_id: str, body: GameMetadataBody):
+        game_or_404(game_id)
+        try:
+            return catalog.game_metadata.update_overrides(game_id, body.model_dump(exclude_unset=True))
+        except GameMetadataError as error:
+            raise HTTPException(error.status_code, str(error)) from error
+
     @app.patch('/api/games/{game_id}/configuration')
     def update_game_configuration(game_id: str, body: GameConfigBody):
         game = game_or_404(game_id)
@@ -753,7 +774,8 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
             raise HTTPException(409, '游戏需要 BIOS；请配置对应固件')
         # Player1 retains the historical storage keys, including already-created
         # EmulatorJS battery saves. Other players get separate personal DBs below.
-        storage_game_name = game['title'] if profile_id == 'player1' else f"{profile_id}_{game_id}_{game['title']}"
+        save_title = game.get('_save_title', game['title'])
+        storage_game_name = save_title if profile_id == 'player1' else f"{profile_id}_{game_id}_{save_title}"
         settings = {'EJS_player': '#game', 'EJS_core': game['browser_core'], 'EJS_gameUrl': url(f'/api/games/{game_id}/rom/{quote(path.name)}'),
                     'EJS_pathtodata': url('/emulatorjs/data/'), 'EJS_gameName': storage_game_name, 'EJS_gameID': int(game_id[:12], 16),
                     'EJS_defaultControls': DEFAULT_CONTROLS, 'EJS_language': 'zh-CN', 'EJS_color': '#64d9f3', 'EJS_backgroundColor': '#0b1424',

@@ -12,6 +12,8 @@ RetroOne is a self-hosted retro gaming hub for families on a home network. Brows
 
 Built on EmulatorJS, RetroArch, and Selkies, RetroOne uses Docker for deployment. Bring your own games and any required BIOS, firmware, or keys—none are included. The public image provides the application and streaming foundation; additional emulator runtimes must be prepared locally as described in the [build and release guide](docs/releasing.md).
 
+Library management keeps metadata, ROM-linked launch configurations, and personal saves separate. Resumable content audits identify exact cartridge duplicates while preserving variants and original save identities; audit results distinguish file checks from actual emulator observations.
+
 ![RetroOne 游戏库示例：平台导航、搜索、运行方式筛选与家人动态](docs/screenshots/library.png)
 
 > 本页是当前应用在浏览器中的实际界面截图，使用明确标注的虚构目录和成员资料，仅展示操作流程，不代表游戏运行或性能验证。图片不含第三方游戏封面或商业游戏画面。仓库及公开镜像不提供 ROM、BIOS、固件或密钥，也不会替用户下载游戏。
@@ -24,6 +26,7 @@ Built on EmulatorJS, RetroArch, and Selkies, RetroOne uses Docker for deployment
 - **看看谁在玩**：顶栏显示在线家人的头像与活动，本人的状态入口可以继续、结束游戏或调整画面设置。
 - **键盘和手柄导航**：支持 WASD、方向键、Xbox 和 PlayStation 手柄，无需先打开手柄模式。
 - **保留原收藏**：游戏库只读挂载，运行时需要的解压副本和存档写到独立数据目录。
+- **管理与核验收藏**：后台扫描、生成每游戏启动配置、分批检查内容指纹和重复副本；保留衍生版本及原存档入口。详见 [游戏库管理](docs/library-management.md)。
 
 ## 游戏在哪里运行
 
@@ -120,7 +123,7 @@ docker compose ps
 
 ### 3. 更新游戏库并检查状态
 
-进入网页、选择玩家，点击 **“更新游戏库”**。扫描在后台进行，完成后列表自动更新；大目录需要更多时间。也可以调用当前玩家的 `POST /p/playerN/api/scan`。
+进入网页、选择玩家，打开 **“管理游戏库”** 并扫描目录。扫描在后台进行，完成后列表自动更新；大目录需要更多时间。管理入口也可分批核验内容、查看进度并继续未完成的指纹任务。也可以调用当前玩家的 `POST /p/playerN/api/scan`。
 
 选择游戏后查看详情中的运行方式和原因。先试一款熟悉的游戏，验证输入、保存和恢复，再继续扩充收藏。移动或重命名已入库文件可能改变游戏 ID，进而影响收藏、最近记录及按游戏 ID 保存的数据关联；已有进度请先备份。
 

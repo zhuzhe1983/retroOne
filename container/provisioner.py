@@ -99,13 +99,14 @@ class Provisioner:
         self.host_profiles = os.environ.get("RETROONE_HOST_PROFILES_ROOT", "/volume1/docker/retroOne/profiles")
         self.rom = os.environ.get("RETROONE_HOST_ROM_ROOT", "/volume2/rom/one")
         self.artwork = os.environ.get("RETROONE_HOST_ARTWORK_ROOT", "/volume1/docker/retroOne/data/retroone/artwork")
+        self.library_data = os.environ.get("RETROONE_HOST_LIBRARY_DATA_ROOT", "/volume1/docker/retroOne/library-data")
         self.network = os.environ.get("RETROONE_DOCKER_NETWORK", "retroone_default")
         self.image = os.environ.get("RETROONE_RUNTIME_IMAGE", "retroone:local")
         self.gateway = os.environ.get("RETROONE_GATEWAY_URL", "http://retroone:3000").rstrip("/")
         self.docker = docker or Docker()
         self.stopping = threading.Event()
         self.image_id = None
-        for path in (self.host_profiles, self.rom, self.artwork):
+        for path in (self.host_profiles, self.rom, self.artwork, self.library_data):
             if not Path(path).is_absolute() or any(c in path for c in (":", "\n", "\0")):
                 raise ValueError("Operator mount paths must be absolute bind-mount paths")
         for name in ("requests", "running", "results", "rejected"):
@@ -132,6 +133,7 @@ class Provisioner:
             "SELKIES_FRAMERATE": "60-60", "SELKIES_MANUAL_WIDTH": "0", "SELKIES_MANUAL_HEIGHT": "0",
             "SELKIES_MANUAL_RESOLUTION": "false|locked", "SELKIES_ENABLE_RESIZE": "false|locked",
             "RETROONE_ARTWORK_ROOT": "/artwork",
+            "RETROONE_LIBRARY_DATA_ROOT": "/library-data",
             "RETROONE_PROFILE_ID": profile, "RETROONE_BASE_PATH": "/p/" + profile,
             "SUBFOLDER": "/p/" + profile + "/stream/", "RETROONE_GATEWAY": "false",
         }
@@ -140,7 +142,7 @@ class Provisioner:
             "Env": [key + "=" + value for key, value in environment.items()],
             "Labels": {"io.retroone.managed": "profile", "io.retroone.profile": profile},
             "HostConfig": {
-                "Binds": [self.rom + ":/roms:ro", self.host_profiles + "/" + profile + ":/config:rw", self.artwork + ":/artwork:rw"],
+                "Binds": [self.rom + ":/roms:ro", self.host_profiles + "/" + profile + ":/config:rw", self.artwork + ":/artwork:rw", self.library_data + ":/library-data:rw"],
                 "Devices": [{"PathOnHost": "/dev/dri/renderD128", "PathInContainer": "/dev/dri/renderD128", "CgroupPermissions": "rw"}],
                 "ShmSize": 2 * 1024 ** 3, "NetworkMode": self.network,
                 "RestartPolicy": {"Name": "unless-stopped"},
@@ -173,7 +175,9 @@ class Provisioner:
                 or mounts.get("/roms", {}).get("Source") != self.rom
                 or mounts.get("/roms", {}).get("RW") is not False
                 or mounts.get("/artwork", {}).get("Source") != self.artwork
-                or mounts.get("/artwork", {}).get("RW") is not True):
+                or mounts.get("/artwork", {}).get("RW") is not True
+                or mounts.get("/library-data", {}).get("Source") != self.library_data
+                or mounts.get("/library-data", {}).get("RW") is not True):
             raise ValueError("Existing runtime has unexpected storage mounts")
         if self.network not in existing.get("NetworkSettings", {}).get("Networks", {}):
             raise ValueError("Existing runtime is on an unexpected network")

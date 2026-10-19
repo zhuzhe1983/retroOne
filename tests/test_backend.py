@@ -166,7 +166,11 @@ class LibraryCase(unittest.TestCase):
         status = self.library.scan()
         self.assertEqual(status['error_types']['metadata_reference_missing_or_unsafe'], 1)
         self.assertEqual(status['warning_samples'][0]['reference'], 'absent.zip')
-        self.assertEqual(self.library.count(), 0)
+        self.assertEqual(self.library.count(), 1)
+        missing = self.library.list()['games'][0]
+        self.assertEqual(missing['title'], 'Not collected')
+        self.assertEqual(missing['mode'], 'unavailable')
+        self.assertEqual(missing['launch_config']['status'], 'blocked')
 
     def test_slow_runtime_refresh_does_not_block_other_requests(self):
         app = create_app(self.roms, self.config, runner=FakeRunner(), auto_scan=False)

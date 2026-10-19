@@ -15,6 +15,7 @@ sudo mkdir -p /srv/rom/one/library /srv/rom/one/firmware
 sudo mkdir -p /srv/retroone/data/retroone/artwork
 sudo mkdir -p /srv/retroone/data/retroone/profile-control
 sudo mkdir -p /srv/retroone/profiles/player2
+sudo mkdir -p /srv/retroone/library-data
 sudo chown -R "$(id -u):$(id -g)" /srv/retroone
 ```
 
@@ -34,6 +35,8 @@ RETROONE_ARTWORK_PATH=/srv/retroone/data/retroone/artwork
 RETROONE_PLAYER2_CONFIG_PATH=/srv/retroone/profiles/player2
 RETROONE_PROFILES_PATH=/srv/retroone/profiles
 RETROONE_HOST_PROFILES_ROOT=/srv/retroone/profiles
+RETROONE_LIBRARY_DATA_PATH=/srv/retroone/library-data
+RETROONE_HOST_LIBRARY_DATA_ROOT=/srv/retroone/library-data
 RETROONE_DOCKER_NETWORK=retroone_default
 RETROONE_MAX_PROFILES=16
 RETROONE_HTTP_PORT=8780
@@ -43,7 +46,7 @@ EOF
 
 `PUID` / `PGID` 是容器内运行用户的 UID / GID；附加组需要允许读取 ROM 和访问渲染设备。Synology 等 NAS 还可能有共享目录 ACL，按实际权限设置附加组，不要为了运行服务开放整个 ROM 目录的写权限。Docker socket 的组号必须从当前宿主机读取，不能照搬其他机器。
 
-`RETROONE_PROFILES_PATH` 是 Compose 挂载位置，`RETROONE_HOST_PROFILES_ROOT` 是新增成员容器使用的宿主机绝对路径，两者必须对应同一个目录。封面缓存共用 `/artwork`，存档和设置则各自独立。
+`RETROONE_PROFILES_PATH` 是 Compose 挂载位置，`RETROONE_HOST_PROFILES_ROOT` 是新增成员容器使用的宿主机绝对路径，两者必须对应同一个目录。封面缓存共用 `/artwork`，存档和设置则各自独立。`RETROONE_LIBRARY_DATA_PATH` 与 `RETROONE_HOST_LIBRARY_DATA_ROOT` 同样必须对应同一个绝对路径，供所有成员共享检测资料与每游戏启动配置；详见 [游戏库管理](library-management.md)。
 
 ### 2. 构建与启动
 
@@ -77,7 +80,7 @@ docker compose logs --tail=100 retroone
 
 ## 存档与备份
 
-备份整个运行数据根目录中的 **`data/` 和 `profiles/`**，不要只备份 Docker 镜像或 `saves/`。DOS / Windows 原生存档可能留在工作副本里。可恢复备份应在游戏正常保存并结束后进行，避免复制正在写入的文件。
+备份整个运行数据根目录中的 **`data/`、`profiles/` 和 `library-data/`**，不要只备份 Docker 镜像或 `saves/`。DOS / Windows 原生存档可能留在工作副本里。可恢复备份应在游戏正常保存并结束后进行，避免复制正在写入的文件。
 
 | 内容 | 玩家 1 数据目录下的相对位置 |
 | --- | --- |

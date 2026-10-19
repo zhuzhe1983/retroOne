@@ -73,6 +73,16 @@ class Runner:
         name = hint if platform in ("mame", "lightgun", "fbneo") and hint in ARCADE_CORES else PLATFORMS.get(platform, {}).get("native_core")
         return self.core_root / f"{name}_libretro.so" if name else None
 
+    def preflight(self, game):
+        """Check the selected core before the API ends a confirmed old session."""
+        platform = game.get('platform')
+        hinted_arcade = platform in {'mame', 'lightgun', 'fbneo'} and game.get('native_core') in ARCADE_CORES
+        standalone = platform in {'dos', 'ps2', 'switch', 'gamecube', 'wii', 'mame', 'lightgun'} or game.get('engine_hint') in {'wine', 'sdlpal'}
+        if hinted_arcade or not standalone:
+            core = self._core(platform, game.get('native_core'))
+            if not core or not core.is_file() or not self._program('retroarch'):
+                raise ValueError('此游戏配置指定的模拟器核心尚未安装，请先检查启动配置')
+
     def _bios_status(self, platform, files):
         names = {p.name.lower() for p in files}
         if platform == "ps2":
@@ -612,6 +622,7 @@ class Runner:
                 raise RuntimeError("已有游戏正在运行，请先结束当前游戏")
             if self._display_backend.unsupported_reason:
                 raise RuntimeError(self._display_backend.unsupported_reason)
+            self.preflight(game)
             # A failed/finished Wine launcher may leave its prefix server alive.
             if self._wine_prefix:
                 environment = dict(os.environ, WINEPREFIX=str(self._wine_prefix), WINEARCH="win32", WINEDEBUG="-all")

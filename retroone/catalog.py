@@ -16,6 +16,8 @@ import time
 import zipfile
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterator
+from .library_review import ReviewIndex
+from .game_config import GameConfigStore, GameConfigError
 
 BROWSER_LIMIT = 20 * 1024 * 1024
 MAX_METADATA = 32 * 1024 * 1024
@@ -241,6 +243,11 @@ class Catalog:
         self._scan_lock = threading.Lock()
         self._scan_thread: threading.Thread | None = None
         self._runtime_key = None
+        self.library_data_root = Path(os.getenv('RETROONE_LIBRARY_DATA_ROOT', str(self.config_root / 'library-data'))).resolve()
+        self.game_configs = GameConfigStore(self.library_data_root / 'runtime', self.rom_root)
+        self._reviews = ReviewIndex(self.rom_root, self.library_data_root / 'metadata' / 'library-review.json')
+        self._review_key = object()
+        self._review_lock = threading.RLock()
         self._media_roots: dict[Path, bool] = {}
         self.scan_status = {'running': False, 'scanned': 0, 'errors': 0, 'started_at': None, 'finished_at': None, 'last_error': None, 'error_types': {}, 'warning_samples': []}
         with self.connect() as db:
@@ -256,6 +263,8 @@ class Catalog:
                 CREATE TABLE IF NOT EXISTS favorites (game_id TEXT PRIMARY KEY, favorite INTEGER NOT NULL);
                 CREATE TABLE IF NOT EXISTS history (game_id TEXT PRIMARY KEY, played_at REAL NOT NULL);
                 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
+                CREATE TABLE IF NOT EXISTS game_reviews (game_id TEXT PRIMARY KEY, group_id TEXT, status TEXT NOT NULL, payload TEXT NOT NULL);
+                CREATE INDEX IF NOT EXISTS reviews_group ON game_reviews(group_id);
             ''')
             row = db.execute("SELECT value FROM settings WHERE key='last_scan'").fetchone()
             if row:
@@ -268,8 +277,23 @@ class Catalog:
         return db
 
     def count(self) -> int:
+        self._sync_reviews()
         with self.connect() as db:
-            return db.execute('SELECT count(*) FROM games').fetchone()[0]
+            return db.execute('SELECT count(DISTINCT coalesce(r.group_id,g.id)||g.mode) FROM games g LEFT JOIN game_reviews r ON r.game_id=g.id').fetchone()[0]
+
+    def _sync_reviews(self):
+        with self._review_lock:
+            self._reviews.load()
+            if self._review_key != self._reviews.key:
+                rows = self._reviews.rows()
+                with self.connect() as db:
+                    db.execute('DELETE FROM game_reviews')
+                    db.executemany('INSERT INTO game_reviews VALUES(?,?,?,?)', rows)
+                self._review_key = self._reviews.key
+            invalid = self._reviews.changed_groups()
+            if invalid:
+                with self.connect() as db:
+                    db.executemany("UPDATE game_reviews SET group_id=NULL,status='stale' WHERE group_id=?", [(g,) for g in invalid])
 
     def begin_scan(self) -> bool:
         if not self._scan_lock.acquire(blocking=False):
@@ -306,6 +330,10 @@ class Catalog:
                 raise FileNotFoundError('one/library 尚未就绪；保留现有索引')
             with self.connect() as db:
                 for game in self.discover():
+                    try:
+                        self.game_configs.generate(game)
+                    except GameConfigError:
+                        self._scan_warning('launch_config_needs_review', Path(game['rom_path']))
                     db.execute('''INSERT INTO games VALUES(?,?,?,?,?,?,?,?,?,?)
                         ON CONFLICT(id) DO UPDATE SET title=excluded.title,platform=excluded.platform,
                         collection=excluded.collection,mode=excluded.mode,browser_eligible=excluded.browser_eligible,
@@ -317,6 +345,7 @@ class Catalog:
                 db.execute('DELETE FROM games WHERE scan_id != ?', (scan_id,))
                 db.commit()
             self._runtime_key = None
+            self._review_key = object()
         except Exception as error:
             self.scan_status['last_error'] = str(error)[:500]
             self.scan_status['errors'] += 1
@@ -370,6 +399,17 @@ class Catalog:
                                 owned_dirs.add(directory / path.relative_to(directory).parts[0])
                         except (OSError, ValueError):
                             unsafe_reason = '元数据引用文件缺失或路径不安全'
+                            # Keep a safe missing reference visible as a blocked
+                            # game; disappearance must not look like a clean scan.
+                            value = ref.strip().strip('"').replace('\\', '/')
+                            relative = PurePosixPath(value)
+                            if value and not relative.is_absolute() and '..' not in relative.parts and not re.match(r'^[A-Za-z]:', value):
+                                try:
+                                    missing = contained_path(self.rom_root, directory.joinpath(*relative.parts), exists=False)
+                                    paths.append(missing)
+                                    self._scan_warning('metadata_reference_missing_or_unsafe', directory / metadata_name, ref)
+                                except (ValueError, OSError):
+                                    pass
                     if not paths:
                         self._scan_warning('metadata_reference_missing_or_unsafe', directory / metadata_name, ' | '.join(record.get('files', [])))
                         continue
@@ -537,19 +577,33 @@ class Catalog:
         if not self.scan_status['running']:
             self._runtime_key = key
 
-    @staticmethod
-    def _decode(row: sqlite3.Row) -> dict:
+    def _decode(self, row: sqlite3.Row) -> dict:
         game = json.loads(row['payload'])
         game.update(mode=row['mode'], reason=row['reason'], favorite=bool(row['favorite']), played_at=row['played_at'])
+        entry = json.loads(row['review_payload']) if 'review_payload' in row.keys() and row['review_payload'] else None
+        game['review'] = self._reviews.public(game, entry, row['review_status'] if 'review_status' in row.keys() else None)
+        try:
+            game['launch_config'] = self.game_configs.summary(game, game['review'])
+        except GameConfigError as error:
+            game['launch_config'] = {'status': 'blocked', 'issues': [str(error)], 'verified_playable': False}
+        if 'group_id' in row.keys() and row['group_id']:
+            with self.connect() as db:
+                members = [dict(r) for r in db.execute('''SELECT g.id,g.title,g.collection,coalesce(f.favorite,0) favorite,h.played_at
+                    FROM games g JOIN game_reviews r ON r.game_id=g.id LEFT JOIN favorites f ON f.game_id=g.id
+                    LEFT JOIN history h ON h.game_id=g.id WHERE r.group_id=? AND g.mode=?
+                    ORDER BY h.played_at DESC,coalesce(f.favorite,0) DESC,g.id''', (row['group_id'], game['mode']))]
+            game['review']['duplicates'] = {'group_id': row['group_id'], 'total_count': len(members), 'representative_id': members[0]['id'], 'members': members}
         return game
 
     def get(self, game_id: str) -> dict | None:
+        self._sync_reviews()
         with self.connect() as db:
-            row = db.execute('''SELECT g.*,coalesce(f.favorite,0) favorite,h.played_at FROM games g
-                LEFT JOIN favorites f ON f.game_id=g.id LEFT JOIN history h ON h.game_id=g.id WHERE g.id=?''', (game_id,)).fetchone()
+            row = db.execute('''SELECT g.*,coalesce(f.favorite,0) favorite,h.played_at,r.payload review_payload,r.group_id,r.status review_status FROM games g
+                LEFT JOIN favorites f ON f.game_id=g.id LEFT JOIN history h ON h.game_id=g.id LEFT JOIN game_reviews r ON r.game_id=g.id WHERE g.id=?''', (game_id,)).fetchone()
             return self._decode(row) if row else None
 
-    def list(self, *, q: str = '', platform: str = '', mode: str = '', favorite: bool = False, recent: bool = False, offset: int = 0, limit: int = 60) -> dict:
+    def list(self, *, q: str = '', platform: str = '', mode: str = '', favorite: bool = False, recent: bool = False, review_filter: str = '', offset: int = 0, limit: int = 60) -> dict:
+        self._sync_reviews()
         where, values = ['1=1'], []
         if q:
             where.append("(g.title LIKE ? ESCAPE '\\' OR g.collection LIKE ? ESCAPE '\\')")
@@ -565,18 +619,29 @@ class Catalog:
             where.append('f.favorite=1')
         if recent:
             where.append('h.played_at IS NOT NULL')
+        if review_filter == 'needs_attention':
+            where.append("r.status IN ('dependency_error','load_failed')")
+        elif review_filter == 'observed':
+            where.append("r.status IN ('boot_observed','input_observed','gameplay_observed')")
+        elif review_filter == 'pending':
+            where.append("coalesce(r.status,'unverified') NOT IN ('dependency_error','load_failed','boot_observed','input_observed','gameplay_observed')")
         clause = ' AND '.join(where)
-        joins = 'FROM games g LEFT JOIN favorites f ON f.game_id=g.id LEFT JOIN history h ON h.game_id=g.id'
-        order = "h.played_at DESC,g.id" if recent else "g.platform,g.collection,json_extract(g.payload,'$.sort_by'),g.title,g.id"
+        joins = 'FROM games g LEFT JOIN favorites f ON f.game_id=g.id LEFT JOIN history h ON h.game_id=g.id LEFT JOIN game_reviews r ON r.game_id=g.id'
+        selection = f'''WITH ranked AS (SELECT g.*,coalesce(f.favorite,0) favorite,h.played_at,r.payload review_payload,r.group_id,r.status review_status,
+            row_number() OVER (PARTITION BY coalesce(r.group_id,g.id),g.mode ORDER BY h.played_at DESC,coalesce(f.favorite,0) DESC,g.id) choice
+            {joins} WHERE {clause})'''
+        order = "played_at DESC,id" if recent else "platform,collection,json_extract(payload,'$.sort_by'),title,id"
         with self.connect() as db:
-            total = db.execute(f'SELECT count(*) {joins} WHERE {clause}', values).fetchone()[0]
-            rows = db.execute(f'SELECT g.*,coalesce(f.favorite,0) favorite,h.played_at {joins} WHERE {clause} ORDER BY {order} LIMIT ? OFFSET ?', [*values, limit, offset]).fetchall()
+            total = db.execute(f'{selection} SELECT count(*) FROM ranked WHERE choice=1', values).fetchone()[0]
+            rows = db.execute(f'{selection} SELECT * FROM ranked WHERE choice=1 ORDER BY {order} LIMIT ? OFFSET ?', [*values, limit, offset]).fetchall()
         return {'games': [self._decode(row) for row in rows], 'total': total, 'offset': offset, 'limit': limit}
 
     def platforms(self) -> list[dict]:
+        self._sync_reviews()
         definitions = platform_definitions()
         with self.connect() as db:
-            rows = db.execute("SELECT platform id,count(*) count,sum(mode='browser') browser_count,sum(mode='stream') stream_count FROM games GROUP BY platform ORDER BY platform").fetchall()
+            rows = db.execute("""WITH entries AS (SELECT g.platform,g.mode,coalesce(r.group_id,g.id) identity FROM games g LEFT JOIN game_reviews r ON r.game_id=g.id GROUP BY g.platform,g.mode,identity)
+                SELECT platform id,count(*) count,sum(mode='browser') browser_count,sum(mode='stream') stream_count FROM entries GROUP BY platform ORDER BY platform""").fetchall()
             return [dict(row, name=definitions.get(row['id'], {}).get('name', row['id'])) for row in rows]
 
     def set_favorite(self, game_id: str, favorite: bool) -> None:

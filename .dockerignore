@@ -5,6 +5,8 @@
 artifacts
 output
 data
+library-data
+.butler
 profiles
 backups
 network-test

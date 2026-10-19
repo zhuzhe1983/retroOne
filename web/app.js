@@ -6,11 +6,14 @@
   const escapeHTML = (value = '') => String(value ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const icon = (name, cls = 'icon') => `<svg class="${cls}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
   const number = (value) => new Intl.NumberFormat('zh-CN').format(Number(value) || 0);
+  const reviewFilters = {'': '全部', needs_attention: '需要处理', pending: '待验证', observed: '已有观察记录'};
+  const reviewStatuses = {unverified: '未检测', fingerprinted: '已计算内容指纹', archive_verified: '文件已校验', dependency_error: '缺依赖', load_failed: '启动失败', boot_observed: '已观察启动画面', input_observed: '已观察输入响应', gameplay_observed: '已观察进入游戏', runtime_unavailable: '运行环境未配置', stale: '检测记录已过期'};
+  function validReviewFilter(value) { return Object.hasOwn(reviewFilters, value) ? value : ''; }
   const initial = new URLSearchParams(location.search);
   const state = {
     games: [], platforms: [], total: 0, platform: initial.get('platform') || '',
     query: initial.get('q') || '', mode: ['browser', 'stream', 'unavailable'].includes(initial.get('mode')) ? initial.get('mode') : '',
-    favorites: initial.get('favorite') === 'true', recent: initial.get('recent') === 'true', selected: null, initialGame: initial.get('game'),
+    favorites: initial.get('favorite') === 'true', recent: initial.get('recent') === 'true', reviewFilter: validReviewFilter(initial.get('review_filter')), selected: null, initialGame: initial.get('game'),
     loading: false, request: 0, controller: null, session: null, playMode: null, health: null,
     favoritePending: new Set(), scanPending: false, wasScanning: false, healthRefreshing: false,
     detailRequest: 0, focusReturn: null, launching: false,
@@ -19,6 +22,7 @@
     playGameId: null, familySelectedId: null, presenceStale: false, presenceEpoch: 0,
     pendingLaunch: null,
     displayData: null, displayDraft: null, displayLoading: false, displaySaving: false, displayRequest: 0, displayFresh: false, displayReadController: null,
+    managementData: null, managementFresh: false, managementLoading: false, managementBusy: false, managementRequest: 0, managementController: null, managementTimer: null,
     networkCapabilities: null, networkInvites: [], networkRoom: null, networkLoading: false, networkBusy: false, networkVersion: 0, networkCreate: null, networkSeen: new Set(), activeNetworkRoomId: null,
   };
   const presenceClientId = newRequestId();
@@ -28,6 +32,9 @@
   let lastKeyboardMove = 0;
   const modeLabels = { browser: '浏览器运行', stream: '云端串流', unavailable: '待配置' };
   const modeIcons = { browser: 'browser', stream: 'cloud', unavailable: 'info' };
+  document.querySelector('.mode-filters').insertAdjacentHTML('beforeend', '<button class="filter-button review-filter" id="review-filter" type="button"></button>');
+  $('scan-button').innerHTML = `${icon('library')}<span>管理游戏库</span>`;
+  document.body.insertAdjacentHTML('beforeend', `<dialog id="management-dialog" class="help-dialog management-dialog" aria-labelledby="management-title" aria-describedby="management-description"><div class="dialog-heading"><div><p class="eyebrow">LIBRARY CARE</p><h2 id="management-title">管理游戏库</h2></div><button class="icon-button" id="close-management" aria-label="关闭游戏库管理">${icon('close')}</button></div><p class="management-description" id="management-description">扫描识别文件并生成启动配置；内容核验检查重复和损坏；独立试运行需配置检测环境。</p><dl class="management-summary" id="management-summary"></dl><section class="management-progress" aria-label="当前任务"><p id="management-scan">正在读取扫描状态…</p><strong id="management-job">正在读取内容核验状态…</strong><p id="management-progress"></p><p class="is-warning" id="management-error" hidden></p></section><p class="management-message" id="management-message" role="status"></p><div class="management-actions"><button class="button button-secondary" id="management-scan-button" disabled>扫描游戏目录</button><button class="button" id="management-audit-button" disabled>开始内容核验</button><button class="text-button" id="management-retry" hidden>重新读取状态</button></div><p class="management-note" id="management-storage">检测记录与游戏资料、原始文件及玩家存档分别保存。</p><p class="management-note">核验会分批进行，暂停后可继续。关闭此窗口不会停止服务器任务。</p><p class="management-note" id="management-observe">独立试运行尚未配置。</p></dialog>`);
 
   async function api(path, options = {}) {
     const {timeoutMs = 25000, global: globalRequest = false, cancelOnProfileChange = true, ...requestOptions} = options;
@@ -150,7 +157,7 @@
   }
   function saveProfileView() {
     if (!state.profile) return;
-    const view = {platform: state.platform, query: state.query, mode: state.mode, favorites: state.favorites, recent: state.recent, initialGame: state.selected?.id || null};
+    const view = {platform: state.platform, query: state.query, mode: state.mode, reviewFilter: state.reviewFilter, favorites: state.favorites, recent: state.recent, initialGame: state.selected?.id || null};
     try { sessionStorage.setItem(`retroone:view:${state.profile.id}`, JSON.stringify(view)); } catch {}
   }
   function readProfileView(id) {
@@ -257,6 +264,95 @@
     const buttons = [...dialog.querySelectorAll('button:not(:disabled):not([hidden])')];
     const index = buttons.indexOf(document.activeElement), delta = direction === 'left' || direction === 'up' ? -1 : 1;
     buttons[(index + delta + buttons.length) % buttons.length]?.focus();
+  }
+  function managementMessage(message = '', error = false) {
+    $('management-message').textContent = message;
+    $('management-message').classList.toggle('is-warning', error);
+  }
+  function managementJobText(job) {
+    if (!job) return '尚未开始内容核验';
+    const labels = {running: '正在核验内容', complete: '本轮内容核验完成', paused: '本批核验完成，可继续', failed: '内容核验未完成', interrupted: '核验已中断，可继续'};
+    return Object.hasOwn(labels, job.status) ? labels[job.status] : '核验状态待确认';
+  }
+  function managementProgressText(progress) {
+    if (!progress || typeof progress !== 'object') return '';
+    const labels = {discovering: '识别目录', discovery: '识别目录', hashing: '计算内容指纹', verifying: '核对文件', writing: '保存检测记录', complete: '本轮完成'};
+    const parts = [];
+    if (Object.hasOwn(labels, progress.phase)) parts.push(labels[progress.phase]);
+    if (Number.isFinite(progress.games_discovered)) parts.push(`已识别 ${number(progress.games_discovered)}${Number.isFinite(progress.games_total) ? ` / ${number(progress.games_total)}` : ''} 项`);
+    if (Number.isFinite(progress.bytes_hashed)) parts.push(`已核验 ${formatSize(progress.bytes_hashed)}`);
+    return parts.join(' · ');
+  }
+  function renderLibraryManagement() {
+    const data = state.managementData, summary = data?.summary || {}, scan = data?.scan || {}, job = data?.job;
+    const fields = {catalog_entries: '目录记录', display_entries: '合并后展示', duplicate_copies: '重复副本', reviewed: '有检测记录', needs_attention: '需要处理', pending: '待验证'};
+    $('management-summary').innerHTML = Object.entries(fields).map(([key, label]) => `<div><dt>${label}</dt><dd>${Number.isFinite(summary[key]) ? number(summary[key]) : '—'}</dd></div>`).join('');
+    $('management-scan').textContent = !data ? '正在读取扫描状态…' : scan.running || state.scanPending ? `正在扫描目录${Number.isFinite(scan.scanned) ? ` · 已识别 ${number(scan.scanned)} 项` : ''}` : scan.last_error ? '上次目录扫描未完成' : scan.finished_at ? '目录扫描已完成' : '目录尚未扫描';
+    $('management-job').textContent = data ? managementJobText(job) : '正在读取内容核验状态…';
+    $('management-progress').textContent = managementProgressText(job?.progress);
+    const error = typeof job?.error === 'string' ? job.error : typeof scan.last_error === 'string' ? scan.last_error : '';
+    $('management-error').textContent = error; $('management-error').hidden = !error;
+    const busy = state.managementBusy || job?.status === 'running' || scan.running || state.scanPending;
+    $('management-scan-button').disabled = !state.managementFresh || busy;
+    $('management-audit-button').disabled = !state.managementFresh || busy || data?.capabilities?.audit !== true;
+    $('management-audit-button').textContent = job?.status === 'running' ? '内容核验进行中…' : ['paused', 'interrupted', 'failed'].includes(job?.status) ? '继续内容核验' : '开始内容核验';
+    $('management-observe').textContent = data?.capabilities?.observe === true ? '独立试运行由检测环境处理，不会在这里启动家庭成员的游戏。' : '独立试运行尚未配置；文件校验不代表已验证可玩。';
+    $('management-storage').textContent = data?.storage?.separated === true ? '检测记录与游戏资料、原始文件及玩家存档分别保存。' : '正在确认检测记录与游戏资料的保存方式。';
+    $('management-summary').setAttribute('aria-busy', String(state.managementLoading));
+  }
+  function cancelManagementRead() {
+    state.managementRequest++; state.managementController?.abort(); state.managementController = null; state.managementLoading = false;
+  }
+  async function refreshLibraryManagement() {
+    if (!$('management-dialog').open || document.hidden || state.managementLoading || state.managementBusy) return;
+    const epoch = state.profileEpoch, request = ++state.managementRequest;
+    const controller = new AbortController(); state.managementController = controller; state.managementLoading = true;
+    renderLibraryManagement();
+    try {
+      const data = await api('/api/library-management', {signal: controller.signal, timeoutMs: 6000});
+      if (epoch !== state.profileEpoch || request !== state.managementRequest || !$('management-dialog').open) return;
+      if (!data?.scan || !data?.summary || !data?.capabilities) throw new Error('管理状态返回不完整，请重新读取。');
+      const previous = state.managementData?.job;
+      state.managementData = data; state.managementFresh = true; managementMessage(); $('management-retry').hidden = true;
+      if (previous?.id === data.job?.id && previous?.status === 'running' && data.job?.status !== 'running') refreshLibraryAfterScan();
+    } catch (error) {
+      if (epoch !== state.profileEpoch || request !== state.managementRequest || error.name === 'AbortError') return;
+      state.managementFresh = false;
+      managementMessage(`${state.managementData ? '当前显示上次读取的记录。' : ''}${error.message} 请重新读取状态。`, true); $('management-retry').hidden = false;
+    } finally {
+      if (epoch === state.profileEpoch && request === state.managementRequest) { state.managementController = null; state.managementLoading = false; renderLibraryManagement(); }
+    }
+  }
+  function showLibraryManagement() {
+    if (!state.profile) return;
+    cancelManagementRead(); clearInterval(state.managementTimer); state.managementFresh = false;
+    managementMessage(state.managementData ? '显示上次读取的记录，正在刷新…' : '正在读取游戏库状态…'); $('management-retry').hidden = true;
+    renderLibraryManagement(); $('management-dialog').showModal(); syncModalBody(); $('close-management').focus();
+    refreshLibraryManagement(); state.managementTimer = setInterval(refreshLibraryManagement, 2000);
+  }
+  function closeLibraryManagement({restoreFocus = true} = {}) {
+    clearInterval(state.managementTimer); state.managementTimer = null; cancelManagementRead(); state.managementFresh = false;
+    $('management-dialog').close(); syncModalBody();
+    if (restoreFocus) $('scan-button').focus({preventScroll: true});
+  }
+  async function runLibraryManagement(kind, outside = false) {
+    if (!state.profile || state.managementBusy || state.scanPending || (!outside && !state.managementFresh)) return;
+    if (!outside && (state.managementData?.scan?.running || state.managementData?.job?.status === 'running' || (kind === 'audit' && state.managementData?.capabilities?.audit !== true))) return;
+    const epoch = state.profileEpoch;
+    cancelManagementRead(); state.managementBusy = true; state.managementFresh = false; managementMessage('正在提交任务…'); renderLibraryManagement();
+    try {
+      await api(kind === 'scan' ? '/api/scan' : '/api/library-management/jobs', {method: 'POST', ...(kind === 'audit' ? {body: JSON.stringify({kind: 'audit'})} : {}), cancelOnProfileChange: false});
+      if (epoch !== state.profileEpoch) return;
+      if (kind === 'scan') { state.scanPending = true; setTimeout(() => { if (epoch === state.profileEpoch) refreshHealth(); }, 1800); }
+      notify(kind === 'scan' ? '已开始扫描目录，完成后会自动刷新' : '已提交内容核验，可在管理窗口查看进度');
+    } catch (error) {
+      if (epoch !== state.profileEpoch) return;
+      state.managementFresh = false;
+      managementMessage(`未能确认任务结果：${error.message} 请重新读取状态后再试。`, true); $('management-retry').hidden = false;
+      if (!$('management-dialog').open) notify('未能确认任务结果，请打开「管理游戏库」查看状态。', true);
+    } finally {
+      if (epoch === state.profileEpoch) { state.managementBusy = false; renderLibraryManagement(); refreshLibraryManagement(); }
+    }
   }
   function networkMessage(message = '', error = false) {
     $('network-message').textContent = message; $('network-message').hidden = !message; $('network-message').dataset.error = String(error);
@@ -559,17 +655,19 @@
     saveProfileView(); clearTimeout(searchTimer);
     for (const controller of state.profileRequests) controller.abort();
     state.profileRequests.clear(); state.profileEpoch++; state.request++; state.detailRequest++;
+    closeLibraryManagement({restoreFocus: false}); state.managementData = null; state.managementBusy = false;
     state.displayReadController?.abort(); state.displayReadController = null;
     state.displayRequest++; state.displayData = null; state.displayDraft = null; state.displayLoading = false; state.displaySaving = false; state.displayFresh = false;
     if ($('display-dialog').open) $('display-dialog').close();
     if (state.playMode) closePlayer({refresh: false, presence: false});
     state.profile = profile;
-    const defaults = {platform: '', query: '', mode: '', favorites: false, recent: false, initialGame: null};
-    const linkedView = first && initial.size && (!initial.has('player') || initial.get('player') === profile.id) ? {platform: initial.get('platform') || '', query: initial.get('q') || '', mode: ['browser', 'stream', 'unavailable'].includes(initial.get('mode')) ? initial.get('mode') : '', favorites: initial.get('favorite') === 'true', recent: initial.get('recent') === 'true', initialGame: initial.get('game')} : null;
+    const defaults = {platform: '', query: '', mode: '', reviewFilter: '', favorites: false, recent: false, initialGame: null};
+    const linkedView = first && initial.size && (!initial.has('player') || initial.get('player') === profile.id) ? {platform: initial.get('platform') || '', query: initial.get('q') || '', mode: ['browser', 'stream', 'unavailable'].includes(initial.get('mode')) ? initial.get('mode') : '', reviewFilter: validReviewFilter(initial.get('review_filter')), favorites: initial.get('favorite') === 'true', recent: initial.get('recent') === 'true', initialGame: initial.get('game')} : null;
     Object.assign(state, defaults, linkedView || readProfileView(profile.id), {games: [], platforms: [], total: 0, selected: null, session: null, health: null, loading: false, scanPending: false, wasScanning: false, healthRefreshing: false, launching: false, pendingProfile: null, networkCapabilities: null, networkInvites: [], networkRoom: null, networkLoading: false, networkBusy: false, networkVersion: 0, networkCreate: null, networkSeen: new Set(), activeNetworkRoomId: null});
+    state.reviewFilter = validReviewFilter(state.reviewFilter);
     state.favoritePending.clear();
     $('stop-session').disabled = false; $('stop-play').disabled = false;
-    $('scan-button').disabled = false; $('scan-button').innerHTML = `${icon('refresh')}<span>更新游戏库</span>`;
+    $('scan-button').disabled = false; $('scan-button').innerHTML = `${icon('library')}<span>管理游戏库</span>`;
     $('migration-banner').hidden = true; $('toast').hidden = true;
     $('connection-label').textContent = '连接中'; $('status-button').dataset.state = 'connecting';
     remember('retroone:last-profile', profile.id); renderCurrentProfile(); renderSession(); renderDetail(null); renderPlatforms(); renderFilters(); updateURL();
@@ -645,6 +743,7 @@
     if (state.platform) params.set('platform', state.platform);
     if (state.query) params.set('q', state.query);
     if (state.mode) params.set('mode', state.mode);
+    if (state.reviewFilter) params.set('review_filter', state.reviewFilter);
     if (state.favorites) params.set('favorite', 'true');
     if (state.recent) params.set('recent', 'true');
     const gameId = state.playGameId || state.initialGame || state.selected?.id;
@@ -653,6 +752,11 @@
   }
 
   function renderFilters() {
+    const nextReview = Object.keys(reviewFilters)[(Object.keys(reviewFilters).indexOf(state.reviewFilter) + 1) % Object.keys(reviewFilters).length];
+    $('review-filter').textContent = `检测：${reviewFilters[state.reviewFilter]}`;
+    $('review-filter').classList.toggle('is-active', Boolean(state.reviewFilter));
+    $('review-filter').setAttribute('aria-label', `检测筛选：${reviewFilters[state.reviewFilter]}。按确认切换为${reviewFilters[nextReview]}`);
+    $('review-filter').title = '点击切换：全部 → 需要处理 → 待验证 → 已有观察记录';
     if (document.activeElement !== $('search')) $('search').value = state.query;
     $('nav-library').classList.toggle('is-active', !state.favorites);
     $('recent-filter').classList.toggle('is-active', state.recent);
@@ -691,9 +795,70 @@
     return url ? `<img src="${escapeHTML(url)}" alt="${detail ? escapeHTML(game.title) + ' 游戏封面' : ''}" loading="${detail ? 'eager' : 'lazy'}" decoding="async" data-cover-id="${escapeHTML(game.id)}">` : fallbackCover(game);
   }
 
+  function reviewStatus(game) {
+    const status = game.review?.verification?.status;
+    return Object.hasOwn(reviewStatuses, status) ? status : 'unverified';
+  }
+  function duplicateCount(game) {
+    const count = game.review?.duplicates?.total_count;
+    return Number.isSafeInteger(count) && count > 0 ? count : null;
+  }
+  function reviewCardNote(game) {
+    const status = reviewStatus(game), count = duplicateCount(game);
+    const warning = status === 'dependency_error' ? '缺文件 / 依赖' : status === 'load_failed' ? '启动失败' : '';
+    return warning ? `<span class="card-review-note is-warning">${warning}</span>` : count > 1 ? `<span class="card-review-note">另 ${number(count - 1)} 份相同副本</span>` : '';
+  }
+  function variantTags(game) {
+    const tags = game.review?.variant_tags;
+    if (!Array.isArray(tags)) return '';
+    const valid = tags.filter((tag) => tag && typeof tag.raw === 'string' && tag.raw.trim());
+    return valid.length ? `<div class="variant-tags" aria-label="版本标记">${valid.map((tag) => `<span title="${escapeHTML([tag.raw, tag.source].filter((item) => typeof item === 'string' && item).join(' · '))}">${escapeHTML(typeof tag.label === 'string' && tag.label ? tag.label : tag.raw)}</span>`).join('')}</div>` : '';
+  }
+  function reviewDetails(game) {
+    const review = game.review || {}, verification = review.verification || {}, status = reviewStatus(game);
+    const notes = Array.isArray(verification.notes) ? verification.notes.filter((item) => typeof item === 'string') : [];
+    const errors = Array.isArray(verification.errors) ? verification.errors.filter((item) => typeof item === 'string') : [];
+    const timestamp = verification.checked_at;
+    const date = timestamp == null ? null : new Date(typeof timestamp === 'number' ? timestamp * 1000 : timestamp);
+    const checked = date && Number.isFinite(date.getTime()) ? date.toLocaleString('zh-CN', {hour12: false}) : '';
+    const context = [checked, modeLabels[verification.mode], typeof verification.engine === 'string' ? verification.engine : ''].filter(Boolean).join(' · ');
+    const fingerprint = review.fingerprint || {};
+    const hash = typeof fingerprint.sha256 === 'string' && /^[a-f0-9]{64}$/i.test(fingerprint.sha256) ? fingerprint.sha256 : '';
+    const tags = Array.isArray(review.variant_tags) ? review.variant_tags.filter((tag) => tag && typeof tag.raw === 'string') : [];
+    const members = Array.isArray(review.duplicates?.members) ? review.duplicates.members.filter((member) => member && typeof member.id === 'string' && member.id) : [];
+    const evidence = hash || tags.length;
+    return `<section class="detail-review" aria-label="检测结果"><h3>检测结果</h3><p class="review-status ${['dependency_error', 'load_failed'].includes(status) ? 'is-warning' : ''}">${reviewStatuses[status]}</p>${context ? `<p class="review-context">${escapeHTML(context)}</p>` : ''}${notes.length ? `<ul class="review-notes">${notes.map((note) => `<li>${escapeHTML(note)}</li>`).join('')}</ul>` : ''}${errors.length ? `<ul class="review-notes is-warning">${errors.map((error) => `<li>${escapeHTML(error)}</li>`).join('')}</ul>` : ''}<p class="review-caution">文件校验或内容相同，不代表已验证可玩；观察记录只对应记录时的运行环境。</p>${evidence ? `<button class="text-button review-toggle" id="review-evidence-toggle" aria-expanded="false" aria-controls="review-evidence">查看指纹与版本依据</button><div class="review-evidence" id="review-evidence" hidden>${hash ? `<dl><dt>SHA-256</dt><dd><code>${escapeHTML(hash)}</code></dd>${typeof fingerprint.scope === 'string' ? `<dt>计算范围</dt><dd>${escapeHTML(fingerprint.scope)}</dd>` : ''}<dt>范围完整性</dt><dd>${fingerprint.complete === true ? '已覆盖声明范围' : fingerprint.complete === false ? '范围不完整' : '尚未说明'}</dd></dl>` : ''}${tags.length ? `<ul>${tags.map((tag) => `<li><span>${escapeHTML(tag.raw)}</span>${typeof tag.source === 'string' && tag.source ? `<small>${escapeHTML(tag.source)}</small>` : ''}</li>`).join('')}</ul>` : ''}</div>` : ''}${members.length > 1 ? `<button class="text-button review-toggle" id="review-copies-toggle" aria-expanded="false" aria-controls="review-copies">查看相同内容的记录（${number(duplicateCount(game) || members.length)} 份）</button><div class="review-copies" id="review-copies" hidden><p>每份记录保留自己的收藏、游玩记录和存档入口。</p>${members.map((member, index) => `<div class="review-copy"><strong>${escapeHTML(member.title || '未命名记录')}</strong><small>${escapeHTML(member.collection || '')}${member.favorite ? ' · 已收藏' : ''}${member.played_at ? ' · 有游玩记录' : ''}</small><button class="button button-secondary button-small" id="review-copy-${index}" data-open-copy="${escapeHTML(member.id)}" ${member.id === game.id ? 'disabled' : ''}>${member.id === game.id ? '当前这份记录' : '打开这份记录'}</button></div>`).join('')}</div>` : ''}</section>`;
+  }
+  function launchConfigDetails(game) {
+    const config = game.launch_config;
+    if (!config || typeof config !== 'object') return '';
+    const labels = {configured: '配置已生成', needs_review: '配置待检查', blocked: '配置受阻'};
+    const label = Object.hasOwn(labels, config.status) ? labels[config.status] : labels.needs_review;
+    const settings = [config.engine, config.core, config.input_profile].filter((value) => typeof value === 'string' && value);
+    const issues = Array.isArray(config.issues) ? config.issues.filter((value) => typeof value === 'string') : [];
+    return `<section class="detail-launch-config" aria-label="启动配置"><p><strong>启动配置</strong> · ${label}</p>${settings.length ? `<p class="review-context">${escapeHTML(settings.join(' · '))}</p>` : ''}${issues.length ? `<ul class="review-notes ${config.status === 'blocked' ? 'is-warning' : ''}">${issues.map((issue) => `<li>${escapeHTML(issue)}</li>`).join('')}</ul>` : ''}<p class="review-caution">配置记录与实测结果分别记录。</p></section>`;
+  }
+
+  async function openDuplicateRecord(id) {
+    const request = ++state.detailRequest, previousId = state.selected?.id;
+    try {
+      const game = await api(`/api/games/${encodeURIComponent(id)}`);
+      if (request !== state.detailRequest || state.selected?.id !== previousId) return;
+      if (game.id !== id) throw new Error('副本记录返回不完整，请重新读取。');
+      state.selected = game;
+      document.querySelectorAll('[data-game-id]').forEach((item) => {
+        const selected = item.dataset.gameId === id;
+        item.classList.toggle('is-selected', selected);
+        item.querySelector('.game-select').setAttribute('aria-pressed', String(selected));
+      });
+      renderDetail(game); updateURL();
+      ($('launch-game')?.disabled ? $('review-copies-toggle') || $('detail-favorite') : $('launch-game'))?.focus({preventScroll: true});
+    } catch (error) { if (error.name !== 'AbortError' && request === state.detailRequest) notify(error.message, true); }
+  }
+
   function card(game) {
     const mode = modeLabels[game.mode] ? game.mode : 'unavailable';
-    return `<article class="game-card ${state.selected?.id === game.id ? 'is-selected' : ''}" data-game-id="${escapeHTML(game.id)}"><button class="game-select" data-select="${escapeHTML(game.id)}" aria-label="查看 ${escapeHTML(game.title)}，${escapeHTML(game.platform_name || game.platform)}，${modeLabels[mode]}" aria-pressed="${state.selected?.id === game.id}"><div class="game-cover">${cover(game)}<span class="game-mode ${mode}">${icon(modeIcons[mode])}${modeLabels[mode]}</span></div><h3 class="game-title" title="${escapeHTML(game.title)}">${escapeHTML(game.title)}</h3><span class="game-subtitle">${icon(platformIcon(game.platform))}<span>${escapeHTML(game.platform_name || game.platform)}</span></span></button><button class="icon-button card-favorite ${game.favorite ? 'is-favorite' : ''}" data-favorite="${escapeHTML(game.id)}" aria-label="${game.favorite ? '取消收藏' : '收藏'} ${escapeHTML(game.title)}" aria-pressed="${Boolean(game.favorite)}" ${state.favoritePending.has(game.id) ? 'disabled' : ''}>${icon('star')}</button></article>`;
+    return `<article class="game-card ${state.selected?.id === game.id ? 'is-selected' : ''}" data-game-id="${escapeHTML(game.id)}"><button class="game-select" data-select="${escapeHTML(game.id)}" aria-label="查看 ${escapeHTML(game.title)}，${escapeHTML(game.platform_name || game.platform)}，${modeLabels[mode]}" aria-pressed="${state.selected?.id === game.id}"><div class="game-cover">${cover(game)}<span class="game-mode ${mode}">${icon(modeIcons[mode])}${modeLabels[mode]}</span></div><h3 class="game-title" title="${escapeHTML(game.title)}">${escapeHTML(game.title)}</h3><span class="game-subtitle">${icon(platformIcon(game.platform))}<span>${escapeHTML(game.platform_name || game.platform)}</span></span>${reviewCardNote(game)}</button><button class="icon-button card-favorite ${game.favorite ? 'is-favorite' : ''}" data-favorite="${escapeHTML(game.id)}" aria-label="${game.favorite ? '取消收藏' : '收藏'} ${escapeHTML(game.title)}" aria-pressed="${Boolean(game.favorite)}" ${state.favoritePending.has(game.id) ? 'disabled' : ''}>${icon('star')}</button></article>`;
   }
 
   function bindImageErrors(root) {
@@ -730,11 +895,12 @@
   }
 
   function showEmpty(kind, message) {
+    const filtered = state.query || state.mode || state.platform || state.reviewFilter;
     $('empty-state').hidden = false;
-    $('empty-action').dataset.action = kind === 'error' ? 'retry' : state.query || state.mode || state.platform ? 'reset' : state.favorites || state.recent ? 'library' : 'scan';
-    $('empty-title').textContent = kind === 'error' ? '暂时没能打开游戏库' : state.query || state.mode || state.platform ? '没有找到匹配的游戏' : state.favorites ? '留一个位置，给最爱的游戏' : state.recent ? '从第一款游戏开始' : '你的游戏，正在等待入馆';
-    $('empty-copy').textContent = message || (state.query || state.mode || state.platform ? '试试更短的关键词，或切换平台和运行方式。' : state.favorites ? '点击游戏封面上的星标，下次就能更快找到它。' : state.recent ? '开始游玩后，这里会留下你的最近记录。' : '将整理好的游戏目录挂载后，更新游戏库即可开始浏览。');
-    $('empty-action').textContent = kind === 'error' ? '重新加载' : state.query || state.mode || state.platform ? '清除筛选' : state.favorites || state.recent ? '浏览游戏库' : '更新游戏库';
+    $('empty-action').dataset.action = kind === 'error' ? 'retry' : filtered ? 'reset' : state.favorites || state.recent ? 'library' : 'scan';
+    $('empty-title').textContent = kind === 'error' ? '暂时没能打开游戏库' : filtered ? '没有找到匹配的游戏' : state.favorites ? '留一个位置，给最爱的游戏' : state.recent ? '从第一款游戏开始' : '你的游戏，正在等待入馆';
+    $('empty-copy').textContent = message || (filtered ? '试试更短的关键词，或切换平台、运行方式和检测筛选。' : state.favorites ? '点击游戏封面上的星标，下次就能更快找到它。' : state.recent ? '开始游玩后，这里会留下你的最近记录。' : '将整理好的游戏目录挂载后，更新游戏库即可开始浏览。');
+    $('empty-action').textContent = kind === 'error' ? '重新加载' : filtered ? '清除筛选' : state.favorites || state.recent ? '浏览游戏库' : '更新游戏库';
   }
 
   function renderDetail(game) {
@@ -745,11 +911,19 @@
     const mode = modeLabels[game.mode] ? game.mode : 'unavailable';
     const videoURL = localURL(game.video_url);
     const size = game.unpacked_size ?? game.size;
-    $('game-detail').innerHTML = `<div class="detail-eyebrow"><p class="eyebrow">IN YOUR COLLECTION</p><span>${game.favorite ? '已收藏' : '游戏详情'}</span></div><div class="detail-cover">${cover(game, true)}</div><p class="detail-platform">${escapeHTML(game.platform_name || game.platform)}</p><h2 class="detail-title">${escapeHTML(game.title)}</h2><div class="detail-actions"><button class="button detail-launch" id="launch-game" ${mode === 'unavailable' ? 'disabled' : ''}>${icon(mode === 'unavailable' ? 'info' : 'play')}${mode === 'unavailable' ? '等待配置' : mode === 'stream' ? '开始云端游戏' : '开始游戏'}</button><button class="icon-button detail-favorite ${game.favorite ? 'is-favorite' : ''}" id="detail-favorite" aria-label="${game.favorite ? '取消收藏' : '收藏'} ${escapeHTML(game.title)}" aria-pressed="${Boolean(game.favorite)}" ${state.favoritePending.has(game.id) ? 'disabled' : ''}>${icon('star')}</button></div><p class="detail-note">${mode === 'browser' ? '在当前设备运行 · 进度可在模拟器中保存' : mode === 'stream' ? '服务器运行 · 游戏镜像无需下载到本机' : '保留在游戏库中，补齐环境后即可尝试启动'}</p>${game.description ? `<p class="detail-description">${escapeHTML(game.description)}</p>` : ''}${videoURL ? `<button class="button button-secondary video-toggle" id="preview-video">${icon('play')}观看游戏预览</button><video class="detail-video" id="detail-video" src="${escapeHTML(videoURL)}" controls preload="none" playsinline hidden></video>` : ''}<dl class="detail-facts"><div><dt>运行方式</dt><dd>${modeLabels[mode]}</dd></div><div><dt>游戏大小</dt><dd>${formatSize(size)}</dd></div>${game.collection ? `<div><dt>来自收藏</dt><dd>${escapeHTML(game.collection)}</dd></div>` : ''}</dl>${game.reason ? `<p class="detail-reason">${icon('info')}${escapeHTML(game.reason)}</p>` : ''}`;
+    $('game-detail').innerHTML = `<div class="detail-eyebrow"><p class="eyebrow">IN YOUR COLLECTION</p><span>${game.favorite ? '已收藏' : '游戏详情'}</span></div><div class="detail-cover">${cover(game, true)}</div><p class="detail-platform">${escapeHTML(game.platform_name || game.platform)}</p><h2 class="detail-title">${escapeHTML(game.title)}</h2>${variantTags(game)}<div class="detail-actions"><button class="button detail-launch" id="launch-game" ${mode === 'unavailable' ? 'disabled' : ''}>${icon(mode === 'unavailable' ? 'info' : 'play')}${mode === 'unavailable' ? '等待配置' : mode === 'stream' ? '开始云端游戏' : '开始游戏'}</button><button class="icon-button detail-favorite ${game.favorite ? 'is-favorite' : ''}" id="detail-favorite" aria-label="${game.favorite ? '取消收藏' : '收藏'} ${escapeHTML(game.title)}" aria-pressed="${Boolean(game.favorite)}" ${state.favoritePending.has(game.id) ? 'disabled' : ''}>${icon('star')}</button></div><p class="detail-note">${mode === 'browser' ? '在当前设备运行 · 进度可在模拟器中保存' : mode === 'stream' ? '服务器运行 · 游戏镜像无需下载到本机' : '保留在游戏库中，补齐环境后即可尝试启动'}</p>${game.description ? `<p class="detail-description">${escapeHTML(game.description)}</p>` : ''}${videoURL ? `<button class="button button-secondary video-toggle" id="preview-video">${icon('play')}观看游戏预览</button><video class="detail-video" id="detail-video" src="${escapeHTML(videoURL)}" controls preload="none" playsinline hidden></video>` : ''}<dl class="detail-facts"><div><dt>运行方式</dt><dd>${modeLabels[mode]}</dd></div><div><dt>游戏大小</dt><dd>${formatSize(size)}</dd></div>${game.collection ? `<div><dt>来自收藏</dt><dd>${escapeHTML(game.collection)}</dd></div>` : ''}${duplicateCount(game) ? `<div><dt>相同内容副本</dt><dd>${number(duplicateCount(game))} 份（含当前）</dd></div>` : ''}</dl>${launchConfigDetails(game)}${reviewDetails(game)}${game.reason ? `<p class="detail-reason">${icon('info')}${escapeHTML(game.reason)}</p>` : ''}`;
     bindImageErrors($('game-detail'));
     updateLaunchButton();
     $('launch-game').addEventListener('click', () => launchGame(game));
     $('detail-favorite').addEventListener('click', () => toggleFavorite(game.id));
+    for (const name of ['evidence', 'copies']) $('review-' + name + '-toggle')?.addEventListener('click', (event) => {
+      const panel = $('review-' + name); panel.hidden = !panel.hidden;
+      event.currentTarget.setAttribute('aria-expanded', String(!panel.hidden));
+    });
+    $('review-copies')?.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-open-copy]');
+      if (button && !button.disabled) openDuplicateRecord(button.dataset.openCopy);
+    });
     $('preview-video')?.addEventListener('click', () => {
       const video = $('detail-video');
       video.hidden = !video.hidden;
@@ -801,6 +975,7 @@
     if (state.query) params.set('q', state.query);
     if (state.platform) params.set('platform', state.platform);
     if (state.mode) params.set('mode', state.mode);
+    if (state.reviewFilter) params.set('review_filter', state.reviewFilter);
     if (state.favorites) params.set('favorite', 'true');
     if (state.recent) params.set('recent', 'true');
     try {
@@ -840,7 +1015,7 @@
   function setFilter(changes) {
     if (!state.profile) return;
     clearTimeout(searchTimer);
-    Object.assign(state, changes); updateURL(); renderFilters(); renderPlatforms(); loadGames();
+    Object.assign(state, changes); state.reviewFilter = validReviewFilter(state.reviewFilter); updateURL(); renderFilters(); renderPlatforms(); loadGames();
   }
 
   async function toggleFavorite(id) {
@@ -1072,12 +1247,9 @@
       if (scanning) {
         // The card grid and platform controls remain stable during a background scan.
         if (count != null) $('stat-games').textContent = number(count);
-        $('scan-button').disabled = true;
-        $('scan-button').innerHTML = `${icon('refresh')}<span>正在更新…</span>`;
       }
       if (scanFinished) {
-        state.scanPending = false; $('scan-button').disabled = false;
-        $('scan-button').innerHTML = `${icon('refresh')}<span>更新游戏库</span>`;
+        state.scanPending = false;
         await refreshLibraryAfterScan();
         if (epoch === state.profileEpoch) notify('游戏库已更新');
       }
@@ -1091,20 +1263,7 @@
   }
 
   async function scanLibrary() {
-    const epoch = state.profileEpoch;
-    if (state.scanPending) return;
-    state.scanPending = true; $('scan-button').disabled = true;
-    $('scan-button').innerHTML = `${icon('refresh')}<span>正在更新…</span>`;
-    try {
-      await api('/api/scan', {method: 'POST'});
-      notify('已开始更新游戏库，完成后会自动刷新');
-      setTimeout(refreshHealth, 1800);
-    } catch (error) {
-      if (epoch !== state.profileEpoch) return;
-      state.scanPending = false; $('scan-button').disabled = false;
-      $('scan-button').innerHTML = `${icon('refresh')}<span>更新游戏库</span>`;
-      notify(error.message, true);
-    }
+    await runLibraryManagement('scan', true);
   }
 
   async function refreshMigration() {
@@ -1138,6 +1297,22 @@
 
   function focusNeighbor(direction) {
     const active = document.activeElement;
+    if (active?.closest('.filter-bar')) {
+      const buttons = [...document.querySelectorAll('.filter-bar button')].filter((button) => !button.disabled && button.getClientRects().length);
+      const index = buttons.indexOf(active);
+      if (direction === 'up') $('platform-nav').querySelector('.is-active')?.focus();
+      else if (direction === 'down') ($('game-grid').querySelector('.game-select') || $('empty-action'))?.focus();
+      else buttons[(index + (direction === 'left' ? -1 : 1) + buttons.length) % buttons.length]?.focus();
+      return;
+    }
+    if (active?.closest('#game-detail')) {
+      const buttons = [...$('game-detail').querySelectorAll('button')].filter((button) => !button.disabled && button.getClientRects().length);
+      const index = buttons.indexOf(active), next = index + (direction === 'left' || direction === 'up' ? -1 : 1);
+      if (next < 0 || next >= buttons.length) ($('game-grid').querySelector('.is-selected .game-select') || $('game-grid').querySelector('.game-select') || $('review-filter'))?.focus();
+      else buttons[next]?.focus();
+      return;
+    }
+    if (active === $('empty-action') && direction === 'up') { $('review-filter').focus(); return; }
     if (active === $('profile-button') || active?.closest('.family-strip')) {
       const buttons = [...$('family-strip').querySelectorAll('button'), $('profile-button')].filter((button) => !button.disabled && !button.hidden && button.getClientRects().length);
       const index = buttons.indexOf(active);
@@ -1151,7 +1326,7 @@
     if (active?.closest('.platform-nav')) {
       const buttons = [...$('platform-nav').querySelectorAll('button')];
       const index = buttons.indexOf(active);
-      if (direction === 'down') { $('game-grid').querySelector('.game-select')?.focus(); return; }
+      if (direction === 'down') { $('review-filter').focus(); return; }
       if (direction === 'up') { $('profile-button').focus(); return; }
       if (direction === 'left' || direction === 'right') buttons[Math.max(0, Math.min(buttons.length - 1, index + (direction === 'right' ? 1 : -1)))]?.focus();
       return;
@@ -1163,7 +1338,7 @@
     const columns = getComputedStyle($('game-grid')).gridTemplateColumns.split(' ').length;
     const delta = {left: -1, right: 1, up: -columns, down: columns}[direction];
     const next = index + delta;
-    if (next < 0 && direction === 'up') { $('platform-nav').querySelector('.is-active')?.focus(); return; }
+    if (next < 0 && direction === 'up') { $('review-filter').focus(); return; }
     if (next >= buttons.length && direction === 'down' && !$('load-more').hidden) { $('load-more').focus(); return; }
     buttons[Math.max(0, Math.min(buttons.length - 1, next))]?.focus();
   }
@@ -1178,7 +1353,7 @@
 
   function pollGamepads(time) {
     gamepadFrame = requestAnimationFrame(pollGamepads);
-    if (document.hidden || (state.playMode && !$('profile-dialog').open && !$('replace-dialog').open && !$('network-dialog').open && !$('display-dialog').open) || time - gamepadLast < 95) return;
+    if (document.hidden || (state.playMode && !$('profile-dialog').open && !$('replace-dialog').open && !$('network-dialog').open && !$('display-dialog').open && !$('management-dialog').open) || time - gamepadLast < 95) return;
     gamepadLast = time;
     let pads;
     try { pads = [...(navigator.getGamepads?.() || [])].filter(Boolean); } catch { return; }
@@ -1221,6 +1396,11 @@
         else if ($('replace-dialog').open) {
           if (key === 'back') closeLaunchConflict();
           else if (directional) (document.activeElement === $('keep-current-game') ? $('replace-current-game') : $('keep-current-game')).focus();
+          else if (key === 'accept') document.activeElement?.click();
+        }
+        else if ($('management-dialog').open) {
+          if (key === 'back') closeLibraryManagement();
+          else if (directional) focusModalAction($('management-dialog'), key);
           else if (key === 'accept') document.activeElement?.click();
         }
         else if ($('display-dialog').open) {
@@ -1342,6 +1522,10 @@
   $('profile-back-to-game').addEventListener('click', closeProfiles);
   $('profile-confirm-switch').addEventListener('click', () => { if (state.pendingProfile) applyProfile(state.pendingProfile); });
   $('recent-filter').addEventListener('click', () => setFilter({recent: !state.recent, favorites: false}));
+  $('review-filter').addEventListener('click', () => {
+    const filters = Object.keys(reviewFilters);
+    setFilter({reviewFilter: filters[(filters.indexOf(state.reviewFilter) + 1) % filters.length]});
+  });
   $('platform-nav').addEventListener('click', (event) => {
     const button = event.target.closest('[data-platform]');
     if (button) setFilter({platform: button.dataset.platform});
@@ -1367,10 +1551,15 @@
     if (button) selectGame(button.dataset.select);
   });
   $('load-more').addEventListener('click', () => loadGames(true));
-  $('scan-button').addEventListener('click', scanLibrary);
+  $('scan-button').addEventListener('click', showLibraryManagement);
+  $('close-management').addEventListener('click', () => closeLibraryManagement());
+  $('management-scan-button').addEventListener('click', () => runLibraryManagement('scan'));
+  $('management-audit-button').addEventListener('click', () => runLibraryManagement('audit'));
+  $('management-retry').addEventListener('click', () => { cancelManagementRead(); refreshLibraryManagement(); });
+  $('management-dialog').addEventListener('cancel', (event) => { event.preventDefault(); closeLibraryManagement(); });
   $('empty-action').addEventListener('click', () => {
     const action = $('empty-action').dataset.action;
-    if (action === 'reset') setFilter({query: '', platform: '', mode: ''});
+    if (action === 'reset') setFilter({query: '', platform: '', mode: '', reviewFilter: ''});
     else if (action === 'library') setFilter({favorites: false, recent: false});
     else if (action === 'scan') scanLibrary();
     else { loadPlatforms(); loadGames(); refreshHealth(); }
@@ -1395,7 +1584,12 @@
     catch { notify('当前浏览器不支持此全屏方式，可使用游戏内的全屏按钮。'); }
   });
   document.addEventListener('keydown', (event) => {
-    if (event.ctrlKey || event.metaKey || event.altKey || event.isComposing || (state.playMode && !$('profile-dialog').open && !$('replace-dialog').open && !$('network-dialog').open && !$('display-dialog').open) || $('help-dialog').open) return;
+    if (event.ctrlKey || event.metaKey || event.altKey || event.isComposing || (state.playMode && !$('profile-dialog').open && !$('replace-dialog').open && !$('network-dialog').open && !$('display-dialog').open && !$('management-dialog').open) || $('help-dialog').open) return;
+    if ($('management-dialog').open) {
+      if (event.key === 'Escape') { event.preventDefault(); closeLibraryManagement(); }
+      else { const direction = {ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down', KeyA: 'left', KeyD: 'right', KeyW: 'up', KeyS: 'down'}[event.code]; if (direction) { event.preventDefault(); focusModalAction($('management-dialog'), direction); } }
+      return;
+    }
     if ($('display-dialog').open) {
       if (event.key === 'Escape') { event.preventDefault(); closeDisplaySettings(); }
       else { const direction = {ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down', KeyA: 'left', KeyD: 'right', KeyW: 'up', KeyS: 'down'}[event.code]; if (direction) { event.preventDefault(); focusModalAction($('display-dialog'), direction); } }
@@ -1447,7 +1641,7 @@
   window.addEventListener('offline', () => { $('status-button').dataset.state = 'error'; $('connection-label').textContent = '网络已断开'; state.presenceStale = true; renderFamilyPresence(); });
   window.addEventListener('popstate', () => {
     const params = new URLSearchParams(location.search);
-    setFilter({platform: params.get('platform') || '', query: params.get('q') || '', mode: params.get('mode') || '', favorites: params.get('favorite') === 'true', recent: params.get('recent') === 'true'});
+    setFilter({platform: params.get('platform') || '', query: params.get('q') || '', mode: params.get('mode') || '', reviewFilter: validReviewFilter(params.get('review_filter')), favorites: params.get('favorite') === 'true', recent: params.get('recent') === 'true'});
   });
   function updateClock() { const now = new Date(); $('clock').textContent = now.toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit', hour12: false}); $('clock').dateTime = now.toISOString(); }
   updateClock(); setInterval(updateClock, 30000);

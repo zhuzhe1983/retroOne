@@ -4,6 +4,8 @@
 !requirements.txt
 !retroone/
 !retroone/**
+!scripts/
+!scripts/library_audit.py
 !web/
 !web/**
 !container/

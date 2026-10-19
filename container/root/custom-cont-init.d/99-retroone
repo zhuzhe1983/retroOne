@@ -8,6 +8,8 @@ done
 mkdir -p /config/retroone/system /config/retroone/saves /config/retroone/work /config/retroone/logs /config/retroone/profile-control
 mkdir -p "${RETROONE_ARTWORK_ROOT:-/artwork}"
 chown abc:abc "${RETROONE_ARTWORK_ROOT:-/artwork}"
+mkdir -p "${RETROONE_LIBRARY_DATA_ROOT:-/config/retroone/library-data}"
+chown abc:abc "${RETROONE_LIBRARY_DATA_ROOT:-/config/retroone/library-data}"
 cp -an /opt/retroone/system/. /config/retroone/system/
 chown -R abc:abc /config/retroone
 mkdir -p /config/.config/PCSX2/bios

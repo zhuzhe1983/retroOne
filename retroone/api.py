@@ -97,6 +97,22 @@ class PresenceBody(BaseModel):
     game_id: str | None = None
 
 
+class LibraryJobBody(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    kind: Literal['audit']
+
+
+class GameConfigBody(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    mode: Literal['auto', 'browser', 'stream'] | None = None
+    native_core: str | None = None
+    browser_core: str | None = None
+    engine_hint: str | None = None
+    input_profile: Literal['default'] | None = None
+    disabled: bool | None = None
+    notes: str | None = None
+
+
 class LeavePresenceBody(BaseModel):
     model_config = ConfigDict(extra='forbid')
     profile_id: str
@@ -134,6 +150,15 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
         return base_path + path
 
     catalog = Catalog(rom_root, config_root)
+    from .library_management import LibraryManager
+    library_manager = LibraryManager(catalog)
+    from .game_config import GameConfigError
+
+    def resolved_game(game, requested_mode=None):
+        try:
+            return catalog.game_configs.resolve(game, requested_mode, game.get('review'))
+        except GameConfigError as error:
+            raise HTTPException(error.status_code, str(error)) from error
     artwork = ArtworkCache(config_root, enabled=os.getenv('RETROONE_FETCH_ARTWORK', '1') != '0', rom_root=rom_root)
     if runner is None:
         try:
@@ -522,9 +547,9 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
         return {'platforms': catalog.platforms()}
 
     @app.get('/api/games')
-    def games(q: str = Query('', max_length=200), platform: str = Query('', max_length=60), mode: str = Query('', pattern='^(browser|stream|unavailable)?$'), favorite: bool = False, recent: bool = False, offset: int = Query(0, ge=0), limit: int = Query(60, ge=1, le=200)):
+    def games(q: str = Query('', max_length=200), platform: str = Query('', max_length=60), mode: str = Query('', pattern='^(browser|stream|unavailable)?$'), favorite: bool = False, recent: bool = False, review_filter: str = Query('', pattern='^(all|needs_attention|pending|observed)?$'), offset: int = Query(0, ge=0), limit: int = Query(60, ge=1, le=200)):
         refresh_modes()
-        result = catalog.list(q=q.strip(), platform=platform, mode=mode, favorite=favorite, recent=recent, offset=offset, limit=limit)
+        result = catalog.list(q=q.strip(), platform=platform, mode=mode, favorite=favorite, recent=recent, review_filter=review_filter, offset=offset, limit=limit)
         result['games'] = [public_view(game) for game in result['games']]
         return result
 
@@ -538,13 +563,25 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
         catalog.set_favorite(game_id, body.favorite)
         return {'id': game_id, 'favorite': body.favorite}
 
+    @app.get('/api/games/{game_id}/configuration')
+    def game_configuration(game_id: str):
+        return game_or_404(game_id).get('launch_config')
+
+    @app.patch('/api/games/{game_id}/configuration')
+    def update_game_configuration(game_id: str, body: GameConfigBody):
+        game = game_or_404(game_id)
+        try:
+            return catalog.game_configs.update_overrides(game, body.model_dump(exclude_unset=True), game.get('review'))
+        except GameConfigError as error:
+            raise HTTPException(error.status_code, str(error)) from error
+
     @app.post('/api/games/{game_id}/launch')
     def launch(game_id: str, body: LaunchBody | None = None):
-        game = game_or_404(game_id)
+        game = resolved_game(game_or_404(game_id), body.mode if body else None)
         room_id = str(body.network_room_id) if body and body.network_room_id else None
         if room_id and body.replace_session_id:
             raise HTTPException(422, '联机启动不会自动替换游戏，请先明确结束当前会话')
-        requested = body.mode if body and body.mode else game['mode']
+        requested = game['mode']
         if room_id and requested != 'stream':
             raise HTTPException(422, '此联机游戏需要独立云端实例')
         if room_id:
@@ -566,6 +603,8 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
         if not engine.get('available'):
             raise HTTPException(409, engine.get('reason') or '服务端尚未配置该平台模拟器')
         try:
+            if hasattr(runner, 'preflight'):
+                runner.preflight(game)
             for filename in game.get('launch_files') or [game['rom_path']]:
                 if not contained_path(rom_root / 'library', Path(filename)).is_file():
                     raise ValueError('游戏文件已不存在，请重新扫描游戏库')
@@ -612,6 +651,17 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
     def scan():
         started = catalog.begin_scan()
         return {'started': started, 'scan': dict(catalog.scan_status)}
+
+    @app.get('/api/library-management')
+    def library_management():
+        return library_manager.view()
+
+    @app.post('/api/library-management/jobs', status_code=202)
+    def library_job(body: LibraryJobBody):
+        try:
+            return library_manager.start()
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from error
 
     @app.get('/api/migration')
     def migration():
@@ -693,7 +743,7 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
 
     @app.get('/play/{game_id}', response_class=HTMLResponse)
     def play(game_id: str, restore: bool = False):
-        game = game_or_404(game_id)
+        game = resolved_game(game_or_404(game_id), 'browser')
         path = browser_rom(game)
         if not (browser_data / 'loader.js').is_file():
             raise HTTPException(503, '浏览器模拟器资源尚未安装')

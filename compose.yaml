@@ -28,6 +28,7 @@ x-environment: &environment
   SELKIES_MANUAL_RESOLUTION: "false|locked"
   SELKIES_ENABLE_RESIZE: "false|locked"
   RETROONE_ARTWORK_ROOT: /artwork
+  RETROONE_LIBRARY_DATA_ROOT: /library-data
 
 services:
   retroone:
@@ -48,6 +49,7 @@ services:
       - "${RETROONE_ROM_PATH:-/volume2/rom/one}:/roms:ro"
       - "${RETROONE_ARTWORK_PATH:-/volume1/docker/retroOne/data/retroone/artwork}:/artwork:rw"
       - "${RETROONE_CONFIG_PATH:-./data}:/config"
+      - "${RETROONE_LIBRARY_DATA_PATH:-./library-data}:/library-data:rw"
 
   retroone-player2:
     <<: *runtime
@@ -62,6 +64,7 @@ services:
       - "${RETROONE_ROM_PATH:-/volume2/rom/one}:/roms:ro"
       - "${RETROONE_ARTWORK_PATH:-/volume1/docker/retroOne/data/retroone/artwork}:/artwork:rw"
       - "${RETROONE_PLAYER2_CONFIG_PATH:-./profiles/player2}:/config"
+      - "${RETROONE_LIBRARY_DATA_PATH:-./library-data}:/library-data:rw"
 
   # A queue-only helper owns the Docker socket. Neither web worker can access it.
   # Additional member containers are created once and retained across restarts.
@@ -93,6 +96,7 @@ services:
       RETROONE_HOST_PROFILES_ROOT: "${RETROONE_HOST_PROFILES_ROOT:-/volume1/docker/retroOne/profiles}"
       RETROONE_HOST_ARTWORK_ROOT: "${RETROONE_ARTWORK_PATH:-/volume1/docker/retroOne/data/retroone/artwork}"
       RETROONE_HOST_ROM_ROOT: "${RETROONE_ROM_PATH:-/volume2/rom/one}"
+      RETROONE_HOST_LIBRARY_DATA_ROOT: "${RETROONE_HOST_LIBRARY_DATA_ROOT:-/volume1/docker/retroOne/library-data}"
       RETROONE_DOCKER_NETWORK: "${RETROONE_DOCKER_NETWORK:-retroone_default}"
       RETROONE_GATEWAY_URL: http://retroone:3000
     volumes:

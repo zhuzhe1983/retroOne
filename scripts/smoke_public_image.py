@@ -15,7 +15,7 @@ from uuid import uuid4
 def check(image):
     name = 'retroone-ci-' + uuid4().hex[:12]
     try:
-        subprocess.run(['docker', 'run', '-d', '--name', name, '--shm-size', '512m', '-p', '127.0.0.1::3000', '-e', 'PUID=1000', '-e', 'PGID=1000', '-e', 'RETROONE_FETCH_ARTWORK=0', '-e', 'SELKIES_USE_CPU=true', image], check=True)
+        subprocess.run(['docker', 'run', '-d', '--name', name, '--shm-size', '512m', '-p', '127.0.0.1::3000', '-e', 'PUID=1000', '-e', 'PGID=1000', '-e', 'RETROONE_FETCH_ARTWORK=0', '-e', 'RETROONE_LIBRARY_DATA_ROOT=/library-data', '--mount', 'type=volume,destination=/library-data', '-e', 'SELKIES_USE_CPU=true', image], check=True)
         port = subprocess.check_output(['docker', 'port', name, '3000/tcp'], text=True).strip().split(':')[-1]
         base = 'http://127.0.0.1:' + port
         health = None
@@ -35,6 +35,12 @@ def check(image):
         with urlopen(base + '/', timeout=10) as response:
             if b'RetroOne' not in response.read(): raise RuntimeError('Missing public web entry')
         if games['total'] != 0: raise RuntimeError('Public image unexpectedly contains indexed games')
+        with urlopen(base + '/p/player1/api/library-management', timeout=10) as response:
+            management = json.load(response)
+        if not management['capabilities']['audit'] or management['capabilities']['observe'] or management['summary']['catalog_entries'] != 0:
+            raise RuntimeError('Library management readiness is inconsistent')
+        subprocess.run(['docker', 'exec', '-u', 'abc', name, '/lsiopy/bin/python', '-c',
+                        "from pathlib import Path; p=Path('/library-data/.write-probe'); p.write_text('synthetic'); p.unlink(); print('shared library data writable by app user')"], check=True)
         probe = "from pathlib import Path; import shutil; assert all(not any(p.is_file() for p in Path(root).rglob('*')) for root in ('/opt/retroone/libretro','/opt/retroone/vendor','/opt/retroone/system','/roms','/artwork')); assert not shutil.which('pcsx2'); assert not shutil.which('sdlpal'); assert not shutil.which('retroone-eden'); assert not shutil.which('eden'); assert not Path('/opt/eden').exists(); print('no private runtime, ROM, firmware or artwork payloads')"
         subprocess.run(['docker', 'exec', name, '/lsiopy/bin/python', '-c', probe], check=True)
         report = {'health': health, 'empty_library': True, 'profiles_endpoint': bool(profiles), 'private_vendor_payloads': False}

@@ -9,6 +9,7 @@ dist/
 vendor/
 output/
 data/
+library-data/
 profiles/
 backups/
 logs/

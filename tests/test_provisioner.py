@@ -52,6 +52,7 @@ class ProvisionerTests(unittest.TestCase):
             'RETROONE_HOST_PROFILES_ROOT': '/fixed/profiles',
             'RETROONE_HOST_ROM_ROOT': '/fixed/roms',
             'RETROONE_HOST_ARTWORK_ROOT': '/fixed/artwork',
+            'RETROONE_HOST_LIBRARY_DATA_ROOT': '/fixed/library-data',
             'RETROONE_DOCKER_NETWORK': 'family-network',
         })
         self.env.start()
@@ -90,7 +91,7 @@ class ProvisionerTests(unittest.TestCase):
         self.assertEqual(sum(row[1].endswith('/start') for row in self.docker.calls), 2)
         self.assertEqual(saved.read_bytes(), b'user-save')
         spec = next(row[2] for row in self.docker.calls if '/create?' in row[1])
-        self.assertEqual(spec['HostConfig']['Binds'], ['/fixed/roms:/roms:ro', '/fixed/profiles/player3:/config:rw', '/fixed/artwork:/artwork:rw'])
+        self.assertEqual(spec['HostConfig']['Binds'], ['/fixed/roms:/roms:ro', '/fixed/profiles/player3:/config:rw', '/fixed/artwork:/artwork:rw', '/fixed/library-data:/library-data:rw'])
         self.assertNotIn('PortBindings', spec['HostConfig'])
         self.assertFalse(any('docker.sock' in mount for mount in spec['HostConfig']['Binds']))
 

@@ -71,6 +71,7 @@ COPY container/wine-game /usr/local/bin/retroone-wine
 COPY vendor/system/ /opt/retroone/system/
 COPY vendor/emulatorjs/ /opt/retroone/vendor/emulatorjs/
 COPY retroone/ /opt/retroone/retroone/
+COPY scripts/library_audit.py /opt/retroone/scripts/library_audit.py
 COPY web/ /opt/retroone/web/
 COPY container/runtime-lock.json /opt/retroone/runtime-lock.json
 COPY container/nginx.conf /opt/retroone/nginx.template.conf

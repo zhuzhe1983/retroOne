@@ -11,6 +11,7 @@ import re
 import threading
 import os
 import tempfile
+from bisect import bisect_left
 from pathlib import Path, PurePosixPath
 
 LABELS = {
@@ -131,15 +132,28 @@ class ReviewIndex:
 
     def _sidecars(self, path: Path) -> bool:
         parent = path.parent
+        stem = path.stem.casefold()
+        if path.relative_to(self.root).as_posix() not in self.known_sources:
+            # Legacy/noncanonical indexes may omit the current source. Preserve
+            # the original explicit exclusion, including case-colliding files.
+            return any(p != path and p.relative_to(self.root).as_posix() not in self.known_sources
+                       and (p.name.casefold() == stem or p.name.casefold().startswith(stem + '.'))
+                       for p in parent.iterdir())
         info = parent.stat()
         stamp = (info.st_mtime_ns, info.st_ctime_ns, info.st_ino)
         cached = self.directory_cache.get(parent)
         if not cached or cached[0] != stamp:
-            cached = (stamp, tuple(parent.iterdir()))
+            # A collection can contain thousands of known ROMs. Filter those
+            # once per directory change, then search only unowned sidecar names.
+            # Rewalking all siblings for every hidden alias makes each library
+            # request quadratic in large cartridge collections.
+            unknown = frozenset(p.name.casefold() for p in parent.iterdir()
+                                if p.relative_to(self.root).as_posix() not in self.known_sources)
+            cached = (stamp, unknown, sorted(unknown))
             self.directory_cache[parent] = cached
-        stem = path.stem.casefold()
-        return any(p != path and p.relative_to(self.root).as_posix() not in self.known_sources
-                   and (p.name.casefold().startswith(stem + '.') or p.name.casefold() == stem) for p in cached[1])
+        prefix = stem + '.'
+        index = bisect_left(cached[2], prefix)
+        return stem in cached[1] or (index < len(cached[2]) and cached[2][index].startswith(prefix))
 
     def current(self, entry: dict) -> bool:
         sources = entry.get('sources', [])

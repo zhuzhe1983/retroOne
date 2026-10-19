@@ -46,8 +46,8 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Wine 10 from Debian stable, including native 32-bit DirectDraw/DirectSound.
-RUN dpkg --add-architecture i386 && apt-get update \
-    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+RUN dpkg --add-architecture i386 && apt-get -o Acquire::Retries=3 update \
+    && DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
       wine wine32:i386 wine64 fonts-wine fonts-wqy-microhei locales \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 

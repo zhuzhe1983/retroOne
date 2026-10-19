@@ -74,7 +74,7 @@ test('inactive sessions return the exact native result and use the current profi
 
 test('keyboard-only Eden exposes one standard pad and consumes mapped keys before Selkies keyboard capture',async()=>{
   const h=harness();await h.eden();const virtual=h.read()[0];assert.equal(virtual.mapping,'standard');assert.equal(virtual.index,0);assert.equal(virtual.connected,true);assert.equal(virtual.buttons.length,17);assert.equal(h.read().filter(Boolean).length,1);
-  const map={KeyJ:0,KeyK:1,KeyU:2,KeyI:3,KeyQ:4,KeyE:5,Digit1:6,Digit3:7,ShiftLeft:8,Enter:9,KeyZ:10,KeyX:11};
+  const map={KeyJ:0,KeyK:1,KeyU:2,KeyI:3,KeyQ:4,KeyE:5,Digit1:6,Digit3:7,ShiftLeft:8,Enter:9,KeyZ:10,KeyX:11,KeyT:12,KeyF:14,KeyG:13,KeyH:15};
   for(const [code,index]of Object.entries(map)){assert.equal(h.key('keydown',code).defaultPrevented,true);assert.equal(h.read()[0].buttons[index].value,1);h.key('keyup',code);assert.equal(h.read()[0].buttons[index].value,0);}
   for(const [code,index,value]of [['KeyW',1,-1],['KeyS',1,1],['KeyA',0,-1],['KeyD',0,1],['ArrowUp',3,-1],['ArrowDown',3,1],['ArrowLeft',2,-1],['ArrowRight',2,1]]){h.key('keydown',code);assert.equal(h.read()[0].axes[index],value);h.key('keyup',code);}
   assert.equal(h.forwarded.length,0);assert.equal(h.padEvents.at(-1).type,'gamepadconnected');
@@ -86,6 +86,7 @@ test('physical analog precision, triggers and haptics survive keyboard merge and
   h.key('keydown','KeyW');assert.equal(h.read()[0].axes[1],-1);assert.equal(h.read()[0].axes[0],physical.axes[0]);assert.equal(h.read()[0].axes[2],physical.axes[2]);
   h.key('keydown','KeyS');assert.equal(h.read()[0].axes[1],physical.axes[1]);h.key('keyup','KeyS');h.key('keyup','KeyW');assert.deepEqual(plain(h.read()[0].axes),physical.axes);
   h.key('keydown','Digit1');assert.equal(h.read()[0].buttons[6].value,1);h.key('keyup','Digit1');assert.equal(h.read()[0].buttons[6].value,.37);
+  h.key('keydown','KeyT');h.key('keydown','KeyH');assert.equal(h.read()[0].buttons[12].value,1);assert.equal(h.read()[0].buttons[15].value,1);assert.deepEqual(plain(h.read()[0].axes),physical.axes);h.key('keyup','KeyT');h.key('keyup','KeyH');assert.equal(h.read()[0].buttons[12].value,0);assert.equal(h.read()[0].buttons[15].value,0);
 });
 
 test('native sparse indices and hotplug cannot disconnect or duplicate the stable merged pad',async()=>{

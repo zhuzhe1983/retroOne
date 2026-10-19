@@ -3,4 +3,6 @@
 # AppRun supplies the official bundle's libraries/hooks; no FUSE or unpack at play time.
 export QT_QPA_PLATFORM=xcb
 export DISABLE_AUTO_UPDATES=1
+# Official sharun otherwise removes LD_PRELOAD, disconnecting Selkies gamepads.
+export SHARUN_ALLOW_LD_PRELOAD=1
 exec /opt/eden/AppRun "$@"

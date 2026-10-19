@@ -19,7 +19,7 @@
   // physical source's browser index. Native connect/disconnect events must not
   // disconnect that merged slot when a physical pad is unplugged.
   const switchKeys = new Set();
-  const switchButtons = {KeyJ:0,KeyK:1,KeyU:2,KeyI:3,KeyQ:4,KeyE:5,Digit1:6,Digit3:7,ShiftLeft:8,ShiftRight:8,Enter:9,KeyZ:10,KeyX:11};
+  const switchButtons = {KeyJ:0,KeyK:1,KeyU:2,KeyI:3,KeyQ:4,KeyE:5,Digit1:6,Digit3:7,ShiftLeft:8,ShiftRight:8,Enter:9,KeyZ:10,KeyX:11,KeyT:12,KeyF:14,KeyG:13,KeyH:15};
   const switchAxes = [['KeyA','KeyD'],['KeyW','KeyS'],['ArrowLeft','ArrowRight'],['ArrowUp','ArrowDown']];
   const switchCodes = new Set([...Object.keys(switchButtons), ...switchAxes.flat()]);
   const nativeGetGamepads = navigator.getGamepads?.bind(navigator);

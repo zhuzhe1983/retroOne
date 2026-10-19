@@ -46,7 +46,7 @@ jobs:
           RETROONE_FETCH_ARTWORK: '0'
         run: python -m pytest -q
       - name: Browser input bridge regression tests (generated fixtures)
-        run: node --test tests/test_stream_input.cjs tests/test_review_ui.cjs tests/test_library_management_ui.cjs
+        run: node --test tests/test_stream_input.cjs tests/test_review_ui.cjs tests/test_library_management_ui.cjs tests/test_i18n.cjs tests/test_interface_language_ui.cjs
 
   build:
     needs: checks

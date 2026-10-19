@@ -3,11 +3,16 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
+const context = vm.createContext({});
+context.window = context;
+vm.runInContext(fs.readFileSync(path.join(__dirname, '../web/i18n.js'), 'utf8'), context);
+vm.runInContext(fs.readFileSync(path.join(__dirname, '../web/i18n-en.js'), 'utf8'), context);
+vm.runInContext(`const I18n = window.RetroI18n; const t = (source, params = {}) => I18n.t(source, params); function localizedLabels(labels) { return new Proxy(labels, {get(target, key) { const value = Reflect.get(target,key); return typeof value === 'string' ? t(value) : value; }}); } function diagnostic(message) { return I18n.locale() === 'en' ? t('服务原始诊断：{message}', {message}) : message; }`, context);
 const source = fs.readFileSync(path.join(__dirname, '../web/app.js'), 'utf8');
 const names = ['validReviewFilter', 'reviewStatus', 'duplicateCount', 'reviewCardNote', 'variantTags', 'reviewDetails', 'launchConfigDetails'];
 const constants = ['escapeHTML', 'number', 'reviewFilters', 'reviewStatuses', 'modeLabels'].map(name => source.match(new RegExp(`^  const ${name} = .+;$`, 'm'))[0]);
 const functions = names.map(name => (source.match(new RegExp(`^  function ${name}\\(.+}$`, 'm')) || source.match(new RegExp(`^  function ${name}\\([\\s\\S]*?^  }`, 'm')))[0]);
-const ui = vm.runInNewContext([...constants, ...functions, `({${names.join(',')}})`].join('\n'));
+const ui = vm.runInContext([...constants, ...functions, `({${names.join(',')}})`].join('\n'), context);
 
 test('unknown and absent audit states stay unverified', () => {
   for (const game of [{}, {review: null}, {review: {}}, {review: {verification: {status: 'verified_playable'}}}]) {

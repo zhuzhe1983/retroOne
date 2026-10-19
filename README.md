@@ -14,6 +14,8 @@ Built on EmulatorJS, RetroArch, and Selkies, RetroOne uses Docker for deployment
 
 Library management keeps metadata, ROM-linked launch configurations, and personal saves separate. Resumable content audits identify exact cartridge duplicates while preserving variants and original save identities; audit results distinguish file checks from actual emulator observations.
 
+The interface supports **English**, **简体中文**, and **Browser default**. Use the language selector in the top bar or on the player selection screen. Each player’s preference is saved on the server; switching languages keeps the current game running. Game titles, descriptions, and save identities retain their original values.
+
 ![RetroOne 游戏库示例：平台导航、搜索、运行方式筛选与家人动态](docs/screenshots/library.png)
 
 > 本页是当前应用在浏览器中的实际界面截图，使用明确标注的虚构目录和成员资料，仅展示操作流程，不代表游戏运行或性能验证。图片不含第三方游戏封面或商业游戏画面。仓库及公开镜像不提供 ROM、BIOS、固件或密钥，也不会替用户下载游戏。
@@ -132,6 +134,8 @@ docker compose ps
 ## 和家人一起使用
 
 每次打开网页，先选自己的玩家档案。首次使用填写昵称并选头像；也可以点“＋”添加成员。新增成员准备好独立实例后才允许进入，失败时可重试。默认提供两个档案，成员数量上限可以配置，实际并发能力由主机资源决定。
+
+顶栏和玩家选择界面都可以切换 **简体中文 / English / 跟随浏览器**。未选玩家时，选择保存在当前浏览器；选定玩家后，使用这位玩家保存在服务器上的语言偏好。切换语言会立即更新网页，保留正在运行的游戏。浏览器模拟器内部菜单在下次打开时使用所选语言；游戏原文、玩家昵称和存档不受影响。添加翻译见 [界面语言说明](docs/i18n.md)。
 
 ![选择玩家示例：各自收藏与存档，支持键盘和手柄选择](docs/screenshots/members.png)
 

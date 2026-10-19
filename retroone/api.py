@@ -27,6 +27,8 @@ from .presence import PresenceStore
 from .network import INSTRUCTIONS, VERIFIED_GAMES, NetworkError, NetworkStore, WorkerGateway
 from .settings import DisplaySettings, DisplaySettingsError, StreamResolution, display_view
 from .game_metadata import GameMetadataError
+from .interface_settings import InterfaceLocale, InterfaceSettings, InterfaceSettingsError
+from .i18n import emulator_locale, player_messages, resolve_locale, text as translated_text
 
 ROOT = Path(__file__).resolve().parent.parent
 MAX_SAVE_SIZE = 32 * 1024 * 1024
@@ -65,6 +67,11 @@ class StopBody(BaseModel):
 class DisplayBody(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     stream_resolution: StreamResolution
+
+
+class InterfaceBody(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    locale: InterfaceLocale
 
 
 class InviteBody(BaseModel):
@@ -152,10 +159,24 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
     presence_store = PresenceStore(config_root)
     network_store = NetworkStore(config_root)
     display_settings = DisplaySettings(config_root)
+    interface_settings = InterfaceSettings(config_root)
     worker_gateway = WorkerGateway(os.getenv('RETROONE_COORDINATOR_URL', 'http://retroone:3000'))
 
     def url(path: str) -> str:
         return base_path + path
+
+    def request_locale(request: Request, *, tolerate_settings_error=False):
+        try:
+            preference = interface_settings.get()['locale']
+        except InterfaceSettingsError:
+            if not tolerate_settings_error:
+                raise
+            # A broken UI preference must not prevent saving a running game.
+            preference = 'auto'
+        return resolve_locale(preference, request.headers.get('accept-language', ''))
+
+    def request_text(request: Request, key: str):
+        return translated_text(request_locale(request, tolerate_settings_error=True), key)
 
     catalog = Catalog(rom_root, config_root)
     from .library_management import LibraryManager
@@ -342,6 +363,7 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
     app.state.network = network_store
     app.state.worker_gateway = worker_gateway
     app.state.display_settings = display_settings
+    app.state.interface_settings = interface_settings
 
     @app.exception_handler(ProfileError)
     async def profile_error(request: Request, error: ProfileError):
@@ -355,6 +377,13 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
     async def display_settings_error(request: Request, error: DisplaySettingsError):
         return JSONResponse({'detail': str(error)}, status_code=error.status_code)
 
+    @app.exception_handler(InterfaceSettingsError)
+    async def interface_settings_error(request: Request, error: InterfaceSettingsError):
+        # The store may be locked or corrupt. Never retry its synchronous read
+        # from this async handler, which would delay the response/event loop.
+        locale = resolve_locale('auto', request.headers.get('accept-language', ''))
+        return JSONResponse({'detail': translated_text(locale, error.code)}, status_code=error.status_code)
+
     @app.middleware('http')
     async def origin_and_headers(request: Request, call_next):
         if request.method not in {'GET', 'HEAD', 'OPTIONS'}:
@@ -364,8 +393,10 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
         response = await call_next(request)
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['Referrer-Policy'] = 'same-origin'
-        if request.url.path in {'/', '/index.html', '/app.js', '/styles.css'}:
+        if request.url.path in {'/', '/index.html', '/app.js', '/styles.css', '/i18n.js', '/i18n-en.js'}:
             response.headers['Cache-Control'] = 'no-cache, max-age=0, must-revalidate'
+        if request.url.path == '/api/settings/interface':
+            response.headers['Cache-Control'] = 'no-store'
         if not request.url.path.startswith('/stream/'):
             response.headers['Cross-Origin-Opener-Policy'] = 'same-origin'
             response.headers['Cross-Origin-Embedder-Policy'] = 'require-corp'
@@ -548,6 +579,15 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
     def update_display_settings(body: DisplayBody):
         display_settings.update(body.model_dump())
         return current_display_settings()
+
+    @app.get('/api/settings/interface')
+    def get_interface_settings():
+        return interface_settings.view()
+
+    @app.put('/api/settings/interface')
+    def update_interface_settings(body: InterfaceBody):
+        settings = interface_settings.update(body.model_dump())
+        return {'settings': settings, 'supported_locales': ['zh-CN', 'en']}
 
     @app.get('/api/platforms')
     def platforms():
@@ -737,10 +777,10 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
         return config_root / 'browser-saves' / f'{game_id}.state'
 
     @app.get('/api/games/{game_id}/save-state')
-    def download_save(game_id: str):
+    def download_save(game_id: str, request: Request):
         path = save_path(game_id)
         if not path.is_file():
-            raise HTTPException(404, '暂无服务器存档')
+            raise HTTPException(404, request_text(request, 'save_not_found'))
         return FileResponse(path, media_type='application/octet-stream', filename=f'{game_id}.state', headers={'Cache-Control': 'no-store'})
 
     @app.put('/api/games/{game_id}/save-state')
@@ -750,9 +790,9 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
         async for chunk in request.stream():
             data.extend(chunk)
             if len(data) > MAX_SAVE_SIZE:
-                raise HTTPException(413, '存档不能超过 32 MiB')
+                raise HTTPException(413, request_text(request, 'save_too_large'))
         if not data:
-            raise HTTPException(400, '存档为空')
+            raise HTTPException(400, request_text(request, 'save_empty'))
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(f'.{time.time_ns()}.tmp')
         try:
@@ -763,46 +803,50 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
         return {'saved': True, 'size': len(data)}
 
     @app.get('/play/{game_id}', response_class=HTMLResponse)
-    def play(game_id: str, restore: bool = False):
+    def play(game_id: str, request: Request, restore: bool = False):
+        locale = request_locale(request)
+        messages = player_messages(locale)
         game = resolved_game(game_or_404(game_id), 'browser')
         path = browser_rom(game)
         if not (browser_data / 'loader.js').is_file():
-            raise HTTPException(503, '浏览器模拟器资源尚未安装')
+            raise HTTPException(503, messages['browser_resources_missing'])
         path = browser_payload(game, path)
         bios_path = bios_for(game['platform'])
         if platform_definitions().get(game['platform'], {}).get('requires_bios') and not bios_path:
-            raise HTTPException(409, '游戏需要 BIOS；请配置对应固件')
+            raise HTTPException(409, messages['browser_bios_missing'])
         # Player1 retains the historical storage keys, including already-created
         # EmulatorJS battery saves. Other players get separate personal DBs below.
         save_title = game.get('_save_title', game['title'])
         storage_game_name = save_title if profile_id == 'player1' else f"{profile_id}_{game_id}_{save_title}"
         settings = {'EJS_player': '#game', 'EJS_core': game['browser_core'], 'EJS_gameUrl': url(f'/api/games/{game_id}/rom/{quote(path.name)}'),
                     'EJS_pathtodata': url('/emulatorjs/data/'), 'EJS_gameName': storage_game_name, 'EJS_gameID': int(game_id[:12], 16),
-                    'EJS_defaultControls': DEFAULT_CONTROLS, 'EJS_language': 'zh-CN', 'EJS_color': '#64d9f3', 'EJS_backgroundColor': '#0b1424',
-                    'EJS_startOnLoaded': False, 'EJS_startButtonName': '开始游戏', 'EJS_defaultOptions': {'save-state-location': 'download'}}
+                    'EJS_defaultControls': DEFAULT_CONTROLS, 'EJS_language': emulator_locale(locale), 'EJS_color': '#64d9f3', 'EJS_backgroundColor': '#0b1424',
+                    'EJS_startOnLoaded': False, 'EJS_startButtonName': messages['start_game'], 'EJS_defaultOptions': {'save-state-location': 'download'}}
         if bios_path:
             settings['EJS_biosUrl'] = url(f'/api/games/{game_id}/bios')
         if restore and save_path(game_id).is_file():
             settings['EJS_loadStateURL'] = url(f'/api/games/{game_id}/save-state')
         settings_json = json.dumps(settings, ensure_ascii=False).replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
+        messages_json = json.dumps(messages, ensure_ascii=False).replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
         title = html.escape(game['title'])
         home_url, play_url, save_url = url('/'), url(f'/play/{game_id}'), url(f'/api/games/{game_id}/save-state')
         storage_namespace = '' if profile_id == 'player1' else f'RetroOne-{profile_id}-'
-        return f'''<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{title} · RetroOne</title><link rel="icon" href="{url('/favicon.svg')}" type="image/svg+xml">
+        document = f'''<!doctype html><html lang="{locale}"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{title} · RetroOne</title><link rel="icon" href="{url('/favicon.svg')}" type="image/svg+xml">
 <style>html,body{{margin:0;background:#08111e;color:#deedf7;font:14px system-ui;height:100%}}body{{display:flex;flex-direction:column}}header{{display:flex;gap:20px;align-items:center;padding:12px 20px;flex-wrap:wrap}}a{{color:#7de5f8;text-decoration:none}}h1{{font-size:16px;font-weight:500;margin:0}}#game{{flex:1;min-height:400px}}footer{{padding:9px 20px;color:#9dacc2;font-size:12px}}button{{background:#162a42;color:#deedf7;border:1px solid #31506d;border-radius:5px;padding:6px 9px;cursor:pointer}}#status{{color:#c4d3e3}}</style>
-<header><a class="back-link" href="{home_url}" onclick="leave();return false">← 返回游戏库</a><h1>{title}</h1><a href="{play_url}?restore=true">载入服务器存档</a><a href="{save_url}">导出服务器存档</a><label><button onclick="document.getElementById('save-upload').click()">上传已有存档</button><input hidden type="file" id="save-upload" accept=".state"></label><span id="status"></span></header>
-<div id="game"></div><footer>WASD 移动 · J/K/U/I 动作 · Enter 开始 · Shift 选择 · 键位及 Xbox / PlayStation 手柄可在模拟器菜单调整。游戏内存档保存在当前浏览器；点击模拟器“保存状态”会下载存档并备份到服务器。原作低于 60 帧时保留原速。</footer>
+<header><a class="back-link" href="{home_url}" onclick="leave();return false">← {html.escape(messages['back_library'])}</a><h1>{title}</h1><a href="{play_url}?restore=true">{html.escape(messages['load_server_save'])}</a><a href="{save_url}">{html.escape(messages['export_server_save'])}</a><label><button onclick="document.getElementById('save-upload').click()">{html.escape(messages['upload_existing_save'])}</button><input hidden type="file" id="save-upload" accept=".state"></label><span id="status"></span></header>
+<div id="game"></div><footer>{html.escape(messages['controls_help'])}</footer>
 <script>
 // IDBFS uses a fixed /data/saves database upstream. Scope only personal data;
 // read-only ROM, BIOS and core caches remain shared. This override is iframe-local.
 const storageNamespace={json.dumps(storage_namespace)};
 if(storageNamespace&&window.indexedDB){{const idb=window.indexedDB;const nativeOpen=idb.open.bind(idb);const nativeDelete=idb.deleteDatabase.bind(idb);const personalName=name=>['/data/saves','EmulatorJS-states'].includes(String(name))?storageNamespace+name:name;idb.open=(name,...args)=>nativeOpen(personalName(name),...args);idb.deleteDatabase=(name,...args)=>nativeDelete(personalName(name),...args);}}
 Object.assign(window,{settings_json});window.EJS_threads=window.crossOriginIsolated;function leave(){{if(parent!==window)parent.postMessage({{type:'retroone:exit'}},location.origin);else location.href='{home_url}'}}window.EJS_onExit=leave;if(parent!==window){{document.querySelector('.back-link').hidden=true;document.querySelector('h1').hidden=true;}}
-const status=document.getElementById('status');
-async function backupState(blob){{const response=await fetch('{save_url}',{{method:'PUT',body:blob}});if(!response.ok)throw Error((await response.json()).detail);status.textContent='存档已备份到服务器'}}
-window.EJS_onSaveState=async(event)=>{{if(!event||!event.state){{status.textContent='模拟器未生成有效存档';return}}const blob=new Blob([event.state],{{type:'application/octet-stream'}});const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download='{game_id}.state';link.click();setTimeout(()=>URL.revokeObjectURL(url),10000);try{{await backupState(blob)}}catch(error){{status.textContent='文件已下载，服务器备份失败：'+error.message}}}};
-document.getElementById('save-upload').addEventListener('change',async(e)=>{{const file=e.target.files[0];if(!file)return;if(file.size>{MAX_SAVE_SIZE}){{status.textContent='存档超过 32 MiB';return}}try{{const response=await fetch('{save_url}',{{method:'PUT',body:file}});if(!response.ok)throw Error((await response.json()).detail);status.textContent='存档已备份到服务器'}}catch(error){{status.textContent='备份失败：'+error.message}}}});
+const status=document.getElementById('status');const messages={messages_json};
+async function backupState(blob){{const response=await fetch('{save_url}',{{method:'PUT',body:blob}});if(!response.ok)throw Error((await response.json()).detail);status.textContent=messages.save_backed_up}}
+window.EJS_onSaveState=async(event)=>{{if(!event||!event.state){{status.textContent=messages.save_invalid;return}}const blob=new Blob([event.state],{{type:'application/octet-stream'}});const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download='{game_id}.state';link.click();setTimeout(()=>URL.revokeObjectURL(url),10000);try{{await backupState(blob)}}catch(error){{status.textContent=messages.save_downloaded_backup_failed+error.message}}}};
+document.getElementById('save-upload').addEventListener('change',async(e)=>{{const file=e.target.files[0];if(!file)return;if(file.size>{MAX_SAVE_SIZE}){{status.textContent=messages.save_too_large;return}}try{{await backupState(file)}}catch(error){{status.textContent=messages.save_backup_failed+error.message}}}});
 </script><script src="{url('/emulatorjs/data/loader.js')}"></script></html>'''
+        return HTMLResponse(document, headers={'Content-Language': locale, 'Vary': 'Accept-Language', 'Cache-Control': 'no-store'})
 
     # Only bundled application/vendor files are static mounts. ROMs are never mounted.
     if browser_data.is_dir():
@@ -813,7 +857,7 @@ document.getElementById('save-upload').addEventListener('change',async(e)=>{{con
         @app.get('/index.html', response_class=HTMLResponse)
         def versioned_index():
             document = (web_root / 'index.html').read_text('utf-8')
-            for filename in ('app.js', 'styles.css'):
+            for filename in ('app.js', 'styles.css', 'i18n.js', 'i18n-en.js'):
                 path = web_root / filename
                 if path.is_file():
                     version = hashlib.sha256(path.read_bytes()).hexdigest()[:16]

@@ -3,10 +3,15 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
+const context = vm.createContext({});
+context.window = context;
+vm.runInContext(fs.readFileSync(path.join(__dirname, '../web/i18n.js'), 'utf8'), context);
+vm.runInContext(fs.readFileSync(path.join(__dirname, '../web/i18n-en.js'), 'utf8'), context);
+vm.runInContext(`const I18n = window.RetroI18n; const t = (source, params = {}) => I18n.t(source, params); function localizedLabels(labels) { return new Proxy(labels, {get(target, key) { const value = Reflect.get(target,key); return typeof value === 'string' ? t(value) : value; }}); } function diagnostic(message) { return I18n.locale() === 'en' ? t('服务原始诊断：{message}', {message}) : message; }`, context);
 const source = fs.readFileSync(path.join(__dirname, '../web/app.js'), 'utf8');
 const functions = ['formatSize', 'managementJobText', 'managementProgressText'].map(name => source.match(new RegExp(`^  function ${name}\\([\\s\\S]*?^  }`, 'm'))[0]);
 const number = source.match(/^  const number = .+;$/m)[0];
-const ui = vm.runInNewContext([number, ...functions, '({managementJobText,managementProgressText})'].join('\n'));
+const ui = vm.runInContext([number, ...functions, '({managementJobText,managementProgressText})'].join('\n'), context);
 
 test('management distinguishes paused work, failed work and completed checks', () => {
   const labels = {running:'正在核验内容', complete:'本轮内容核验完成', paused:'本批核验完成，可继续', failed:'内容核验未完成', interrupted:'核验已中断，可继续'};

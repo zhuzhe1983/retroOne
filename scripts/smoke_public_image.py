@@ -8,7 +8,7 @@ import argparse
 import json
 import subprocess
 import time
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 from uuid import uuid4
 
 
@@ -34,6 +34,21 @@ def check(image):
         with urlopen(base + '/p/player1/api/games?limit=1', timeout=10) as response: games = json.load(response)
         with urlopen(base + '/', timeout=10) as response:
             if b'RetroOne' not in response.read(): raise RuntimeError('Missing public web entry')
+        interface_url = base + '/p/player1/api/settings/interface'
+        with urlopen(interface_url, timeout=10) as response:
+            if json.load(response)['settings']['locale'] != 'zh-CN':
+                raise RuntimeError('Unexpected default interface language')
+        request = Request(interface_url, data=b'{"locale":"en"}', method='PUT', headers={'Content-Type': 'application/json'})
+        with urlopen(request, timeout=10) as response:
+            if json.load(response)['settings']['locale'] != 'en':
+                raise RuntimeError('Interface language update failed')
+        with urlopen(interface_url, timeout=10) as response:
+            if json.load(response)['settings']['locale'] != 'en':
+                raise RuntimeError('Interface language was not persisted')
+        for resource in ('i18n.js', 'i18n-en.js'):
+            with urlopen(base + '/' + resource, timeout=10) as response:
+                if b'RetroI18n' not in response.read():
+                    raise RuntimeError('Missing interface translation resource: ' + resource)
         if games['total'] != 0: raise RuntimeError('Public image unexpectedly contains indexed games')
         with urlopen(base + '/p/player1/api/library-management', timeout=10) as response:
             management = json.load(response)
@@ -43,7 +58,7 @@ def check(image):
                         "from pathlib import Path; p=Path('/library-data/.write-probe'); p.write_text('synthetic'); p.unlink(); print('shared library data writable by app user')"], check=True)
         probe = "from pathlib import Path; import shutil; assert all(not any(p.is_file() for p in Path(root).rglob('*')) for root in ('/opt/retroone/libretro','/opt/retroone/vendor','/opt/retroone/system','/roms','/artwork')); assert not shutil.which('pcsx2'); assert not shutil.which('sdlpal'); assert not shutil.which('retroone-eden'); assert not shutil.which('eden'); assert not Path('/opt/eden').exists(); print('no private runtime, ROM, firmware or artwork payloads')"
         subprocess.run(['docker', 'exec', name, '/lsiopy/bin/python', '-c', probe], check=True)
-        report = {'health': health, 'empty_library': True, 'profiles_endpoint': bool(profiles), 'private_vendor_payloads': False}
+        report = {'health': health, 'empty_library': True, 'profiles_endpoint': bool(profiles), 'interface_language_saved': 'en', 'private_vendor_payloads': False}
         print(json.dumps(report, ensure_ascii=False))
     finally:
         subprocess.run(['docker', 'logs', '--tail', '80', name], check=False)

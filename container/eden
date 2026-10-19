@@ -1,0 +1,6 @@
+#!/bin/sh
+# Preserve the runner's per-player working directory and Selkies input preload.
+# AppRun supplies the official bundle's libraries/hooks; no FUSE or unpack at play time.
+export QT_QPA_PLATFORM=xcb
+export DISABLE_AUTO_UPDATES=1
+exec /opt/eden/AppRun "$@"

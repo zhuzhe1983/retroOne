@@ -97,7 +97,7 @@ docker compose logs --tail=100 retroone
 
 固件根目录为 `one/firmware/`，只使用自己已有且可使用的文件。PS2 BIOS 从 `one/firmware/pcsx2/` 读取；3DS 的实验运行环境可读取 `one/firmware/azahar/`。其他平台的文件名检测见 [runner.py](../retroone/runner.py) 和 [api.py](../retroone/api.py)，不应仅凭同名 `firmware.bin` 判断是正确固件。
 
-缺少核心与缺少固件是两件事，补充 BIOS 不会为尚未接入的系统创建模拟器。Switch 仍未配置；NVIDIA 仅预留接口。3DS 存档恢复问题尚待解决，不应使用重要进度直接做兼容性实验。
+缺少核心与缺少固件是两件事，补充 BIOS 不会为尚未接入的系统创建模拟器。Switch 的 Eden 运行组件由本地完整镜像提供，还需要自己的密钥和匹配固件；准备目录、格式与验证边界见 [Switch 指南](switch-runtime.md)。NVIDIA 仅预留接口。3DS 存档恢复问题尚待解决，不应使用重要进度直接做兼容性实验。
 
 本地完整构建所需组件的来源、版本与校验值记录在 [UPSTREAM.md](../container/UPSTREAM.md) 和 [runtime-lock.json](../container/runtime-lock.json)。保存自己的已核验缓存和私有镜像。上游滚动下载内容改变时，校验应失败，不能为了构建通过而随意更新散列值。
 

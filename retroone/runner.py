@@ -24,6 +24,7 @@ import zipfile
 from .platforms import PLATFORMS
 from .settings import DisplaySettings
 from .display_runtime import display_backend
+from .switch_runtime import SwitchRuntime
 
 ARCADE_CORES = {"fbneo", "fbalpha2012", "mame2003_plus", "mame2003", "mame2010"}
 NETWORK_GAMES = {"f9eb2a58978f3b367e18a092"}  # Ridge Racer 2 / ULJS00080, two-console race verified
@@ -50,6 +51,19 @@ class Runner:
         self.last_exit = None
         self._wine_prefix = None
         self._display_backend = display_backend(lambda name: self._program(name))
+        self._switch = SwitchRuntime(self.config_root, self.rom_root, lambda name: self._program(name))
+
+    @staticmethod
+    def _firmware_files(root, excluded=()):
+        # Prune console-specific trees before walking; Switch firmware may contain
+        # hundreds of large NCAs and private keys, never RetroArch BIOS inputs.
+        for directory, names, files in os.walk(root, followlinks=False):
+            if Path(directory) == root:
+                names[:] = [name for name in names if name.lower() not in excluded]
+            for name in files:
+                path = Path(directory) / name
+                if path.is_file():
+                    yield path
 
     @staticmethod
     def _program(name):
@@ -75,9 +89,16 @@ class Runner:
     def capabilities(self):
         display = bool(os.getenv("DISPLAY")) and Path("/tmp/.X11-unix/X" + os.getenv("DISPLAY", ":1").split(":")[-1].split(".")[0]).exists()
         firmware = self.rom_root / "firmware"
-        firmware_files = [p for p in firmware.rglob("*") if p.is_file()] if firmware.exists() else []
+        firmware_files = list(self._firmware_files(firmware, ("switch",)))
         platforms = {}
         for key, definition in PLATFORMS.items():
+            if key == "switch":
+                capability = self._switch.readiness()
+                if self._display_backend.unsupported_reason or not display:
+                    capability["available"] = False
+                    capability["reason"] += "；" + (self._display_backend.unsupported_reason or "云游戏图形桌面尚未就绪")
+                platforms[key] = capability
+                continue
             core = self._core(key)
             if key == "dos":
                 engine = "DOSBox"
@@ -97,9 +118,7 @@ class Runner:
             reason = None
             if not ready:
                 reason = "尚未安装或验证这个系统的模拟器"
-                if key == "switch":
-                    reason = "Switch 模拟器、固件和密钥尚未配置及验证"
-                elif definition.get("kind") == "windows":
+                if definition.get("kind") == "windows":
                     reason = "Windows 游戏需要逐个配置 Wine；目前仅收录，尚未验证运行"
             elif self._display_backend.unsupported_reason:
                 reason = self._display_backend.unsupported_reason
@@ -246,9 +265,7 @@ class Runner:
         system.mkdir(parents=True, exist_ok=True)
         supplied = self.rom_root / "firmware"
         if supplied.exists():
-            for path in supplied.rglob("*"):
-                if path.relative_to(supplied).parts[0] in ("azahar", "pcsx2"):
-                    continue
+            for path in self._firmware_files(supplied, ("azahar", "pcsx2", "switch")):
                 if not path.is_file() or not path.resolve().is_relative_to(self.rom_root):
                     continue
                 relative = path.relative_to(supplied)
@@ -408,6 +425,8 @@ class Runner:
 
     def _command(self, game, content, workspace):
         platform = game["platform"]
+        if platform == "switch":
+            return self._switch.prepare(content)
         if game.get("engine_hint") == "wine":
             if platform != "windows":
                 raise RuntimeError("这款 Windows 游戏尚未配置并验证启动方式")
@@ -631,7 +650,9 @@ class Runner:
             log = log_dir / (identifier + ".log")
             environment = dict(os.environ, DISPLAY=os.getenv("DISPLAY", ":1"), SDL_AUDIODRIVER="pulse", SDL_JOYSTICK_HIDAPI="0")
             cwd = workspace
-            if game.get("engine_hint") == "sdlpal":
+            if game["platform"] == "switch":
+                cwd = self._switch.cwd
+            elif game.get("engine_hint") == "sdlpal":
                 environment["HOME"] = str(workspace)
             elif game.get("engine_hint") == "wine":
                 environment.update(WINEPREFIX=str(self._wine_prefix), WINEARCH="win32", WINEDLLOVERRIDES="mscoree,mshtml=", WINEDEBUG="-all")
@@ -659,6 +680,39 @@ class Runner:
             self.status()
             raise RuntimeError(f"模拟器启动失败（退出码 {exit_code}），请查看 {log.name}")
 
+    def _close_switch_window(self):
+        """WM_DELETE only this emulator's process group, so Qt can flush saves."""
+        binary = self._program("wmctrl")
+        if not binary or not self._process:
+            return False
+        deadline = time.monotonic() + 10
+        try:
+            while time.monotonic() < deadline:
+                if self._process.poll() is not None:
+                    return self._process.returncode == 0
+                windows = subprocess.run([binary, "-lp"], capture_output=True, text=True,
+                                         timeout=max(0.01, min(2, deadline - time.monotonic())), check=True)
+                # Newer modal windows normally follow their parent. A closing
+                # dialog can reveal another one, so re-enumerate within one budget.
+                for line in reversed(windows.stdout.splitlines()):
+                    fields = line.split(None, 4)
+                    if len(fields) < 4 or not re.fullmatch(r"0x[0-9a-fA-F]+", fields[0]):
+                        continue
+                    try:
+                        own = os.getpgid(int(fields[2])) == self._process.pid
+                    except (ValueError, ProcessLookupError):
+                        continue
+                    remaining = deadline - time.monotonic()
+                    if own and remaining > 0:
+                        subprocess.run([binary, "-ic", fields[0]], capture_output=True, timeout=min(2, remaining))
+                try:
+                    return self._process.wait(timeout=max(0.01, min(0.2, deadline - time.monotonic()))) == 0
+                except subprocess.TimeoutExpired:
+                    continue
+        except (OSError, subprocess.SubprocessError):
+            pass
+        return False
+
     def stop(self):
         with self._lock:
             current = self.status()
@@ -666,14 +720,25 @@ class Runner:
                 environment = dict(os.environ, WINEPREFIX=str(self._wine_prefix), WINEARCH="win32", WINEDEBUG="-all")
                 subprocess.run([self._program("wineserver"), "-k"], env=environment, capture_output=True, timeout=15, check=False)
                 self._wine_prefix = None
-            if self._process:
+            switch = bool(current and current.get("platform") == "switch")
+            graceful = self._close_switch_window() if switch else None
+            forced = False
+            if self._process and self._process.poll() is None:
                 try:
                     os.killpg(self._process.pid, signal.SIGTERM)
+                    forced = True
                     self._process.wait(timeout=10)
                 except ProcessLookupError:
                     pass
                 except subprocess.TimeoutExpired:
                     os.killpg(self._process.pid, signal.SIGKILL)
                     self._process.wait(timeout=5)
-                self.status()
-            return {"stopped": bool(current), "session_id": current["session_id"] if current else None}
+            self.status()
+            result = {"stopped": bool(current), "session_id": current["session_id"] if current else None}
+            if switch:
+                result["graceful"] = graceful
+                result["forced"] = forced
+                if self.last_exit:
+                    self.last_exit["graceful"] = graceful
+                    self.last_exit["forced"] = forced
+            return result

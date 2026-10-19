@@ -107,6 +107,7 @@ docker compose ps
 | PlayStation / PSP | `psx` / `psp` | `.cue`、`.chd`、`.m3u` / `.iso`、`.cso`、`.pbp` |
 | DOS / Windows | `dos` / `windows` | 游戏压缩包或完整游戏目录，还需确认启动入口 |
 | 街机 | `fbneo` / `mame` | 与核心版本匹配的 ROM 集及其依赖 |
+| Nintendo Switch | `switch` | `.nsp`、`.xci`、`.nro`；全部云端运行，需本地完整镜像与自己的固件、密钥 |
 
 ### 2. 保留关联文件与所需固件
 
@@ -115,6 +116,7 @@ docker compose ps
 - 街机 ZIP、父包、BIOS、CHD 不要全部展开或合并，ROM 集必须与对应核心版本相符。
 - DOS / Windows 游戏保留完整资源，不要只复制一个 `.exe`。识别不到入口时会显示待配置，不会任意执行目录内程序。
 - 需要固件的平台，将自己的文件放入 `one/firmware/`；例如 PS2 BIOS 使用 `one/firmware/pcsx2/`。具体名称和布局取决于模拟器，详见 [维护指南](docs/operations.md#固件与运行组件)。项目不提供这些文件或下载入口。
+- Switch 使用 `one/firmware/switch/prod.keys` 和 `firmware.zip`（或 `registered/` 内的 NCA）；详见 [Switch 接入指南](docs/switch-runtime.md#准备自己的游戏与依赖)。NSZ / XCZ 要先转换，更新与 DLC 不能当作游戏本体启动。
 
 ### 3. 更新游戏库并检查状态
 
@@ -186,7 +188,7 @@ docker compose ps
 ## 当前边界
 
 - **3DS**：实验支持，已有实际关卡运行记录，也发现原生保存后重启核心崩溃的问题，尚不能承诺进度恢复稳定。
-- **Switch**：可识别收藏，模拟器尚未接入。补上游戏文件不会自动变成可玩。
+- **Switch**：已接入 Eden 0.2.1，全部使用云端运行。空界面启动及正常退出已验证；实际游戏的输入、存档恢复、兼容性和帧率仍待具备密钥与匹配固件后验证。公开镜像不含 Eden。默认掌机模式、1 倍内部分辨率；尚未开放 Switch 原生联网。
 - **Windows 老游戏**：仅接入少量已明确入口的布局，不能把任意 Windows 游戏当作已支持。DOS 游戏也需保留资源并适配启动方式。
 - **NVIDIA**：只有后端适配接口，显卡透传、采集与 NVENC 链路尚未实现，当前不能仅改一个环境变量就迁移成功。
 - **帧率与并发**：60 FPS 是串流目标，不是全平台性能保证。成员数量上限不等于能同时运行同样数量的重型游戏。卡顿、声音异常与温度排查见 [性能说明](docs/performance.md)。
@@ -198,6 +200,7 @@ docker compose ps
 - [性能与声音排查](docs/performance.md)
 - [架构与 API](ARCHITECTURE.md)
 - [联机能力及验证边界](NETWORK_REVIEW.md)
+- [Switch 模拟器、依赖准备与验证边界](docs/switch-runtime.md)
 - [上游组件、版本与许可证记录](container/UPSTREAM.md)
 - [示例截图来源说明](docs/screenshots/README.md)
 

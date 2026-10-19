@@ -225,6 +225,15 @@
     "sha256": "2223444b74de2c922bae1efcfed60002f696b3c2aaf4fc73fc03e66a395dc26e",
     "binary_sha256": "ee4eea0979809e7d3eb262e1e0863231b441abfc4042d9936b478f907b5cb1b6"
   },
+  "Eden-0.2.1.AppImage": {
+    "url": "https://stable.eden-emu.dev/v0.2.1/Eden-Linux-v0.2.1-amd64-gcc-standard.AppImage",
+    "sha256": "2fae658397daf13c118082a3eb65d61a6519967b5e22e6667756baecf6000c5a",
+    "release": "https://git.eden-emu.dev/eden-emu/eden/releases/tag/v0.2.1",
+    "source": "https://git.eden-emu.dev/eden-emu/eden/src/tag/v0.2.1",
+    "license": "GPL-3.0-or-later",
+    "format": "uruntime-dwarfs",
+    "distribution": "private-local-only"
+  },
   "runtime_transforms": [
     {
       "binary": "melonds_libretro.so",

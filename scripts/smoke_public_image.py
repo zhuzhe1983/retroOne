@@ -27,7 +27,7 @@ def check(image):
         if health is None: raise RuntimeError('Public image API did not start within 180 seconds')
         if health.get('status') != 'ok' or health.get('browser', {}).get('available'):
             raise RuntimeError('Public image health/browser capability is inconsistent')
-        for platform in ('nes', 'snes', 'psp', 'ps2', '3ds'):
+        for platform in ('nes', 'snes', 'psp', 'ps2', '3ds', 'switch'):
             if health['runtime']['platforms'][platform]['available']:
                 raise RuntimeError('Uninstalled private runtime incorrectly available: ' + platform)
         with urlopen(base + '/api/profiles', timeout=10) as response: profiles = json.load(response)
@@ -35,7 +35,7 @@ def check(image):
         with urlopen(base + '/', timeout=10) as response:
             if b'RetroOne' not in response.read(): raise RuntimeError('Missing public web entry')
         if games['total'] != 0: raise RuntimeError('Public image unexpectedly contains indexed games')
-        probe = "from pathlib import Path; import shutil; assert all(not any(p.is_file() for p in Path(root).rglob('*')) for root in ('/opt/retroone/libretro','/opt/retroone/vendor','/opt/retroone/system','/roms','/artwork')); assert not shutil.which('pcsx2'); assert not shutil.which('sdlpal'); print('no private runtime, ROM, firmware or artwork payloads')"
+        probe = "from pathlib import Path; import shutil; assert all(not any(p.is_file() for p in Path(root).rglob('*')) for root in ('/opt/retroone/libretro','/opt/retroone/vendor','/opt/retroone/system','/roms','/artwork')); assert not shutil.which('pcsx2'); assert not shutil.which('sdlpal'); assert not shutil.which('retroone-eden'); assert not shutil.which('eden'); assert not Path('/opt/eden').exists(); print('no private runtime, ROM, firmware or artwork payloads')"
         subprocess.run(['docker', 'exec', name, '/lsiopy/bin/python', '-c', probe], check=True)
         report = {'health': health, 'empty_library': True, 'profiles_endpoint': bool(profiles), 'private_vendor_payloads': False}
         print(json.dumps(report, ensure_ascii=False))

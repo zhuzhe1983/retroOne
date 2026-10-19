@@ -11,7 +11,7 @@ docker build --platform linux/amd64 -f Dockerfile.public -t retroone:local .
 python3 scripts/smoke_public_image.py retroone:local
 ```
 
-该镜像包含 RetroOne 网页、目录 API、成员管理、Selkies 串流基础环境，以及 Debian 软件源中的 RetroArch、DOSBox、Dolphin、MAME、Wine 等软件包。它不包含本地审查缓存中的 Libretro 核心、EmulatorJS 运行文件、PCSX2 或 SDLPAL AppImage。缺少对应运行环境的平台会显示不可用，浏览器模拟也不会被标记为可用；这不是已经包含所有模拟器的完整游戏镜像。
+该镜像包含 RetroOne 网页、目录 API、成员管理、Selkies 串流基础环境，以及 Debian 软件源中的 RetroArch、DOSBox、Dolphin、MAME、Wine 等软件包。它不包含本地审查缓存中的 Libretro 核心、EmulatorJS 运行文件、PCSX2、SDLPAL 或 Eden AppImage。缺少对应运行环境的平台会显示不可用，浏览器模拟也不会被标记为可用；这不是已经包含所有模拟器的完整游戏镜像。
 
 `Dockerfile.public.dockerignore` 使用构建上下文白名单。即使开发目录里存在 `vendor/`、游戏目录和测试截图，也不会传入公开镜像构建。镜像保留 Debian 包的许可证文档及 `/opt/retroone/runtime-packages.tsv`，用于查看已安装包版本。Selkies 基础镜像按摘要固定；APT 软件仓库仍会更新，因此这里不承诺跨时间逐字节重建相同镜像。
 
@@ -25,7 +25,7 @@ RETROONE_IMAGE=ghcr.io/zhuzhe1983/retroone:v0.1.0
 
 ## 完整运行环境仅在本地准备
 
-现有 `Dockerfile` 保留完整本地构建方式。需要 Python 3.11、curl、7-Zip（命令为 `7z` 或 `7zz`）及 Docker；先准备运行文件，再构建：
+现有 `Dockerfile` 保留完整本地构建方式，Switch 使用的固定 Eden 来源及构建步骤见 [Switch 运行环境](switch-runtime.md)。需要 Python 3.11、curl、7-Zip（命令为 `7z` 或 `7zz`）及 Docker；先准备运行文件，再构建：
 
 ```sh
 python3 scripts/fetch_runtime.py

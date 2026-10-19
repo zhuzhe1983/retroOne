@@ -405,6 +405,8 @@ class Catalog:
     def _build_game(self, platform: str, source: str, collection: Path, paths: list[Path], metadata: dict, media_root: Path, blocked_reason: str | None = None) -> dict:
         definitions = platform_definitions()
         definition = definitions.get(platform, {})
+        if platform == 'switch' and any(path.suffix.lower() in {'.nsz', '.xcz'} for path in paths):
+            blocked_reason = blocked_reason or 'Switch 压缩格式 NSZ / XCZ 需先转换为 NSP / XCI，再更新游戏库'
         files: list[Path] = []
         seen: set[Path] = set()
         for path in paths:

@@ -23,6 +23,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 LOCK = ROOT / 'container/runtime-lock.json'
 ASSETS = {
+    'Eden-0.2.1.AppImage': 'eden.AppImage',
     'pcsx2-2.8.2.AppImage': 'pcsx2.AppImage',
     'SDLPAL-3.0.2025.0616.AppImage': 'sdlpal.AppImage',
     'PPSSPP.zip': 'runtime-downloads/PPSSPP.zip',

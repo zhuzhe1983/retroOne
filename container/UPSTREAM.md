@@ -14,6 +14,7 @@ No game ROM, BIOS, proprietary firmware, or key is included in the Docker image.
 | PCSX2 | https://github.com/PCSX2/pcsx2 | 2.8.2 official AppImage + SHA256 lock | GPL-3.0 |
 | SDLPAL | https://github.com/sdlpal/sdlpal | 3.0.2025.0616 official AppImage + SHA256 lock | GPL-3.0 |
 | Azahar libretro | https://github.com/azahar-emu/azahar | 2126.2 official release + SHA256 lock | GPL-2.0+ |
+| Eden (private build only) | https://git.eden-emu.dev/eden-emu/eden | v0.2.1 official amd64 GCC standard AppImage + SHA256 lock | GPL-3.0-or-later |
 | Wine | https://www.winehq.org/ | Debian trixie stable 10.0 with 32-bit OpenGL/audio | LGPL-2.1+ |
 | DOSBox | https://www.dosbox.com/ | Debian trixie packaged version | GPL-2.0 |
 | Dolphin | https://dolphin-emu.org/ | Debian trixie packaged version | GPL-2.0+ |
@@ -88,8 +89,18 @@ result. Successful loading still does not prove a particular game's compatibilit
 Windows entries remain unavailable unless an explicitly supported engine is detected.
 PAL98 resources are verified before SDLPAL is selected. Wine only exposes individually
 verified executable/resource combinations, using isolated writable prefixes and game
-copies; the original Windows launch scripts are not executed. Switch/PS3/Xbox360 and other
+copies; the original Windows launch scripts are not executed. PS3/Xbox360 and other
 unconfigured engines are reported as missing; cataloging an entry never proves playability.
+
+Switch always uses the cloud path, with Eden in the private full build. Its per-member
+portable `switch/user/` contains private keys, configuration, NAND saves and shader caches.
+Read-only assets come from `one/firmware/switch/`; readiness checks structure, not
+decryption or compatibility. The initial profile uses Vulkan, handheld mode and 1x
+internal resolution, while the existing stream-resolution preference remains independent.
+The input bridge merges keyboard and one standard browser gamepad through Selkies;
+normal shutdown closes only the emulator's own windows before a bounded signal fallback.
+Actual game input, save restoration, GPU performance and Switch networking remain
+unverified. See [the Switch integration guide](../docs/switch-runtime.md).
 
 Back up the entire persistent `/config` bind mount, including `retroone/work/`: DOS
 and Wine games may store their native saves beside their writable game files. The

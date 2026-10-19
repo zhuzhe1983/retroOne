@@ -1,5 +1,23 @@
 # LinuxServer Debian trixie / Selkies 2.0, amd64 manifest verified 2026-10-19.
 ARG SELKIES_BASE=ghcr.io/linuxserver/baseimage-selkies:debiantrixie@sha256:a684b614e142b4d1e942b98a2c5232fdaff94c33f89f4a751d97303866afb645
+
+# Eden's official AppImage uses URuntime + DwarFS, not SquashFS. Run its
+# SHA-pinned extractor through Debian QEMU in this build-only stage so that
+# Apple Silicon buildx also works (Rosetta cannot run its static PIE loader).
+FROM ${SELKIES_BASE} AS eden-extract
+RUN apt-get update && apt-get install -y --no-install-recommends qemu-user \
+    && rm -rf /var/lib/apt/lists/*
+COPY vendor/eden.AppImage /tmp/eden.AppImage
+COPY container/runtime-lock.json /tmp/runtime-lock.json
+RUN python3 -c 'import hashlib,json; from pathlib import Path; p=Path("/tmp/eden.AppImage"); expected=json.loads(Path("/tmp/runtime-lock.json").read_text())["Eden-0.2.1.AppImage"]["sha256"]; assert hashlib.sha256(p.read_bytes()).hexdigest()==expected, "Eden checksum differs from reviewed lock"' \
+    && chmod 0755 /tmp/eden.AppImage \
+    && mkdir -p /tmp/eden-extract \
+    && cd /tmp/eden-extract \
+    && qemu-x86_64 /tmp/eden.AppImage --appimage-extract >/dev/null \
+    && test -x AppDir/AppRun && test -x AppDir/bin/eden \
+    && mv AppDir /opt/eden \
+    && rm /tmp/eden.AppImage
+
 FROM ${SELKIES_BASE}
 
 ENV ROM_ROOT=/roms CONFIG_ROOT=/config/retroone RETROONE_GPU_BACKEND=intel \
@@ -20,7 +38,7 @@ ENV ROM_ROOT=/roms CONFIG_ROOT=/config/retroone RETROONE_GPU_BACKEND=intel \
     LC_ALL=zh_CN.UTF-8 PYTHONUNBUFFERED=1
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      retroarch retroarch-assets dosbox dolphin-emu mame 7zip unzip \
+      retroarch retroarch-assets dosbox dolphin-emu mame 7zip unzip wmctrl \
       mesa-utils vainfo ffmpeg libqt6svg6 libqt6waylandclient6 \
       libqt6waylandcompositor6 libqt6opengl6 libqt6widgets6 libqt6network6 \
       libqt6concurrent6 libqt6core6t64 libqt6dbus6 libqt6gui6 \
@@ -47,6 +65,8 @@ COPY container/pcsx2 /usr/local/bin/pcsx2
 COPY vendor/sdlpal.AppImage /tmp/sdlpal.AppImage
 RUN 7z x -y -o/opt/sdlpal /tmp/sdlpal.AppImage >/dev/null && rm /tmp/sdlpal.AppImage
 COPY container/sdlpal /usr/local/bin/sdlpal
+COPY --from=eden-extract /opt/eden/ /opt/eden/
+COPY container/eden /usr/local/bin/retroone-eden
 COPY container/wine-game /usr/local/bin/retroone-wine
 COPY vendor/system/ /opt/retroone/system/
 COPY vendor/emulatorjs/ /opt/retroone/vendor/emulatorjs/
@@ -61,7 +81,7 @@ COPY container/stream-input.js /opt/retroone/stream-input.js
 COPY container/azahar-core-options.cfg /opt/retroone/azahar-core-options.cfg
 COPY container/prepare-cores.py /opt/retroone/prepare-cores.py
 COPY container/root/ /
-RUN chmod +x /usr/local/bin/pcsx2 /usr/local/bin/sdlpal /usr/local/bin/retroone-wine /custom-cont-init.d/99-retroone /custom-services.d/retroone-api
+RUN chmod +x /usr/local/bin/pcsx2 /usr/local/bin/sdlpal /usr/local/bin/retroone-eden /usr/local/bin/retroone-wine /custom-cont-init.d/99-retroone /custom-services.d/retroone-api
 
 # Some upstream assembly lacks .note.GNU-stack. glibc 2.41 refuses that
 # executable-stack metadata on dlopen; apply the one reviewed SHA-pinned fix.

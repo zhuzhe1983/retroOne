@@ -23,7 +23,7 @@ PLATFORMS = {
     "n64": platform("Nintendo 64", "mupen64plus_next", "mupen64plus_next", ".z64 .n64 .v64 .zip .7z"),
     "gamecube": platform("Nintendo GameCube", None, "dolphin", ".iso .gcm .rvz .ciso .gcz .zip .7z"),
     "wii": platform("Nintendo Wii", None, "dolphin", ".iso .wbfs .rvz .gcz .wad .zip .7z"),
-    "switch": platform("Nintendo Switch", None, None, ".xci .nsp .nsz .xcz .zip .7z", requires_bios=True),
+    "switch": platform("Nintendo Switch", None, None, ".xci .nsp .nro .nsz .xcz .zip .7z", requires_bios=True),
     "virtualboy": platform("Virtual Boy", "beetle_vb", "mednafen_vb", ".vb .vboy .zip .7z"),
     "pokemini": platform("Pokémon Mini", None, "pokemini", ".min .zip .7z"),
     "psx": platform("PlayStation", "pcsx_rearmed", "pcsx_rearmed", ".chd .cue .m3u .pbp .iso .img .mdf .zip .7z", requires_bios=True),

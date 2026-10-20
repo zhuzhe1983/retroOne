@@ -28,10 +28,16 @@ test('invalid state values never reach the standard wire payload',()=>{
   assert.deepEqual(value.buttons,[0,1,...Array(15).fill(0)]);assert.deepEqual(value.axes,[0,0,1,-1]);
 });
 test('device preferences are bounded, opt-in on desktop, and contain by default',()=>{
-  assert.deepEqual(preferences(null),{fit:'contain',zoom:1,size:1,opacity:.78,touch:false,preset:'auto'});
+  assert.deepEqual(preferences(null),{placement:'rails',fit:'contain',zoom:1,size:1,opacity:.78,touch:false,preset:'auto'});
   assert.equal(preferences(null,true).touch,true);
-  assert.deepEqual(preferences({fit:'cover',size:20,opacity:-5,preset:'evil',touch:'true'}),{fit:'cover',zoom:1,size:1.3,opacity:.35,touch:false,preset:'auto'});
+  assert.deepEqual(preferences({fit:'cover',size:20,opacity:-5,preset:'evil',touch:'true'}),{placement:'rails',fit:'cover',zoom:1,size:1.3,opacity:.35,touch:false,preset:'auto'});
   assert.equal(preferences({size:NaN}).size,1);
+});
+test('floating placement is explicit and persists independently from picture and touch preferences',()=>{
+  for(const placement of [undefined,null,'invalid',false,{},'rails'])assert.equal(preferences({placement}).placement,'rails');
+  const stored={placement:'overlay',fit:'cover',zoom:2,size:1.2,opacity:.45,touch:false,preset:'psp'};
+  assert.deepEqual(preferences(JSON.parse(JSON.stringify(stored))),stored);
+  assert.deepEqual(preferences({...stored,fit:'contain',zoom:1}),{...stored,fit:'contain',zoom:1});
 });
 test('display preferences migrate old records and keep fit independent from bounded numeric zoom',()=>{
   assert.equal(preferences({fit:'stretch',touch:true}).zoom,1);

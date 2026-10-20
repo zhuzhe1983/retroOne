@@ -16,6 +16,8 @@ Library management keeps metadata, ROM-linked launch configurations, and persona
 
 The interface supports **English**, **简体中文**, and **Browser default**. Use the language selector in the top bar or on the player selection screen. Each player’s preference is saved on the server; switching languages keeps the current game running. Game titles, descriptions, and save identities retain their original values.
 
+On phones, touch controls adapt to the game platform, with landscape side controls and a portrait layout below the picture. The play menu offers fullscreen, aspect-preserving or horizontal-stretch presentation, and button size/opacity settings. Install the PWA from a supported HTTPS browser for a standalone window. Games still require a connection; the offline page does not cache ROMs or saves. See [mobile play](docs/mobile-play.md) for setup and limitations.
+
 下面三张截图来自实际家庭游戏库，展示已有的最近游玩、单个平台和个人收藏。游戏标题、封面、排序与数量取自真实目录；成员昵称仅在截图页面中作匿名化处理，没有修改服务器资料。
 
 **最近游玩：接着上次的冒险。**
@@ -39,6 +41,7 @@ The interface supports **English**, **简体中文**, and **Browser default**. U
 - **全家各有进度**：自选昵称和头像，独立收藏、最近记录、设置与存档；首页“＋”可添加成员。
 - **看看谁在玩**：顶栏显示在线家人的头像与活动，本人的状态入口可以继续、结束游戏或调整画面设置。
 - **键盘和手柄导航**：支持 WASD、方向键、Xbox 和 PlayStation 手柄，无需先打开手柄模式。
+- **手机也能玩**：全屏播放、按平台切换的触控按键、横竖屏布局及 PWA 安装；按键大小、透明度和画面比例可在游玩菜单调整。
 - **保留原收藏**：游戏库只读挂载，运行时需要的解压副本和存档写到独立数据目录。
 - **管理与核验收藏**：后台扫描、生成每游戏启动配置、分批检查内容指纹和重复副本；保留衍生版本及原存档入口。详见 [游戏库管理](docs/library-management.md)。
 
@@ -174,6 +177,14 @@ docker compose ps
 | 选择玩家 | 顶栏本人状态 → 切换玩家 | Menu / Options |
 
 连接手柄后按任意键唤醒浏览器检测。进入游戏后使用对应模拟器的映射：浏览器游戏默认 WASD 移动、J/K/U/I 动作、Q/E 肩键、Enter 开始、Shift 选择，可在模拟器中调整；云端按具体系统映射。
+
+### 手机游玩与 PWA
+
+手机进入游戏后自动显示触控手柄：横屏时主要按键靠两侧，竖屏时放在画面下方。点右上角 **☰** 打开游玩菜单，可全屏、切换原比例居中或横向铺满、调整按键大小与透明度，或手动选择布局。浏览器模拟器的存档工具也会随菜单展开。设置保存在这台设备的当前玩家名下，不改变服务器串流分辨率。
+
+通过可信 HTTPS 地址打开 RetroOne，在 **顶栏自己的头像 → 安装应用** 中安装，或使用 Android Chrome 的浏览器安装菜单。安装后可从桌面以独立窗口启动；浏览器不允许系统全屏时仍提供沉浸布局。PWA 不提供离线游戏，断网只显示提示，不缓存 ROM、存档或家庭成员数据；新版本也不会强制刷新正在玩的页面。
+
+详细操作、触控布局和兼容边界见 [手机游玩说明](docs/mobile-play.md)。
 
 ### 保存与恢复进度
 

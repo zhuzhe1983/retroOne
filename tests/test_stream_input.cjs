@@ -10,14 +10,17 @@ const source = fs.readFileSync(require('node:path').join(__dirname, '../containe
 
 function harness() {
   let now = 0, id = 0, pads = [null,null,null,null], session = null;
-  const timers = new Map(), frames = [], requests = [], forwarded = [], padEvents = [];
+  const timers = new Map(), frames = [], requests = [], forwarded = [], padEvents = [], messages = [], selfMessages = [], elements = new Map();
   class Event {
     constructor(type, options = {}) { this.type = type; Object.assign(this, options); this.defaultPrevented = false; this.stopped = false; }
     preventDefault() { this.defaultPrevented = true; }
     stopImmediatePropagation() { this.stopped = true; }
   }
   class Target {
-    constructor() { this.listeners = []; this.id = ''; }
+    constructor() { this.listeners = []; this.id = ''; this.dataset = {}; this.classes = new Set(); this.props = {};
+      this.classList = {toggle:(name,on)=>on ? this.classes.add(name) : this.classes.delete(name)};
+      this.style = {setProperty:(name,value)=>{this.props[name]=value;}}; }
+    appendChild(child) { elements.set(child.id,child); child.parentElement=this; }
     addEventListener(type, callback, capture = false) { this.listeners.push({type,callback,capture:!!capture}); }
     dispatchEvent(event) {
       if (!event.target) event.target = this;
@@ -30,8 +33,12 @@ function harness() {
   }
   class Input extends Target {} class Textarea extends Target {} class Select extends Target {}
   const window = new Target(), document = new Target(), body = new Target();
-  window.location = {pathname:'/p/player3/stream/'};
-  document.body = body; document.hidden = false; document.visibilityState = 'visible'; document.getElementById = () => null;
+  window.location = {pathname:'/p/player3/stream/',origin:'https://retroone.test'};
+  window.parent = {postMessage:(data,origin)=>messages.push({data,origin})};
+  window.postMessage = (data,origin) => { selfMessages.push({data,origin}); window.dispatchEvent(new Event('message',{data,origin,source:window})); };
+  document.body = body; document.head = new Target(); document.documentElement = new Target();
+  document.hidden = false; document.visibilityState = 'visible'; document.getElementById = id => elements.get(id) || null;
+  document.createElement = () => new Target();
   const nativeRead = () => pads, navigator = {getGamepads:nativeRead, userAgent:'Chromium'};
   const addTimer = (fn, delay, interval = false) => { const value = ++id; timers.set(value,{fn,at:now+delay,delay,interval}); return value; };
   const context = vm.createContext({window,document,navigator,Event,KeyboardEvent:Event,HTMLInputElement:Input,HTMLTextAreaElement:Textarea,HTMLSelectElement:Select,
@@ -50,7 +57,8 @@ function harness() {
     }
     now=end;
   };
-  return {context,window,document,body,Input,Textarea,Select,Event,requests,forwarded,padEvents,settle,tick,nativeRead,
+  return {context,window,document,body,Input,Textarea,Select,Event,requests,forwarded,padEvents,messages,selfMessages,elements,settle,tick,nativeRead,
+    message(data,extra={}) {window.dispatchEvent(new Event('message',{data,origin:window.location.origin,source:window.parent,...extra}));},
     read:()=>navigator.getGamepads(), pads:value=>{pads=value;},
     async session(value) { session=value; [...timers.values()].find(t=>t.interval&&t.delay===2000).fn();await settle(); },
     async eden() {await this.session({engine:'Eden 0.2.1',platform:'switch'});tick(40);},
@@ -159,4 +167,122 @@ test('actual pinned Selkies GamepadManager reports merged input and reindexes na
   assert.ok(changes.some(c=>c[0]==='axis'&&c[1]===0&&c[2]===1&&c[3]===-1));assert.ok(changes.some(c=>c[0]==='button'&&c[1]===0&&c[2]===0&&c[3]===1));
   h.key('keyup','KeyW');h.tick(16);assert.ok(changes.some(c=>c[0]==='axis'&&c[2]===1&&c[3]===physical.axes[1]));
   h.pads([null,null,pad(2),null]);await h.session(null);h.tick(40);changes.length=0;h.tick(16);assert.ok(changes.some(c=>c[0]==='axis'&&c[1]===2&&c[2]===2&&c[3]===physical.axes[2]));manager.destroy();
+});
+
+const presentation = (extra={}) => ({type:'retroone:presentation',version:1,embedded:true,touch:true,fit:'contain',immersive:true,menu:false,...extra});
+const controls = (sequence=1,buttons={},axes=[0,0,0,0]) => ({type:'retroone:controls',version:1,sequence,buttons:Array.from({length:17},(_,i)=>buttons[i]||0),axes});
+
+test('menu neutralizes every native slot without reindexing, losing metadata or changing the native gamepad preference',async()=>{
+  const h=harness(),p1=pad(1),p3=pad(3,[.9,-.8,.7,-.6],'');const native=[null,p1,null,p3];
+  h.pads(native);await h.settle();h.message(presentation({touch:false,menu:true,immersive:false}));
+  const gated=h.read();assert.equal(gated.length,4);assert.equal(gated[0],null);assert.equal(gated[2],null);
+  for(const index of [1,3]){
+    const source=native[index],result=gated[index];
+    for(const key of ['id','index','mapping','connected','timestamp','vibrationActuator','hapticActuators'])assert.equal(result[key],source[key],key);
+    assert.ok(result.axes.every(value=>value===0));assert.ok(result.buttons.every(b=>b.value===0&&!b.pressed&&!b.touched));
+  }
+  assert.equal(h.padEvents.length,0);assert.equal(h.selfMessages.length,0);
+  h.message(presentation({touch:false}));assert.equal(h.read(),native);assert.equal(h.padEvents.length,0);
+});
+
+test('actual pinned Selkies poller emits menu releases and restores native and merged holds without controller churn',{skip:!process.env.SELKIES_BUNDLE},async()=>{
+  const h=harness(),bundle=fs.readFileSync(process.env.SELKIES_BUNDLE,'utf8');
+  const start=bundle.indexOf('D=class{constructor(e,t,n,r){this.gamepad='),end=bundle.indexOf('};function xe',start);
+  h.context.T=4;h.context.E='linux';vm.runInContext('GamepadManager = '+bundle.slice(start+2,end+1),h.context);
+  const physical=pad(2);h.pads([null,null,physical,null]);await h.settle();
+  const changes=[],manager=new h.context.GamepadManager(physical,(...v)=>changes.push(['button',...v]),(...v)=>changes.push(['axis',...v]));
+  try{
+    h.tick(16);changes.length=0;const events=h.padEvents.length;
+    h.message(presentation({touch:false,menu:true,immersive:false}));h.tick(16);
+    assert.ok(changes.some(c=>c[0]==='button'&&c[1]===2&&c[2]===6&&c[3]===0));
+    assert.ok(changes.some(c=>c[0]==='axis'&&c[1]===2&&c[2]===1&&c[3]===0));assert.equal(h.padEvents.length,events);
+    changes.length=0;h.message(presentation({touch:false}));h.tick(16);
+    assert.ok(changes.some(c=>c[0]==='button'&&c[1]===2&&c[2]===6&&c[3]===.37));
+    assert.ok(changes.some(c=>c[0]==='axis'&&c[1]===2&&c[2]===1&&c[3]===physical.axes[1]));assert.equal(h.padEvents.length,events);
+    h.message(presentation());h.tick(56);h.message(controls(1,{0:1}));h.tick(16);
+    const mergedEvents=h.padEvents.length;changes.length=0;
+    h.message(presentation({menu:true,immersive:false}));h.tick(16);
+    assert.ok(changes.some(c=>c[0]==='button'&&c[1]===0&&c[2]===0&&c[3]===0));
+    assert.ok(h.read()[0].axes.every(v=>v===0));assert.equal(h.padEvents.length,mergedEvents);
+    changes.length=0;h.message(presentation());h.tick(16);
+    assert.ok(changes.some(c=>c[0]==='button'&&c[1]===0&&c[2]===6&&c[3]===.37));
+    assert.equal(h.read()[0].buttons[0].value,0,'old touch must not revive');assert.equal(h.padEvents.length,mergedEvents);
+  }finally{manager.destroy();}
+});
+
+test('parent touch full snapshots merge simultaneous controls, neutral releases only touch, and iframe blur is harmless',async()=>{
+  const h=harness();await h.session({engine:'RetroArch',platform:'psp'});
+  const physical=pad(2);h.pads([null,null,physical,null]);h.message(presentation());h.tick(40);
+  h.message(controls(1,{0:1,4:1,6:.8,12:1},[.75,-1,-.4,.2]));
+  assert.deepEqual(plain(h.read()[0].axes),[.75,-1,-.4,.2]);assert.equal(h.read()[0].buttons[4].value,1);assert.equal(h.read()[0].buttons[6].value,.8);
+  h.blur();assert.equal(h.read()[0].buttons[0].value,1);
+  h.message(controls(2,{4:1},[0,-1,0,0]));assert.equal(h.read()[0].buttons[0].value,0);assert.equal(h.read()[0].buttons[4].value,1);
+  h.message(controls(3));assert.deepEqual(plain(h.read()[0].axes),physical.axes);assert.equal(h.read()[0].buttons[6].value,.37);
+  assert.equal(h.messages[0].data.supported,true);
+});
+
+test('strict message authentication, bounded values and monotonic sequence reject hostile or stale state',async()=>{
+  const h=harness();await h.settle();h.message(presentation());h.tick(40);
+  for(const extra of [{origin:'https://evil.test'},{source:{}}])h.message(controls(1,{0:1}),extra);
+  const bad=[{buttons:Array(17)},{axes:Array(4)},{buttons:[1]},{axes:[Infinity,0,0,0]},{buttons:Array(17).fill(NaN)},{sequence:-1},{sequence:1.5},{version:2},{axes:[0,0,0,2]}];
+  for(const value of bad)h.message({...controls(),...value});
+  assert.equal(h.read()[0].buttons[0].value,0);
+  h.message(controls(4,{0:1}));h.message(controls(3));h.message(controls(4,{1:1}));assert.equal(h.read()[0].buttons[0].value,1);
+  h.tick(1000);h.message(controls(4,{0:1}));h.tick(1100);assert.equal(h.read()[0].buttons[0].value,1);
+  h.tick(200);assert.equal(h.read()[0].buttons[0].value,0);
+});
+
+test('hidden, pagehide, menu and disabling touch release snapshots without losing Eden keyboard mode',async()=>{
+  const h=harness();await h.eden();h.message(presentation());h.message(controls(1,{0:1}));h.hidden(true);assert.equal(h.read()[0].buttons[0].value,0);
+  h.hidden(false);h.message(controls(2,{0:1}));h.message(presentation({menu:true,immersive:false}));assert.equal(h.read()[0].buttons[0].value,0);
+  h.message(controls(3,{0:1}));assert.equal(h.read()[0].buttons[0].value,0);
+  h.message(presentation());h.message(controls(4,{0:1}));h.window.dispatchEvent(new h.Event('pagehide'));assert.equal(h.read()[0].buttons[0].value,0);
+  h.message(presentation({touch:false}));h.key('keydown','KeyW');assert.equal(h.read()[0].axes[1],-1);
+});
+
+test('touch DOS/MAME keyboard bridge preserves multi-button modifiers, blur reacquisition and physical keyboard ownership',async()=>{
+  const h=harness();await h.session({engine:'DOSBox'});h.message(presentation());h.tick(40);
+  h.message(controls(1,{0:1,3:1,4:1,5:1,12:1}));h.frame();
+  for(const key of ['ArrowUp','Enter','Control','Shift','Alt'])assert.ok(h.forwarded.some(e=>e.key===key&&e.type==='keydown'),key);
+  const alt=h.forwarded.find(e=>e.key==='Alt');assert.equal(alt.ctrlKey,true);assert.equal(alt.shiftKey,true);
+  h.forwarded.length=0;h.blur();h.tick(0);assert.ok(h.forwarded.some(e=>e.key==='Enter'&&e.type==='keydown'));
+  h.key('keydown','Enter');h.forwarded.length=0;h.message(controls(2));h.frame();assert.equal(h.forwarded.some(e=>e.key==='Enter'&&e.type==='keyup'),false);
+  h.key('keyup','Enter');assert.equal(h.forwarded.at(-1).key,'Enter');assert.equal(h.forwarded.at(-1).type,'keyup');
+  await h.session({engine:'MAME'});h.message(controls(3,{0:1,4:1,8:1,9:1}));h.forwarded.length=0;h.frame();
+  for(const key of ['Control','z','5','1'])assert.ok(h.forwarded.some(e=>e.key===key&&e.type==='keydown'),key);
+  h.tick(1300);h.frame();assert.ok(h.forwarded.some(e=>e.key==='5'&&e.type==='keyup'));
+});
+
+test('presentation preserves stream intrinsic dimensions, centers contain, stretches only CSS and restores chrome',async()=>{
+  const h=harness();await h.settle();const sink={width:1280,height:720,parentElement:{getBoundingClientRect:()=>({width:800,height:600})}};h.elements.set('videoCanvas',sink);
+  h.message(presentation());const root=h.document.documentElement;assert.equal(root.props['--retroone-media-w'],'800px');assert.equal(root.props['--retroone-media-h'],'450px');assert.equal(root.props['--retroone-media-y'],'75px');assert.ok(root.classes.has('retroone-immersive'));assert.equal(sink.width,1280);
+  h.message(presentation({fit:'stretch',menu:true,immersive:false}));assert.equal(root.props['--retroone-media-h'],'450px');assert.equal(root.classes.has('retroone-immersive'),false);assert.equal(sink.height,720);
+  assert.equal(h.messages.at(-1).data.aspectRatio,1280/720);
+});
+
+test('actual pinned Selkies poller sees touch, physical merge and timeout release',{skip:!process.env.SELKIES_BUNDLE},async()=>{
+  const h=harness(),bundle=fs.readFileSync(process.env.SELKIES_BUNDLE,'utf8');const start=bundle.indexOf('D=class{constructor(e,t,n,r){this.gamepad=');const end=bundle.indexOf('};function xe',start);
+  assert.ok(start>=0&&end>start);h.context.T=4;h.context.E='linux';vm.runInContext('GamepadManager = '+bundle.slice(start+2,end+1),h.context);
+  const changes=[];let manager;h.window.addEventListener('gamepadconnected',event=>{manager ||= new h.context.GamepadManager(event.gamepad,(...args)=>changes.push(['button',...args]),(...args)=>changes.push(['axis',...args]));});
+  await h.session({engine:'RetroArch'});const physical=pad(2);h.pads([null,null,physical,null]);h.message(presentation());h.tick(40);
+  h.message(controls(1,{0:1,4:1},[-.9,.8,0,0]));h.tick(16);
+  assert.ok(changes.some(c=>c[0]==='button'&&c[2]===0&&c[3]===1));assert.ok(changes.some(c=>c[0]==='axis'&&c[2]===0&&c[3]===-.9));
+  h.blur();h.tick(16);assert.equal(h.read()[0].buttons[0].value,1);changes.length=0;h.tick(1250);
+  assert.ok(changes.some(c=>c[0]==='button'&&c[2]===0&&c[3]===0));assert.ok(changes.some(c=>c[0]==='axis'&&c[2]===0&&c[3]===physical.axes[0]));manager.destroy();
+});
+
+test('touch uses upstream gamepadControl to re-enable a disabled pinned poller; desktop preference remains untouched',{skip:!process.env.SELKIES_BUNDLE},async()=>{
+  const h=harness(),bundle=fs.readFileSync(process.env.SELKIES_BUNDLE,'utf8');const start=bundle.indexOf('D=class{constructor(e,t,n,r){this.gamepad=');const end=bundle.indexOf('};function xe',start);
+  h.context.T=4;h.context.E='linux';vm.runInContext('GamepadManager = '+bundle.slice(start+2,end+1),h.context);
+  const changes=[];const physical=pad(0,[0,0,0,0]);h.pads([physical,null,null,null]);const manager=new h.context.GamepadManager(physical,(...args)=>changes.push(args),()=>{});manager.disable();
+  // Execute the pinned command branch, with its ordinary surrounding state
+  // supplied by the fixture, then the actual GamepadManager.enable/_poll code.
+  const commandStart=bundle.indexOf('case`gamepadControl`:');const commandEnd=bundle.indexOf('case`clipboardUpdateFromUI`:',commandStart);
+  assert.ok(commandStart>=0&&commandEnd>commandStart);h.context.N=false;h.context.j=new Set();h.context.Gt=()=>{};h.context.er=()=>{};h.context.ir=()=>manager.enable();
+  vm.runInContext('upstreamToggle = t => { switch(t.type) { '+bundle.slice(commandStart,commandEnd)+' } }',h.context);
+  h.window.addEventListener('message',e=>{if(e.source===h.window)h.context.upstreamToggle(e.data);});await h.session({engine:'RetroArch'});
+  h.message(presentation({touch:false}));h.tick(100);assert.equal(h.selfMessages.length,0);assert.equal(h.context.N,false);
+  h.message(presentation());h.tick(40);h.message(controls(1,{0:1}));h.tick(16);assert.equal(h.context.N,true);assert.ok(changes.some(c=>c[1]===0&&c[2]===1));assert.equal(h.selfMessages.length,1);
+  h.window.webrtcInput={gamepadManager:manager};h.tick(100);assert.equal(h.selfMessages.length,2,'late transport attachment replays enable once');h.tick(100);assert.equal(h.selfMessages.length,2);
+  h.message(presentation({touch:false}));h.tick(100);assert.equal(h.selfMessages.length,2,'closing overlay does not disable physical input');manager.destroy();
 });

@@ -123,6 +123,7 @@
       $('play-note').textContent = state.playMode === 'stream' ? t('返回游戏库会保留云端会话 · 退出前请保存进度') : t('退出前请在模拟器菜单保存进度');
       if ($('game-frame')) $('game-frame').title = t('{value1} · 游戏画面', {value1: $('play-title').textContent});
     }
+    window.RetroMobilePlayer?.localize();
     if (state.health && $('status-button').dataset.state === 'online') renderHealth();
     else $('connection-label').textContent = $('status-button').dataset.state === 'error' ? t('连接暂时中断') : t('连接中');
     if (state.migrationData) renderMigration(state.migrationData);
@@ -1264,7 +1265,7 @@
   function resumeCloudSession(session) {
     if (state.playMode === 'stream' && $('play-dialog').open) { $('game-frame')?.focus(); return; }
     state.activeNetworkRoomId = sessionNetworkRoomId(session); renderFamilyPresence();
-    if (session) openPlayer(localURL(session.play_url, [`${state.profile.base_path}/stream/`]) || `${state.profile.base_path}/stream/`, sessionTitle(session), 'stream', sessionGameId(session) || null);
+    if (session) openPlayer(localURL(session.play_url, [`${state.profile.base_path}/stream/`]) || `${state.profile.base_path}/stream/`, sessionTitle(session), 'stream', sessionGameId(session) || null, session.game || session);
   }
   async function launchGame(game, {replaceSessionId = null, networkRoomId = null} = {}) {
     const epoch = state.profileEpoch;
@@ -1280,13 +1281,13 @@
       if (!url) throw interfaceError("没有收到有效的游戏入口，请重新加载游戏库。");
       state.activeNetworkRoomId = networkRoomId || sessionNetworkRoomId(result.session); renderFamilyPresence();
       if ($('network-dialog').open) closeNetwork();
-      openPlayer(url, game.title, result.mode || game.mode, game.id);
+      openPlayer(url, game.title, result.mode || game.mode, game.id, game);
       refreshSession();
     } catch (error) { if (epoch === state.profileEpoch) { if (error.status === 409 && error.detail?.code === 'session_conflict') showLaunchConflict(game, error.detail, {networkRoomId}); else { notify(errorMessage(error), true); if (networkRoomId && $('network-dialog').open) networkMessage(errorMessage(error), true); refreshSession(); } } }
     finally { if (epoch !== state.profileEpoch) return; state.launching = false; if (state.selected?.id === game.id) renderDetail(state.selected); }
   }
 
-  function openPlayer(url, title, mode, gameId = null) {
+  function openPlayer(url, title, mode, gameId = null, game = null) {
     if ($('play-dialog').open) return;
     state.focusReturn = document.activeElement;
     state.playMode = mode; state.playGameId = gameId;
@@ -1304,10 +1305,13 @@
     iframe.src = url;
     $('play-frame-wrap').append(iframe);
     $('play-dialog').showModal(); document.body.classList.add('body-modal');
+    const metadata = game || (state.selected?.id === gameId ? state.selected : state.games.find(item => item.id === gameId));
+    window.RetroMobilePlayer?.open({iframe, profileId: state.profile.id, platform: metadata?.platform || '', mode, engine: metadata?.engine || ''});
     heartbeatPresence();
   }
 
   function closePlayer({refresh = true, presence = true} = {}) {
+    window.RetroMobilePlayer?.close();
     $('game-frame')?.remove();
     state.playMode = null; state.playGameId = null; state.activeNetworkRoomId = null;
     updateURL();
@@ -1519,7 +1523,7 @@
 
   function pollGamepads(time) {
     gamepadFrame = requestAnimationFrame(pollGamepads);
-    if (document.hidden || (state.playMode && !$('profile-dialog').open && !$('replace-dialog').open && !$('network-dialog').open && !$('display-dialog').open && !$('management-dialog').open) || time - gamepadLast < 95) return;
+    if (document.hidden || (state.playMode && !window.RetroMobilePlayer?.isMenuOpen() && !$('profile-dialog').open && !$('replace-dialog').open && !$('network-dialog').open && !$('display-dialog').open && !$('management-dialog').open) || time - gamepadLast < 95) return;
     gamepadLast = time;
     let pads;
     try { pads = [...(navigator.getGamepads?.() || [])].filter(Boolean); } catch { return; }
@@ -1584,6 +1588,7 @@
           else if (directional) focusModalAction($('network-dialog'), key);
           else if (key === 'accept') document.activeElement?.click();
         }
+        else if (window.RetroMobilePlayer?.isMenuOpen()) window.RetroMobilePlayer.navigate(key);
         else if (key === 'profiles') showProfiles();
         else if (directional) focusNeighbor(key);
         else if (key === 'accept') {
@@ -1738,7 +1743,7 @@
   $('help-dialog').addEventListener('close', () => syncModalBody());
   $('help-dialog').addEventListener('click', (event) => { if (event.target === $('help-dialog')) { const rect = $('help-dialog').getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) closeHelp(); } });
   $('close-play').addEventListener('click', closePlayer);
-  $('play-dialog').addEventListener('cancel', (event) => { event.preventDefault(); closePlayer(); });
+  $('play-dialog').addEventListener('cancel', (event) => { event.preventDefault(); if (window.RetroMobilePlayer?.isMenuOpen()) window.RetroMobilePlayer.setMenu(false); else closePlayer(); });
   window.addEventListener('message', (event) => {
     if (event.origin !== location.origin || event.source !== $('game-frame')?.contentWindow) return;
     if (event.data?.type === 'retroone:exit') closePlayer();
@@ -1749,7 +1754,8 @@
     resumeCloudSession(state.session);
   });
   $('fullscreen-play').addEventListener('click', async () => {
-    try { if (document.fullscreenElement) await document.exitFullscreen(); else await $('play-dialog').requestFullscreen(); }
+    if (window.RetroMobilePlayer) { await window.RetroMobilePlayer.toggleFullscreen(); return; }
+    try { if (document.fullscreenElement) await document.exitFullscreen(); else await document.documentElement.requestFullscreen({navigationUI: 'hide'}); }
     catch { notify(t("当前浏览器不支持此全屏方式，可使用游戏内的全屏按钮。")); }
   });
   document.addEventListener('keydown', (event) => {

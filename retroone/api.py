@@ -29,6 +29,7 @@ from .settings import DisplaySettings, DisplaySettingsError, StreamResolution, d
 from .game_metadata import GameMetadataError
 from .interface_settings import InterfaceLocale, InterfaceSettings, InterfaceSettingsError
 from .i18n import emulator_locale, player_messages, resolve_locale, text as translated_text
+from .pwa import register_pwa
 
 ROOT = Path(__file__).resolve().parent.parent
 MAX_SAVE_SIZE = 32 * 1024 * 1024
@@ -831,8 +832,10 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
         title = html.escape(game['title'])
         home_url, play_url, save_url = url('/'), url(f'/play/{game_id}'), url(f'/api/games/{game_id}/save-state')
         storage_namespace = '' if profile_id == 'player1' else f'RetroOne-{profile_id}-'
-        document = f'''<!doctype html><html lang="{locale}"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{title} · RetroOne</title><link rel="icon" href="{url('/favicon.svg')}" type="image/svg+xml">
-<style>html,body{{margin:0;background:#08111e;color:#deedf7;font:14px system-ui;height:100%}}body{{display:flex;flex-direction:column}}header{{display:flex;gap:20px;align-items:center;padding:12px 20px;flex-wrap:wrap}}a{{color:#7de5f8;text-decoration:none}}h1{{font-size:16px;font-weight:500;margin:0}}#game{{flex:1;min-height:400px}}footer{{padding:9px 20px;color:#9dacc2;font-size:12px}}button{{background:#162a42;color:#deedf7;border:1px solid #31506d;border-radius:5px;padding:6px 9px;cursor:pointer}}#status{{color:#c4d3e3}}</style>
+        bridge = ROOT / 'web' / 'emulator-input.js'
+        bridge_version = hashlib.sha256(bridge.read_bytes()).hexdigest()[:16] if bridge.is_file() else 'pending'
+        document = f'''<!doctype html><html lang="{locale}"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>{title} · RetroOne</title><link rel="icon" href="{url('/favicon.svg')}" type="image/svg+xml">
+<style>html,body{{margin:0;background:#08111e;color:#deedf7;font:14px system-ui;height:100%;width:100%;min-height:0}}body{{display:flex;flex-direction:column}}header{{display:flex;gap:8px 12px;align-items:center;padding:8px 12px;flex-wrap:wrap;flex-shrink:0}}a{{color:#7de5f8;text-decoration:none}}h1{{font-size:16px;font-weight:500;margin:0}}#game{{flex:1;min-height:0;position:relative;overflow:hidden}}footer{{padding:6px 12px;color:#9dacc2;font-size:12px;flex-shrink:0}}button{{background:#162a42;color:#deedf7;border:1px solid #31506d;border-radius:5px;padding:6px 9px;cursor:pointer}}#status{{color:#c4d3e3}}@media(max-height:480px){{footer{{display:none}}header{{font-size:12px;padding:4px 8px}}}}</style>
 <header><a class="back-link" href="{home_url}" onclick="leave();return false">← {html.escape(messages['back_library'])}</a><h1>{title}</h1><a href="{play_url}?restore=true">{html.escape(messages['load_server_save'])}</a><a href="{save_url}">{html.escape(messages['export_server_save'])}</a><label><button onclick="document.getElementById('save-upload').click()">{html.escape(messages['upload_existing_save'])}</button><input hidden type="file" id="save-upload" accept=".state"></label><span id="status"></span></header>
 <div id="game"></div><footer>{html.escape(messages['controls_help'])}</footer>
 <script>
@@ -845,7 +848,7 @@ const status=document.getElementById('status');const messages={messages_json};
 async function backupState(blob){{const response=await fetch('{save_url}',{{method:'PUT',body:blob}});if(!response.ok)throw Error((await response.json()).detail);status.textContent=messages.save_backed_up}}
 window.EJS_onSaveState=async(event)=>{{if(!event||!event.state){{status.textContent=messages.save_invalid;return}}const blob=new Blob([event.state],{{type:'application/octet-stream'}});const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download='{game_id}.state';link.click();setTimeout(()=>URL.revokeObjectURL(url),10000);try{{await backupState(blob)}}catch(error){{status.textContent=messages.save_downloaded_backup_failed+error.message}}}};
 document.getElementById('save-upload').addEventListener('change',async(e)=>{{const file=e.target.files[0];if(!file)return;if(file.size>{MAX_SAVE_SIZE}){{status.textContent=messages.save_too_large;return}}try{{await backupState(file)}}catch(error){{status.textContent=messages.save_backup_failed+error.message}}}});
-</script><script src="{url('/emulatorjs/data/loader.js')}"></script></html>'''
+</script><script src="{url('/emulator-input.js')}?v={bridge_version}"></script><script src="{url('/emulatorjs/data/loader.js')}"></script></html>'''
         return HTMLResponse(document, headers={'Content-Language': locale, 'Vary': 'Accept-Language', 'Cache-Control': 'no-store'})
 
     # Only bundled application/vendor files are static mounts. ROMs are never mounted.
@@ -853,11 +856,12 @@ document.getElementById('save-upload').addEventListener('change',async(e)=>{{con
         app.mount('/emulatorjs/data', StaticFiles(directory=browser_data), name='emulatorjs')
     web_root = ROOT / 'web'
     if web_root.is_dir():
+        register_pwa(app, web_root)
         @app.get('/', response_class=HTMLResponse)
         @app.get('/index.html', response_class=HTMLResponse)
         def versioned_index():
             document = (web_root / 'index.html').read_text('utf-8')
-            for filename in ('app.js', 'styles.css', 'i18n.js', 'i18n-en.js'):
+            for filename in ('app.js', 'styles.css', 'i18n.js', 'i18n-en.js', 'mobile-player.js', 'mobile-player.css', 'pwa-install.js'):
                 path = web_root / filename
                 if path.is_file():
                     version = hashlib.sha256(path.read_bytes()).hexdigest()[:16]

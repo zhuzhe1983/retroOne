@@ -2,14 +2,19 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#0b1427">
   <meta name="description" content="RetroOne · 你的私人怀旧游戏馆。在浏览器里，接着玩。" data-i18n-content="RetroOne · 你的私人怀旧游戏馆。在浏览器里，接着玩。">
   <title data-i18n="RetroOne · 私人游戏馆">RetroOne · 私人游戏馆</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
   <link rel="stylesheet" href="/styles.css?v=f9ada0191f2b1227">
+  <link rel="stylesheet" href="/mobile-player.css">
   <script src="/i18n.js" defer></script>
   <script src="/i18n-en.js" defer></script>
+  <script src="/pwa-install.js" defer></script>
+  <script src="/mobile-player.js" defer></script>
   <script src="/app.js?v=867d4740d80a7491" defer></script>
 </head>
 <body>
@@ -89,7 +94,7 @@
     <div class="profile-footer"><span><kbd><span data-i18n="WASD / 方向键">WASD / 方向键</span></kbd> <span data-i18n="选择 ·">选择 ·</span> <kbd>Enter / A / ×</kbd> <span data-i18n="确认">确认</span></span><small><span data-i18n="切换玩家会保留各自的云端会话。">切换玩家会保留各自的云端会话。</span></small></div>
   </dialog>
   <dialog id="family-dialog" class="help-dialog family-dialog" aria-labelledby="family-title"><div class="dialog-heading"><div><p class="eyebrow">FAMILY ACTIVITY</p><h2 id="family-title">家人动态</h2></div><button class="icon-button" id="close-family" aria-label="关闭家人动态" data-i18n-aria-label="关闭家人动态"><svg class="icon"><use href="#i-close"/></svg></button></div><div id="family-details" class="family-details"></div><div id="family-invite-actions" class="family-invite-actions"></div><p id="family-invite-message" class="profile-message" role="status" hidden></p><button class="button button-secondary" id="back-from-family"><span data-i18n="返回游戏馆">返回游戏馆</span></button></dialog>
-  <dialog id="self-dialog" class="help-dialog self-dialog" aria-labelledby="self-title"><div class="dialog-heading"><div><p class="eyebrow">YOUR GAME SPACE</p><h2 id="self-title">我的游戏空间</h2></div><button class="icon-button" id="close-self" aria-label="关闭我的游戏空间" data-i18n-aria-label="关闭我的游戏空间"><svg class="icon"><use href="#i-close"/></svg></button></div><div class="family-details"><span id="self-avatar"></span><div><strong id="session-title">正在挑游戏</strong><p id="self-session-note"></p></div></div><div class="self-actions"><button class="button" id="resume-session" hidden><span data-i18n="继续游戏">继续游戏</span><svg class="icon"><use href="#i-play"/></svg></button><button class="button button-secondary" id="stop-session" hidden><span data-i18n="结束云端游戏">结束云端游戏</span><svg class="icon"><use href="#i-stop"/></svg></button><button class="button button-secondary" id="self-display-settings"><span data-i18n="画面设置">画面设置</span><svg class="icon"><use href="#i-pc"/></svg></button><button class="button button-secondary" id="self-switch-profile"><span data-i18n="切换 / 添加家庭成员">切换 / 添加家庭成员</span></button></div></dialog>
+  <dialog id="self-dialog" class="help-dialog self-dialog" aria-labelledby="self-title"><div class="dialog-heading"><div><p class="eyebrow">YOUR GAME SPACE</p><h2 id="self-title">我的游戏空间</h2></div><button class="icon-button" id="close-self" aria-label="关闭我的游戏空间" data-i18n-aria-label="关闭我的游戏空间"><svg class="icon"><use href="#i-close"/></svg></button></div><div class="family-details"><span id="self-avatar"></span><div><strong id="session-title">正在挑游戏</strong><p id="self-session-note"></p></div></div><div class="self-actions"><button class="button" id="resume-session" hidden><span data-i18n="继续游戏">继续游戏</span><svg class="icon"><use href="#i-play"/></svg></button><button class="button button-secondary" id="stop-session" hidden><span data-i18n="结束云端游戏">结束云端游戏</span><svg class="icon"><use href="#i-stop"/></svg></button><button class="button button-secondary" id="self-display-settings"><span data-i18n="画面设置">画面设置</span><svg class="icon"><use href="#i-pc"/></svg></button><button class="button button-secondary" data-retroone-install>安装应用</button><span class="install-status" data-retroone-install-status role="status"></span><button class="button button-secondary" id="self-switch-profile"><span data-i18n="切换 / 添加家庭成员">切换 / 添加家庭成员</span></button></div></dialog>
   <dialog id="display-dialog" class="help-dialog display-dialog" aria-labelledby="display-title" aria-describedby="display-description">
     <div class="dialog-heading"><div><p class="eyebrow">YOUR DISPLAY</p><h2 id="display-title">画面设置</h2></div><button class="icon-button" id="close-display" aria-label="返回我的游戏空间" data-i18n-aria-label="返回我的游戏空间"><svg class="icon"><use href="#i-close"/></svg></button></div>
     <p class="display-description" id="display-description"><span data-i18n="这个玩家的所有云端游戏共用，下次启动游戏时生效。">这个玩家的所有云端游戏共用，下次启动游戏时生效。</span></p>

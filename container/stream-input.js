@@ -2,6 +2,9 @@
 (() => {
   let engine = '';
   let sessionRequest = 0;
+  let touchEnabled = false, touchButtons = Array(17).fill(0), touchAxes = Array(4).fill(0);
+  let touchSequence = -1, touchSignature = '', touchSeen = -Infinity, presentation = null, aspect = 0;
+  let touchInputHost = null, touchEnableRequested = false;
   const keyCodes = {ArrowUp:38,ArrowDown:40,ArrowLeft:37,ArrowRight:39,Enter:13,Escape:27,' ':32,w:87,a:65,s:83,d:68,Control:17,Alt:18,Shift:16,z:90,x:88,'1':49,'5':53};
   const profilePrefix = window.location.pathname.match(/^\/p\/(player[1-9][0-9]{0,5})\//)?.[0].replace(/\/$/, '') || '';
   const refresh = () => {
@@ -10,8 +13,12 @@
       .then(r => { if (!r.ok) throw new Error('Session unavailable'); return r.json(); })
       .then(v => {
         if (request !== sessionRequest) return;
-        engine = v.session?.engine || '';
-        switchSession(/\bEden\b/i.test(engine) && v.session?.platform === 'switch');
+        const nextEngine = v.session?.engine || '';
+        if (engine !== nextEngine) { releasePad(); keyboardHeld.clear(); }
+        engine = nextEngine;
+        switchActive = /\bEden\b/i.test(engine) && v.session?.platform === 'switch';
+        if (!switchActive) releaseSwitchKeys();
+        switchSession(switchActive || touchEnabled);
       }).catch(() => { if (request === sessionRequest) releaseSwitchKeys(); });
   };
   // The pinned Selkies client polls all browser pads into one server slot.
@@ -35,12 +42,13 @@
     const source = Array.from(pads).find(pad => pad?.connected && pad.mapping === 'standard');
     const axes = switchAxes.map(([negative, positive], index) => {
       const keyboard = Number(switchKeys.has(positive)) - Number(switchKeys.has(negative));
-      return keyboard || source?.axes[index] || 0;
+      return keyboard || touchAxes[index] || source?.axes[index] || 0;
     });
     const buttons = Array.from({length:17}, (_, index) => {
       const original = source?.buttons[index];
       const keyboard = Object.keys(switchButtons).some(code => switchButtons[code] === index && switchKeys.has(code));
-      return {value:keyboard ? 1 : original?.value || 0, pressed:keyboard || !!original?.pressed, touched:keyboard || !!original?.touched};
+      const virtual = keyboard ? 1 : touchButtons[index];
+      return {value:Math.max(virtual, original?.value || 0), pressed:virtual > .5 || !!original?.pressed, touched:virtual > 0 || !!original?.touched};
     });
     return {id:switchId, index:0, connected:true, mapping:'standard', axes, buttons,
       timestamp:performance.now(), vibrationActuator:source?.vibrationActuator || null, hapticActuators:source?.hapticActuators || []};
@@ -51,8 +59,8 @@
     window.dispatchEvent(event);
   }
   function switchSession(enabled) {
-    if (!switchSupported || switchActive === enabled) return;
-    switchActive = enabled; releaseSwitchKeys();
+    if (!switchSupported || (switchPhase !== 'off' && enabled === bridgeEnabled) || (switchPhase === 'off' && !enabled)) return;
+    bridgeEnabled = enabled;
     const transition = ++switchTransition;
     clearTimeout(switchTimer);
     switchPhase = 'transition';
@@ -70,19 +78,32 @@
       }
     }, 40);
   }
+  let bridgeEnabled = false;
+  function menuPads(pads) {
+    if (!presentation?.menu) return pads;
+    // Preserve identity and sparse slots so the upstream poller sends ordinary
+    // releases, without disconnecting a controller while it navigates the menu.
+    return Array.from(pads, pad => pad && ({
+      id:pad.id, index:pad.index, connected:pad.connected, mapping:pad.mapping,
+      timestamp:pad.timestamp, vibrationActuator:pad.vibrationActuator,
+      hapticActuators:pad.hapticActuators,
+      axes:Array.from(pad.axes, () => 0),
+      buttons:Array.from(pad.buttons, () => ({value:0, pressed:false, touched:false})),
+    }));
+  }
   function installSwitchBridge() {
     if (!nativeGetGamepads || navigator.getGamepads === installedRead) return;
     const upstreamRead = navigator.getGamepads.bind(navigator);
     const read = function() {
-      if (switchPhase === 'off') return upstreamRead();
-      return switchPhase === 'active' ? [mergedSwitchPad(), null, null, null] : emptyPads();
+      if (switchPhase === 'off') return menuPads(upstreamRead());
+      return menuPads(switchPhase === 'active' ? [mergedSwitchPad(), null, null, null] : emptyPads());
     };
     try { navigator.getGamepads = read; switchSupported = navigator.getGamepads === read; if (switchSupported) installedRead = read; } catch { /* Leave native input usable when wrapping is forbidden. */ }
   }
   installSwitchBridge();
   // Selkies's deferred module installs its touch-pad wrapper after this head
   // script. Keep the Eden view outermost; leave that wrapper intact elsewhere.
-  document.addEventListener('DOMContentLoaded', installSwitchBridge, {once:true});
+  document.addEventListener('DOMContentLoaded', () => { installSwitchBridge(); announce(); present(); }, {once:true});
   for (const type of ['gamepadconnected','gamepaddisconnected']) window.addEventListener(type, event => {
     if (switchPhase !== 'off' && !event.retrooneSwitchPad) event.stopImmediatePropagation();
   }, true);
@@ -126,27 +147,41 @@
   // DOS titles often use keyboard controls even when a joystick is present.
   // Translate the standard browser Gamepad layout into those native keys.
   const held = new Set();
-  const gamepadKeys = {ArrowUp:['ArrowUp',38],ArrowDown:['ArrowDown',40],ArrowLeft:['ArrowLeft',37],ArrowRight:['ArrowRight',39],Enter:['Enter',13],Escape:['Escape',27],Space:[' ',32]};
+  const keyboardHeld = new Set();
+  const gamepadKeys = {ArrowUp:['ArrowUp',38],ArrowDown:['ArrowDown',40],ArrowLeft:['ArrowLeft',37],ArrowRight:['ArrowRight',39],Enter:['Enter',13],Escape:['Escape',27],Space:[' ',32],ControlLeft:['Control',17],AltLeft:['Alt',18],ShiftLeft:['Shift',16],KeyZ:['z',90],KeyX:['x',88],Digit1:['1',49],Digit5:['5',53]};
   function emitPadKey(code, down) {
+    if (keyboardHeld.has(code)) return;
     const [key, keyCode] = gamepadKeys[code];
     const target = document.getElementById('overlayInput') || document.getElementById('keyboard-input-assist') || document.body;
-    const event = new KeyboardEvent(down ? 'keydown' : 'keyup', {key, code, keyCode, which:keyCode, bubbles:true, cancelable:true});
-    Object.defineProperty(event, 'retrooneAlias', {value:true});
+    const modifier = name => code === name ? down : held.has(name) || keyboardHeld.has(name);
+    const event = new KeyboardEvent(down ? 'keydown' : 'keyup', {key, code, keyCode, which:keyCode, bubbles:true, cancelable:true,
+      ctrlKey:modifier('ControlLeft'),altKey:modifier('AltLeft'),shiftKey:modifier('ShiftLeft')});
+    Object.defineProperties(event, {retrooneAlias:{value:true},retroonePad:{value:true}});
     target.dispatchEvent(event);
   }
   function updateGamepad() {
     const wanted = new Set();
-    if (/DOSBox/.test(engine) && document.visibilityState === 'visible') {
-      const pad = [...(navigator.getGamepads?.() || [])].find(p => p?.connected);
+    if ((/DOSBox/.test(engine) || touchEnabled && /SDLPAL|^MAME$/.test(engine)) && document.visibilityState === 'visible') {
+      // Preserve existing physical DOS controls. MAME/SDLPAL only add the
+      // parent touch source; their native joystick mapping remains independent.
+      const pad = /DOSBox/.test(engine) ? [...(navigator.getGamepads?.() || [])].find(p => p?.connected)
+        : {buttons:touchButtons.map(value => ({pressed:value > .5})), axes:touchAxes};
       if (pad) {
         const button = index => !!pad.buttons[index]?.pressed;
         if (button(12) || pad.axes[1] < -.45) wanted.add('ArrowUp');
         if (button(13) || pad.axes[1] > .45) wanted.add('ArrowDown');
         if (button(14) || pad.axes[0] < -.45) wanted.add('ArrowLeft');
         if (button(15) || pad.axes[0] > .45) wanted.add('ArrowRight');
-        if (button(0) || button(9)) wanted.add('Enter');
-        if (button(1) || button(8)) wanted.add('Escape');
-        if (button(2)) wanted.add('Space');
+        if (engine === 'MAME') {
+          const keys = {0:'ControlLeft',1:'AltLeft',2:'Space',3:'ShiftLeft',4:'KeyZ',5:'KeyX',8:'Digit5',9:'Digit1'};
+          for (const [index,key] of Object.entries(keys)) if (button(index)) wanted.add(key);
+        } else {
+          if (button(0) || button(9)) wanted.add('Enter');
+          if (button(1) || button(8)) wanted.add('Escape');
+          if (button(2)) wanted.add('Space');
+          for (const [index,key] of [[3,'ControlLeft'],[4,'ShiftLeft'],[5,'AltLeft']])
+            if (touchEnabled && touchButtons[index] > .5) wanted.add(key);
+        }
       }
     }
     for (const code of held) if (!wanted.has(code)) { emitPadKey(code, false); held.delete(code); }
@@ -154,11 +189,108 @@
     requestAnimationFrame(updateGamepad);
   }
   const releasePad = () => { for (const code of held) emitPadKey(code, false); held.clear(); };
-  const releaseAll = () => { releaseSwitchKeys(); releasePad(); };
-  window.addEventListener('blur', releaseAll);
-  window.addEventListener('pagehide', releaseAll);
-  document.addEventListener('visibilitychange', () => { if (document.hidden) releaseAll(); });
+  const releaseAll = () => { releaseSwitchKeys(); keyboardHeld.clear(); releasePad(); };
+  // A tap on the parent rails blurs the iframe. It must not release touch.
+  window.addEventListener('blur', () => {
+    releaseSwitchKeys(); keyboardHeld.clear();
+    if (!touchEnabled) releasePad();
+    // Selkies correctly resets keyboard on iframe blur. Reapply our separately
+    // owned touch-to-keyboard state after that reset, without suppressing it.
+    else setTimeout(() => { if (!document.hidden && performance.now()-touchSeen < 1200)
+      for (const code of held) emitPadKey(code, true); }, 0);
+  });
+  window.addEventListener('pagehide', () => { releaseTouch(); releaseAll(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { releaseTouch(); releaseAll(); } });
   requestAnimationFrame(updateGamepad);
   window.addEventListener('keydown', alias, true);
   window.addEventListener('keyup', alias, true);
+  for (const type of ['keydown','keyup']) window.addEventListener(type, event => {
+    if (event.retroonePad || !gamepadKeys[event.code]) return;
+    const host = ['overlayInput','keyboard-input-assist'].includes(event.target?.id);
+    if (!host && (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement ||
+        event.target instanceof HTMLSelectElement || event.target?.isContentEditable)) return;
+    if (type === 'keydown') keyboardHeld.add(event.code);
+    else {
+      keyboardHeld.delete(event.code);
+      if (held.has(event.code)) { event.preventDefault(); event.stopImmediatePropagation(); }
+    }
+  }, true);
+  function releaseTouch() {
+    touchButtons = Array(17).fill(0); touchAxes = Array(4).fill(0); touchSeen = -Infinity;
+  }
+  function announce() {
+    if (window.parent && window.parent !== window) window.parent.postMessage({
+      type:'retroone:controls-ready', version:1, supported:switchSupported,
+      ...(aspect > 0 ? {aspectRatio:aspect} : {}),
+    }, window.location.origin);
+  }
+  function present() {
+    const root = document.documentElement;
+    if (!presentation || !root) return;
+    root.classList.toggle('retroone-embedded', true);
+    root.classList.toggle('retroone-touch', presentation.touch && switchSupported);
+    root.classList.toggle('retroone-immersive', switchSupported && presentation.immersive === true && presentation.menu !== true);
+    if (!document.getElementById('retroone-stream-style')) {
+      const style = document.createElement('style'); style.id = 'retroone-stream-style';
+      // IDs from the pinned Selkies client. Do not change sink visibility,
+      // intrinsic resolution, encoder settings, audio or transport ownership.
+      style.textContent = `
+        .retroone-immersive #root,.retroone-immersive #dashboard-root,.retroone-immersive #player-ui-root{display:none!important}
+        .retroone-touch #touch-gamepad-host,.retroone-touch #universal-touch-gamepad-controls-overlay{display:none!important}
+        .retroone-embedded .video-container #stream,.retroone-embedded .video-container #videoStream,
+        .retroone-embedded .video-container #videoCanvas,.retroone-embedded .video-container #videoWorkerCanvas,
+        .retroone-embedded .video-container #overlayInput{
+          width:var(--retroone-media-w,100%)!important;height:var(--retroone-media-h,100%)!important;
+          left:var(--retroone-media-x,0px)!important;top:var(--retroone-media-y,0px)!important;object-fit:fill!important}
+      `;
+      (document.head || root).appendChild(style);
+    }
+    const sinks = ['videoStream','stream','videoWorkerCanvas','videoCanvas'].map(id=>document.getElementById(id)).filter(Boolean);
+    const sink = sinks.find(s => (s.videoWidth || s.width) > 0 && (s.videoHeight || s.height) > 0);
+    const box = sink?.parentElement?.getBoundingClientRect();
+    const ratio = (sink?.videoWidth || sink?.width) / (sink?.videoHeight || sink?.height);
+    if (!(ratio > 0 && ratio < 10) || !box?.width || !box?.height) return;
+    if (ratio !== aspect) { aspect = ratio; announce(); }
+    const containW = Math.min(box.width, box.height * ratio), h = containW / ratio;
+    const w = presentation.fit === 'stretch' ? box.width : containW;
+    for (const [name,value] of Object.entries({w,h,x:(box.width-w)/2,y:(box.height-h)/2}))
+      root.style.setProperty('--retroone-media-' + name, value + 'px');
+  }
+  function enableTouchGamepad() {
+    if (!touchEnabled || !switchSupported) { touchEnableRequested = false; touchInputHost = null; return; }
+    // Reuse the upstream dashboard command, including its normal persistence.
+    // A later transport attachment/reconnection gets one retry. Desktop users
+    // who have not enabled touch keep their own gamepad-toggle preference.
+    const host = window.webrtcInput || null;
+    if (!touchEnableRequested || (host && host !== touchInputHost)) {
+      window.postMessage({type:'gamepadControl', enabled:true}, window.location.origin);
+      touchEnableRequested = true; touchInputHost = host;
+    }
+  }
+  window.addEventListener('message', event => {
+    if (event.origin !== window.location.origin || event.source !== window.parent || window.parent === window) return;
+    const data = event.data;
+    if (!data || data.version !== 1) return;
+    if (data.type === 'retroone:presentation') {
+      if (data.embedded !== true || !['contain','stretch'].includes(data.fit) || typeof data.touch !== 'boolean' ||
+          (data.menu !== undefined && typeof data.menu !== 'boolean') ||
+          (data.immersive !== undefined && typeof data.immersive !== 'boolean')) return;
+      presentation = data; touchEnabled = data.touch;
+      if (!touchEnabled || data.menu) releaseTouch();
+      switchSession(switchActive || touchEnabled); enableTouchGamepad(); present(); return;
+    }
+    if (data.type !== 'retroone:controls' || !Number.isSafeInteger(data.sequence) || data.sequence < 0 ||
+        data.sequence < touchSequence || !Array.isArray(data.buttons) || data.buttons.length !== 17 ||
+        !Array.isArray(data.axes) || data.axes.length !== 4 ||
+        !Array.from(data.buttons).every(v => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1) ||
+        !Array.from(data.axes).every(v => typeof v === 'number' && Number.isFinite(v) && v >= -1 && v <= 1)) return;
+    const signature = JSON.stringify([data.buttons,data.axes]);
+    if (data.sequence === touchSequence && signature !== touchSignature) return;
+    touchSequence = data.sequence; touchSignature = signature;
+    if (document.hidden || !touchEnabled || presentation?.menu) return;
+    touchButtons = data.buttons.slice(); touchAxes = data.axes.slice(); touchSeen = performance.now();
+  });
+  window.addEventListener('resize', present);
+  setInterval(() => { if (performance.now()-touchSeen >= 1200) releaseTouch(); enableTouchGamepad(); present(); }, 100);
+  announce();
 })();

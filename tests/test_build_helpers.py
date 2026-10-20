@@ -157,3 +157,28 @@ def test_screenshot_manifest_matches_exact_reviewed_bytes(tmp_path):
     image.write_bytes(b'\x89PNG\0different unreviewed pixels')
     errors = violations(['docs/screenshots/library.png'], tmp_path)
     assert any('SHA256 mismatch' in reason for _, reason in errors)
+
+
+def test_product_icons_require_own_mark_and_exact_reviewed_bytes(tmp_path):
+    folder = tmp_path / 'web/icons'
+    folder.mkdir(parents=True)
+    source = tmp_path / 'web/favicon.svg'
+    source.write_text('<svg xmlns="http://www.w3.org/2000/svg"/>')
+    icon = folder / 'icon-192.png'
+    icon.write_bytes(b'\x89PNG\0generated application mark')
+    manifest = {'source': 'web/favicon.svg', 'source_sha256': hashlib.sha256(source.read_bytes()).hexdigest(),
+                'files': [{'path': icon.name, 'sha256': hashlib.sha256(icon.read_bytes()).hexdigest()}]}
+    (folder / 'manifest.json').write_text(json.dumps(manifest))
+    assert not violations(['web/icons/icon-192.png'], tmp_path)
+    # A replacement of either the reviewed vector or rendered icon must fail.
+    icon.write_bytes(b'\x89PNG\0unreviewed artwork')
+    assert violations(['web/icons/icon-192.png'], tmp_path)
+    manifest['files'][0]['sha256'] = hashlib.sha256(icon.read_bytes()).hexdigest()
+    (folder / 'manifest.json').write_text(json.dumps(manifest))
+    source.write_text('<svg>different mark</svg>')
+    assert violations(['web/icons/icon-192.png'], tmp_path)
+    # This manifest is not an escape hatch for unrelated cover caches.
+    manifest['source_sha256'] = hashlib.sha256(source.read_bytes()).hexdigest()
+    manifest['files'][0]['path'] = 'cover.png'
+    (folder / 'manifest.json').write_text(json.dumps(manifest))
+    assert violations(['web/icons/cover.png'], tmp_path)

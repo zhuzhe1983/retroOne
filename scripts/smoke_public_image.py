@@ -49,6 +49,22 @@ def check(image):
             with urlopen(base + '/' + resource, timeout=10) as response:
                 if b'RetroI18n' not in response.read():
                     raise RuntimeError('Missing interface translation resource: ' + resource)
+        with urlopen(base + '/manifest.webmanifest', timeout=10) as response:
+            manifest = json.load(response)
+        if manifest.get('display') != 'standalone' or manifest.get('scope') != '/':
+            raise RuntimeError('PWA install scope/display is inconsistent')
+        for resource in ('mobile-player.js', 'mobile-player.css', 'emulator-input.js', 'pwa-install.js'):
+            with urlopen(base + '/' + resource, timeout=10) as response:
+                if len(response.read()) < 100:
+                    raise RuntimeError('Missing mobile player resource: ' + resource)
+        with urlopen(base + '/service-worker.js', timeout=10) as response:
+            worker = response.read()
+            if response.headers.get('Service-Worker-Allowed') != '/' or b'__RETROONE_PWA_VERSION__' in worker:
+                raise RuntimeError('PWA worker scope/version is inconsistent')
+        for icon in manifest['icons']:
+            with urlopen(base + '/' + icon['src'].lstrip('/'), timeout=10) as response:
+                if not response.read().startswith(b'\x89PNG\r\n\x1a\n'):
+                    raise RuntimeError('Missing installable app icon')
         if games['total'] != 0: raise RuntimeError('Public image unexpectedly contains indexed games')
         with urlopen(base + '/p/player1/api/library-management', timeout=10) as response:
             management = json.load(response)
@@ -58,7 +74,8 @@ def check(image):
                         "from pathlib import Path; p=Path('/library-data/.write-probe'); p.write_text('synthetic'); p.unlink(); print('shared library data writable by app user')"], check=True)
         probe = "from pathlib import Path; import shutil; assert all(not any(p.is_file() for p in Path(root).rglob('*')) for root in ('/opt/retroone/libretro','/opt/retroone/vendor','/opt/retroone/system','/roms','/artwork')); assert not shutil.which('pcsx2'); assert not shutil.which('sdlpal'); assert not shutil.which('retroone-eden'); assert not shutil.which('eden'); assert not Path('/opt/eden').exists(); print('no private runtime, ROM, firmware or artwork payloads')"
         subprocess.run(['docker', 'exec', name, '/lsiopy/bin/python', '-c', probe], check=True)
-        report = {'health': health, 'empty_library': True, 'profiles_endpoint': bool(profiles), 'interface_language_saved': 'en', 'private_vendor_payloads': False}
+        report = {'health': health, 'empty_library': True, 'profiles_endpoint': bool(profiles), 'interface_language_saved': 'en',
+                  'pwa_manifest_and_worker': True, 'mobile_player_assets': True, 'private_vendor_payloads': False}
         print(json.dumps(report, ensure_ascii=False))
     finally:
         subprocess.run(['docker', 'logs', '--tail', '80', name], check=False)

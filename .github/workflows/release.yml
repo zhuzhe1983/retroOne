@@ -39,14 +39,13 @@ jobs:
           python scripts/check_public_source.py
           python -c 'import json; from scripts.fetch_runtime import records, LOCK; print(len(records(json.loads(LOCK.read_text()))), "reviewed local assets; no download")'
           docker compose config --quiet
-          node --check web/app.js
-          node --check container/stream-input.js
+          for script in web/*.js container/stream-input.js; do node --check "$script"; done
       - name: Unit and API regression tests (no copyrighted fixtures)
         env:
           RETROONE_FETCH_ARTWORK: '0'
         run: python -m pytest -q
       - name: Browser input bridge regression tests (generated fixtures)
-        run: node --test tests/test_stream_input.cjs tests/test_review_ui.cjs tests/test_library_management_ui.cjs tests/test_i18n.cjs tests/test_interface_language_ui.cjs
+        run: node --test tests/test_*.cjs
 
   build:
     needs: checks

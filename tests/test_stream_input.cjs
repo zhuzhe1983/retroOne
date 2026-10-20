@@ -343,6 +343,31 @@ test('stream invalid zoom is ignored without changing geometry or held input; ol
   assert.equal(h.read()[0].buttons[0].value,1);
 });
 
+test('actual pinned pointer mapper follows stretched video after upstream manual sizing',{skip:!process.env.SELKIES_BUNDLE},async()=>{
+  const h=harness();await h.settle();
+  const bundle=fs.readFileSync(process.env.SELKIES_BUNDLE,'utf8');
+  const start=bundle.indexOf('_sinkBox(e,t){'),end=bundle.indexOf('_noteScreenAnchor(',start);
+  assert.ok(start>=0&&end>start,'Supply the inspected pinned Selkies bundle');
+  const mapper=vm.runInContext('({'+bundle.slice(start,end)+'})',h.context);
+  h.window.manualResolution=true;
+  const video={tagName:'VIDEO',videoWidth:1280,videoHeight:720,style:{objectFit:'contain'},
+    parentElement:{getBoundingClientRect:()=>({width:1200,height:600})},
+    getBoundingClientRect:()=>{
+      const p=h.document.documentElement.props;
+      return {left:parseFloat(p['--retroone-media-x']),top:parseFloat(p['--retroone-media-y']),
+        width:parseFloat(p['--retroone-media-w']),height:parseFloat(p['--retroone-media-h'])};
+    }};
+  h.elements.set('stream',video);
+  h.message(presentation({fit:'stretch',zoom:1.5}));
+  for(const upstreamResize of [false,true]){
+    if(upstreamResize){video.style.objectFit='contain';h.tick(100);}
+    const mapped=mapper._sinkBox(null,video),rect=video.getBoundingClientRect();
+    assert.deepEqual([mapped.boxLeft,mapped.boxTop,mapped.boxW,mapped.boxH],
+      [rect.left,rect.top,rect.width,rect.height],'pointer geometry must use the displayed rectangle without a second contain fit');
+    assert.equal(mapped.sinkW,1280);assert.equal(mapped.sinkH,720);
+  }
+});
+
 test('actual pinned Selkies poller sees touch, physical merge and timeout release',{skip:!process.env.SELKIES_BUNDLE},async()=>{
   const h=harness(),bundle=fs.readFileSync(process.env.SELKIES_BUNDLE,'utf8');const start=bundle.indexOf('D=class{constructor(e,t,n,r){this.gamepad=');const end=bundle.indexOf('};function xe',start);
   assert.ok(start>=0&&end>start);h.context.T=4;h.context.E='linux';vm.runInContext('GamepadManager = '+bundle.slice(start+2,end+1),h.context);

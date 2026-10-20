@@ -250,12 +250,18 @@
         .retroone-embedded .video-container #stream,.retroone-embedded .video-container #videoStream,
         .retroone-embedded .video-container #videoCanvas,.retroone-embedded .video-container #videoWorkerCanvas,
         .retroone-embedded .video-container #overlayInput{
+          /* Selkies caps video elements at the viewport size. Remove those
+             caps so video and canvas use the same scaled, centered rectangle. */
+          max-width:none!important;max-height:none!important;
           width:var(--retroone-media-w,100%)!important;height:var(--retroone-media-h,100%)!important;
           left:var(--retroone-media-x,0px)!important;top:var(--retroone-media-y,0px)!important;object-fit:fill!important}
       `;
       (document.head || root).appendChild(style);
     }
     const sinks = ['videoStream','stream','videoWorkerCanvas','videoCanvas'].map(id=>document.getElementById(id)).filter(Boolean);
+    // The pinned pointer mapper reads inline objectFit, not computed CSS.
+    // Match our displayed rectangle so stretched video keeps accurate input.
+    for (const media of sinks) if (media.tagName === 'VIDEO') media.style.objectFit = 'fill';
     const sink = sinks.find(s => (s.videoWidth || s.width) > 0 && (s.videoHeight || s.height) > 0);
     const box = sink?.parentElement?.getBoundingClientRect();
     const ratio = (sink?.videoWidth || sink?.width) / (sink?.videoHeight || sink?.height);

@@ -29,6 +29,7 @@
 .touch-shoulders{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;flex:none}
 .touch-shoulders .touch-button{width:min(clamp(52px,calc(64px*var(--touch-size)),84px),calc((var(--rail-width) - 16px)/2));height:var(--shoulder-height);border-radius:12px;font-size:13px}
 .touch-system .touch-button{flex:1;min-width:52px;width:auto;height:48px;border-radius:11px;font-size:12px;touch-action:manipulation}
+.touch-rail-bottom{display:flex;flex:none;width:100%;align-items:center;justify-content:center;gap:8px}.touch-side-system{flex:none;width:clamp(44px,calc(48px*var(--touch-size)),56px);height:44px;border-radius:11px;font-size:10px;padding:0 3px}
 .touch-stick{position:relative;display:flex;align-items:center;justify-content:center;width:var(--stick-size);height:var(--stick-size);flex:none;border:1px solid #4e6380;border-radius:50%;background:radial-gradient(circle,#223850,#111d2c);touch-action:none}
 .touch-stick-knob{width:51%;height:51%;border:1px solid #7a93af;border-radius:50%;background:linear-gradient(140deg,#506b89,#263c55);transform:translate(var(--stick-x,0),var(--stick-y,0));pointer-events:none;box-shadow:0 3px 12px #0008}
 .touch-stick small{position:absolute;bottom:5px;font-size:9px;color:#9eb2cb;pointer-events:none}
@@ -81,7 +82,7 @@
  .touch-active:is([data-touch-layout=nintendo3ds],[data-touch-layout=switch],[data-touch-layout=psp],[data-touch-layout=playstation],[data-touch-layout=standard]) :is(.touch-dpad,.touch-face){grid-column:1/-1;grid-row:1}
  .touch-active:is([data-touch-layout=nintendo3ds],[data-touch-layout=switch],[data-touch-layout=psp],[data-touch-layout=playstation],[data-touch-layout=standard]) .touch-shoulders{grid-column:1;grid-row:2;flex-direction:column;gap:4px}
  .touch-active:is([data-touch-layout=nintendo3ds],[data-touch-layout=switch],[data-touch-layout=psp],[data-touch-layout=playstation],[data-touch-layout=standard]) .touch-shoulders .touch-button{width:48px}
- .touch-active:is([data-touch-layout=nintendo3ds],[data-touch-layout=switch],[data-touch-layout=psp],[data-touch-layout=playstation],[data-touch-layout=standard]) .touch-stick{grid-column:2;grid-row:2}
+ .touch-active:is([data-touch-layout=nintendo3ds],[data-touch-layout=switch],[data-touch-layout=psp],[data-touch-layout=playstation],[data-touch-layout=standard]) .touch-rail-bottom{grid-column:2;grid-row:2;flex-direction:column;gap:4px}.touch-active .touch-side-system{width:44px}
 }
 @media(prefers-reduced-motion:reduce){.touch-button,.touch-stick-knob{transition:none}}
 

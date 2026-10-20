@@ -72,7 +72,7 @@
   function post(payload){if(context?.iframe?.contentWindow)context.iframe.contentWindow.postMessage(payload,location.origin);}
   function interactive(){return !!context&&dialog.open&&prefs.touch&&ready&&supported&&!menuOpen&&!toolsOpen&&!document.hidden&&!document.querySelector('dialog[open]:not(#play-dialog)');}
   function send(){if(context)post({type:'retroone:controls',version:1,...input.snapshot(),sequence:++sequence});}
-  function presentation(){if(context)post({type:'retroone:presentation',version:1,fit:prefs.fit,embedded:true,touch:prefs.touch,menu:menuOpen||toolsOpen,immersive:(immersive||prefs.touch||!!document.fullscreenElement||innerWidth<=700)&&!menuOpen&&!toolsOpen});}
+  function presentation(){if(context)post({type:'retroone:presentation',version:1,fit:prefs.fit,embedded:true,nativeTools:true,touch:prefs.touch,menu:menuOpen||toolsOpen,immersive:(immersive||prefs.touch||!!document.fullscreenElement||innerWidth<=700)&&!menuOpen&&!toolsOpen});}
   function release(){clearTimeout(systemPulseTimer);systemPulseTimer=null;input.clear();pointers.clear();for(const node of dialog.querySelectorAll('[data-touch-index], [data-touch-zone]')){node.classList.remove('is-pressed');node.style.removeProperty('--stick-x');node.style.removeProperty('--stick-y');}send();}
   function status(){
     $('touch-status').textContent=!ready?t('正在连接触控输入；也可使用原模拟器控件。'):!supported?t('此运行环境尚不支持这套触控，请使用原模拟器控件或实体手柄。'):effectivePreset()==='dos'?t('DOS 默认键盘布局；不同游戏可在模拟器内调整按键。'):t('实体手柄与键盘仍可使用。');
@@ -83,9 +83,12 @@
   function renderControls(){
     const layout=presets[effectivePreset()],dos=effectivePreset()==='dos',dual=layout.sticks===2,is3ds=effectivePreset()==='nintendo3ds';
     const shoulders=side=>layout.shoulders?`<div class="touch-shoulders">${button(side==='left'?4:5,dos?(side==='left'?'Shift':'Alt'):effectivePreset()==='arcade'?(side==='left'?'E':'F'):(side==='left'?'L':'R'))}${layout.triggers?button(side==='left'?6:7,is3ds?(side==='left'?'ZL':'ZR'):(side==='left'?'L2':'R2')):''}</div>`:'';
-    left.innerHTML=`${shoulders('left')}<div class="touch-dpad" data-touch-zone="dpad" role="group" aria-label="${escape(t('方向键'))}">${button(12,'↑','dpad-up')}${button(13,'↓','dpad-down')}${button(14,'←','dpad-left')}${button(15,'→','dpad-right')}</div>${layout.sticks?stick('left'):''}`;
-    right.innerHTML=`${shoulders('right')}<div class="touch-face">${layout.face.map((label,index)=>button(index,label,`face-${index}`)).join('')}</div>${dual?stick('right'):''}`;
-    system.innerHTML=`${dual&&!is3ds?button(10,'L3'):''}${button(8,dos?'Esc':effectivePreset()==='arcade'?t('投币'):effectivePreset()==='switch'?'−':'SELECT')}${button(9,dos?'Enter':effectivePreset()==='switch'?'+':'START')}${dual&&!is3ds?button(11,'R3'):''}`;
+    const selectLabel=dos?'Esc':effectivePreset()==='arcade'?t('投币'):effectivePreset()==='switch'?'−':'SELECT';
+    const startLabel=dos?'Enter':effectivePreset()==='switch'?'+':'START';
+    left.innerHTML=`${shoulders('left')}<div class="touch-dpad" data-touch-zone="dpad" role="group" aria-label="${escape(t('方向键'))}">${button(12,'↑','dpad-up')}${button(13,'↓','dpad-down')}${button(14,'←','dpad-left')}${button(15,'→','dpad-right')}</div><div class="touch-rail-bottom">${button(8,selectLabel,'touch-side-system')}${layout.sticks?stick('left'):''}</div>`;
+    right.innerHTML=`${shoulders('right')}<div class="touch-face">${layout.face.map((label,index)=>button(index,label,`face-${index}`)).join('')}</div><div class="touch-rail-bottom">${dual?stick('right'):''}${button(9,startLabel,'touch-side-system')}</div>`;
+    system.innerHTML=dual&&!is3ds?`${button(10,'L3')}${button(11,'R3')}`:'';
+    system.closest('.mobile-game-keys').hidden=!system.children.length;
     dialog.dataset.touchLayout=effectivePreset();update();
   }
   function update(){
@@ -103,7 +106,7 @@
     $('touch-preset').innerHTML=`<option value="auto">${escape(t('按平台自动选择'))}</option>${Object.entries(presets).map(([id,preset])=>`<option value="${id}">${escape(t(preset.label))}</option>`).join('')}`;
     $('touch-preset').value=prefs.preset;
     for(const zone of dialog.querySelectorAll('[data-touch-zone]'))zone.setAttribute('aria-label',t(zone.dataset.touchZone==='dpad'?'方向键':zone.dataset.touchZone==='left'?'左摇杆':'右摇杆'));
-    if(effectivePreset()==='arcade'&&system.querySelector('[data-touch-index="8"]')){const coin=system.querySelector('[data-touch-index="8"]');coin.textContent=t('投币');coin.setAttribute('aria-label',t('投币'));}
+    if(effectivePreset()==='arcade'&&left.querySelector('[data-touch-index="8"]')){const coin=left.querySelector('[data-touch-index="8"]');coin.textContent=t('投币');coin.setAttribute('aria-label',t('投币'));}
     status();
   }
   function setMenu(open){

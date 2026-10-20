@@ -169,7 +169,7 @@ test('actual pinned Selkies GamepadManager reports merged input and reindexes na
   h.pads([null,null,pad(2),null]);await h.session(null);h.tick(40);changes.length=0;h.tick(16);assert.ok(changes.some(c=>c[0]==='axis'&&c[1]===2&&c[2]===2&&c[3]===physical.axes[2]));manager.destroy();
 });
 
-const presentation = (extra={}) => ({type:'retroone:presentation',version:1,embedded:true,touch:true,fit:'contain',immersive:true,menu:false,...extra});
+const presentation = (extra={}) => ({type:'retroone:presentation',version:1,embedded:true,touch:true,fit:'contain',immersive:true,menu:false,nativeTools:true,...extra});
 const controls = (sequence=1,buttons={},axes=[0,0,0,0]) => ({type:'retroone:controls',version:1,sequence,buttons:Array.from({length:17},(_,i)=>buttons[i]||0),axes});
 
 test('embedded app hides only pinned floating tool entries during play and restores them through its menu',async()=>{
@@ -190,6 +190,19 @@ test('embedded app hides only pinned floating tool entries during play and resto
   h.message(presentation({menu:true,immersive:true}));
   assert.equal(root.classes.has('retroone-app-playing'),false);
   assert.equal(root.classes.has('retroone-immersive'),false,'menu must reveal the upstream dashboard even if immersive requested');
+});
+
+test('a reconnected stream keeps floating tools reachable for an older open parent page',async()=>{
+  const h=harness();await h.settle();const root=h.document.documentElement;
+  const oldParent=presentation({touch:false,immersive:false});delete oldParent.nativeTools;
+  h.message(oldParent);
+  assert.equal(root.classes.has('retroone-app-playing'),false);
+  h.message(presentation({touch:false,immersive:false}));
+  assert.equal(root.classes.has('retroone-app-playing'),true);
+  h.message({...oldParent,nativeTools:'true'});
+  assert.equal(root.classes.has('retroone-app-playing'),true,'malformed presentation is ignored');
+  h.message(oldParent);
+  assert.equal(root.classes.has('retroone-app-playing'),false,'legacy behavior returns without losing the existing frame');
 });
 
 test('native-tools mode keeps pads neutral while retaining upstream keyboard-assist input until returning to play',async()=>{

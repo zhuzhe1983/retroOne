@@ -230,7 +230,9 @@
     root.classList.toggle('retroone-embedded', true);
     root.classList.toggle('retroone-touch', presentation.touch && switchSupported);
     root.classList.toggle('retroone-immersive', switchSupported && presentation.immersive === true && presentation.menu !== true);
-    root.classList.toggle('retroone-app-playing', presentation.menu !== true);
+    // Older open parent pages have no explicit tools screen. Keep their
+    // floating entries available if only the stream frame reconnects.
+    root.classList.toggle('retroone-app-playing', presentation.nativeTools === true && presentation.menu !== true);
     if (!document.getElementById('retroone-stream-style')) {
       const style = document.createElement('style'); style.id = 'retroone-stream-style';
       // IDs from the pinned Selkies client. Do not change sink visibility,
@@ -281,6 +283,7 @@
     if (data.type === 'retroone:presentation') {
       if (data.embedded !== true || !['contain','stretch'].includes(data.fit) || typeof data.touch !== 'boolean' ||
           (data.menu !== undefined && typeof data.menu !== 'boolean') ||
+          (data.nativeTools !== undefined && typeof data.nativeTools !== 'boolean') ||
           (data.immersive !== undefined && typeof data.immersive !== 'boolean')) return;
       presentation = data; touchEnabled = data.touch;
       if (!touchEnabled || data.menu) releaseTouch();

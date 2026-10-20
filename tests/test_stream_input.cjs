@@ -172,6 +172,42 @@ test('actual pinned Selkies GamepadManager reports merged input and reindexes na
 const presentation = (extra={}) => ({type:'retroone:presentation',version:1,embedded:true,touch:true,fit:'contain',immersive:true,menu:false,...extra});
 const controls = (sequence=1,buttons={},axes=[0,0,0,0]) => ({type:'retroone:controls',version:1,sequence,buttons:Array.from({length:17},(_,i)=>buttons[i]||0),axes});
 
+test('embedded app hides only pinned floating tool entries during play and restores them through its menu',async()=>{
+  const h=harness();await h.settle();const root=h.document.documentElement;
+  assert.equal(root.classes.has('retroone-app-playing'),false,'standalone desktop keeps upstream UI');
+  assert.equal(h.elements.has('retroone-stream-style'),false);
+  h.message(presentation({touch:false,immersive:false}));
+  assert.equal(root.classes.has('retroone-app-playing'),true,'normal embedded play is independent of viewport and touch setting');
+  assert.equal(root.classes.has('retroone-immersive'),false);
+  const css=h.elements.get('retroone-stream-style').textContent;
+  for(const selector of ['.dashboard-overlay-container .virtual-keyboard-button','.dashboard-overlay-container .toggle-handle'])
+    assert.ok(css.includes('.retroone-app-playing '+selector));
+  assert.equal(/#[\w-]*(?:keyboard-input-assist|overlayInput)\s*\{display:none/.test(css),false);
+  h.message(presentation({touch:false,immersive:false,menu:true}));
+  assert.equal(root.classes.has('retroone-app-playing'),false,'native keyboard/dashboard entries return with the app menu');
+  h.message(presentation({touch:false,immersive:false}));
+  assert.equal(root.classes.has('retroone-app-playing'),true);
+  h.message(presentation({menu:true,immersive:true}));
+  assert.equal(root.classes.has('retroone-app-playing'),false);
+  assert.equal(root.classes.has('retroone-immersive'),false,'menu must reveal the upstream dashboard even if immersive requested');
+});
+
+test('native-tools mode keeps pads neutral while retaining upstream keyboard-assist input until returning to play',async()=>{
+  const h=harness();await h.session({engine:'DOSBox'});h.pads([pad(0,[.7,0,0,0]),null,null,null]);
+  h.message(presentation());h.tick(40);
+  // The parent dismisses its own panel but keeps menu:true for native tools.
+  h.message(presentation({menu:true,immersive:false}));h.message(controls(1,{0:1,15:1}));h.frame();
+  assert.ok(h.read()[0].axes.every(v=>v===0));assert.ok(h.read()[0].buttons.every(b=>b.value===0));
+  assert.equal(h.forwarded.length,0,'gamepad-to-keyboard translation must remain gated');
+  const assist=new h.Input();assist.id='keyboard-input-assist';
+  h.key('keydown','KeyB',{target:assist});h.key('keyup','KeyB',{target:assist});
+  assert.deepEqual(h.forwarded.map(e=>[e.type,e.key,e.target.id]),[['keydown','b','keyboard-input-assist'],['keyup','b','keyboard-input-assist']]);
+  assert.equal(h.document.documentElement.classes.has('retroone-app-playing'),false);
+  h.message(presentation());h.tick(40);
+  assert.equal(h.read()[0].axes[0],.7);assert.equal(h.read()[0].buttons[0].value,0);
+  assert.equal(h.document.documentElement.classes.has('retroone-app-playing'),true);
+});
+
 test('menu neutralizes every native slot without reindexing, losing metadata or changing the native gamepad preference',async()=>{
   const h=harness(),p1=pad(1),p3=pad(3,[.9,-.8,.7,-.6],'');const native=[null,p1,null,p3];
   h.pads(native);await h.settle();h.message(presentation({touch:false,menu:true,immersive:false}));

@@ -1,19 +1,19 @@
 {
   "source": "web/favicon.svg",
-  "source_sha256": "c16c25743ec76f400db0b8ecde92d29e3f21a08e421c69ccf582c8a207685878",
-  "method": "Headless Chromium SVG rendering at exact dimensions; maskable changes the background radius from 16 to 0, retaining the original centered mark. No external art.",
+  "source_sha256": "d12de8d7db7558495e7d5b89d4c7fa890cf5985c9693431576a440f4cde80e41",
+  "method": "Headless Chromium SVG rendering at exact dimensions; maskable changes the background radius from 16 to 0, retaining the centered rounded three-bar mark. No external art.",
   "files": [
     {
       "path": "icon-192.png",
-      "sha256": "27799c6e7040fe33895d0a22d1bc9235c071e057df6c2cb103289546e49b2271"
+      "sha256": "b9cc39e96c42d0dc19fe859d79e3d7bd547c18f43f1f7d07ddcfdbf725ec7807"
     },
     {
       "path": "icon-512.png",
-      "sha256": "bcf517db70584079365d2e3b1754e1868c228de9d9580949a99bc3bf3e19c0b3"
+      "sha256": "b955b86de33fa9a2807b2144c8ab88ea33f4e12024a662a827b1476e2e20d7a9"
     },
     {
       "path": "icon-maskable-512.png",
-      "sha256": "e4f8dd371e7c82e92cde79f0db21cb74dd68b483642ad895184e66ca3d8a20b4"
+      "sha256": "7a0984656a2a3df0948fbfd2c3f538be84e8437742f535decd93e0426f559f8c"
     }
   ]
 }

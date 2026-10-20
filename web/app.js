@@ -37,7 +37,7 @@
     games: [], platforms: [], total: 0, platform: initial.get('platform') || '',
     query: initial.get('q') || '', mode: ['browser', 'stream', 'unavailable'].includes(initial.get('mode')) ? initial.get('mode') : '',
     favorites: initial.get('favorite') === 'true', recent: initial.get('recent') === 'true', reviewFilter: validReviewFilter(initial.get('review_filter')), selected: null, initialGame: initial.get('game'),
-    loading: false, request: 0, controller: null, session: null, playMode: null, health: null,
+    loading: false, request: 0, controller: null, session: null, playMode: null, health: null, connectionStatus: 'connecting',
     favoritePending: new Set(), scanPending: false, wasScanning: false, healthRefreshing: false,
     detailRequest: 0, focusReturn: null, launching: false,
     profile: null, profiles: [], profileEpoch: 0, profileRequests: new Set(), profileEditing: null, profileEditEnter: false, profileAvatar: 'pixel', pendingProfile: null, profileSaving: false,
@@ -49,6 +49,12 @@
     networkCapabilities: null, networkInvites: [], networkRoom: null, networkLoading: false, networkBusy: false, networkVersion: 0, networkCreate: null, networkSeen: new Set(), activeNetworkRoomId: null,
   };
   const presenceClientId = newRequestId();
+  const deviceStorageKey = 'retroone:display-device';
+  const savedDeviceId = remembered(deviceStorageKey);
+  const displayDeviceId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(savedDeviceId || '') ? savedDeviceId.toLowerCase() : newRequestId();
+  remember(deviceStorageKey, displayDeviceId);
+  const deviceStorageAvailable = remembered(deviceStorageKey) === displayDeviceId;
+  const displaySettingsPath = `/api/settings/display?device_id=${encodeURIComponent(displayDeviceId)}`;
   let presenceQueue = Promise.resolve();
   let toastTimer, searchTimer, gamepadFrame, gamepadLast = 0, gamepadPressed = {}, gamepadName = '';
   const gamepadHeldAt = {}, gamepadRepeatAt = {};
@@ -125,8 +131,8 @@
       if ($('game-frame')) $('game-frame').title = t('{value1} · 游戏画面', {value1: $('play-title').textContent});
     }
     window.RetroMobilePlayer?.localize();
-    if (state.health && $('status-button').dataset.state === 'online') renderHealth();
-    else $('connection-label').textContent = $('status-button').dataset.state === 'error' ? t('连接暂时中断') : t('连接中');
+    if (state.health && state.connectionStatus === 'online') renderHealth();
+    else if (state.connectionStatus === 'connecting') $('health-detail').textContent = t('正在检查服务状态…');
     if (state.migrationData) renderMigration(state.migrationData);
     for (const [id, recipe] of statusMessages) if ($(id)) $(id).textContent = recipe.source ? I18n.t(recipe.source, recipe.params) : recipe.raw;
     $('search').value = search; $('platform-nav').scrollLeft = gridScroll; updateClock();
@@ -333,7 +339,7 @@
   function showSelf() {
     if (!state.profile) { showProfiles(); return; }
     renderSelfDetails(); $('self-dialog').showModal(); syncModalBody();
-    (state.session ? $('resume-session') : $('self-switch-profile')).focus();
+    (state.session ? $('resume-session') : $('self-display-settings')).focus();
   }
   function closeSelf() { $('self-dialog').close(); syncModalBody(); $('profile-button').focus(); }
   function displayMessage(message = '', error = false) {
@@ -347,7 +353,7 @@
     const data = state.displayData, active = data?.active, busy = state.displayLoading || state.displaySaving;
     const available = data?.capabilities?.available === true;
     const focusedValue = document.activeElement?.dataset.displayResolution;
-    $('display-title').textContent = t("{value1} 的画面设置", {value1: state.profile?.name || t("玩家")});
+    $('display-title').textContent = t("{value1} · 这台设备", {value1: state.profile?.name || t("玩家")});
     $('display-current').hidden = !(active || data?.active_unknown);
     if (active || data?.active_unknown) {
       $('display-current-title').textContent = !state.displayFresh ? t("上次读取的云端会话") : state.session && (data.active_unknown || sessionId(state.session) === active?.session_id) ? t("当前会话 · {value1}", {value1: sessionTitle(state.session)}) : t("当前云端会话");
@@ -358,8 +364,12 @@
     $('display-options').innerHTML = displayOptions().map((option) => `<button type="button" class="display-option" data-display-resolution="${escapeHTML(option.value)}" aria-pressed="${state.displayDraft === option.value}" ${!available || busy || !state.displayFresh ? 'disabled' : ''}><strong>${escapeHTML(option.value)}</strong><small>${option.width} × ${option.height}</small>${state.displayDraft === option.value ? icon('check') : ''}</button>`).join('');
     $('display-unavailable').hidden = !data || available;
     $('display-unavailable').textContent = (data?.capabilities?.reason && diagnostic(data.capabilities.reason)) || t("当前服务暂不支持调整串流分辨率。");
-    $('save-display').disabled = busy || !state.displayFresh || !available || !displayOptions().some((option) => option.value === state.displayDraft) || state.displayDraft === data?.settings?.stream_resolution;
-    $('save-display').textContent = state.displaySaving ? t("正在保存…") : t("保存设置");
+    $('save-display').disabled = busy || !state.displayFresh || !available || !displayOptions().some((option) => option.value === state.displayDraft) || (data?.source === 'device' && state.displayDraft === data?.settings?.stream_resolution);
+    $('save-display').textContent = state.displaySaving ? t("正在保存…") : t("保存到这台设备");
+    $('display-device-source').textContent = !data ? '' : data.source === 'device' ? t('已为这台设备单独保存。') : t('尚未单独设置，沿用玩家默认值：{value1}。', {value1: data.default_settings?.stream_resolution || data.settings.stream_resolution});
+    $('display-device-storage').hidden = deviceStorageAvailable;
+    $('reset-display').hidden = data?.source !== 'device';
+    $('reset-display').disabled = busy || !state.displayFresh;
     $('display-options').setAttribute('aria-busy', String(busy));
     if (focusedValue) [...$('display-options').querySelectorAll('button')].find((button) => button.dataset.displayResolution === focusedValue && !button.disabled)?.focus({preventScroll: true});
   }
@@ -370,9 +380,10 @@
     state.displayLoading = true; state.displayFresh = false; state.displayDraft = state.displayData?.settings?.stream_resolution || null;
     $('retry-display').hidden = true; displayMessage(state.displayData ? t("显示上次读取的设置，正在刷新…") : ''); renderDisplaySettings();
     try {
-      const result = await api('/api/settings/display', {timeoutMs: 6000, signal: controller.signal, priority: 'high'});
+      const result = await api(displaySettingsPath, {timeoutMs: 6000, signal: controller.signal, priority: 'high'});
       if (epoch !== state.profileEpoch || request !== state.displayRequest) return;
       if (!result?.settings || !result?.capabilities) throw interfaceError("画面设置返回不完整，请重试。");
+      if (result.scope !== 'device' || result.device_id !== displayDeviceId) throw interfaceError('服务尚未支持设备独立设置，请在升级完成后重试。');
       state.displayData = result; state.displayDraft = result.settings.stream_resolution; state.displayFresh = true; displayMessage();
     } catch (error) {
       if (epoch !== state.profileEpoch || request !== state.displayRequest) return;
@@ -391,15 +402,16 @@
     state.displayReadController?.abort(); state.displayReadController = null; state.displayFresh = false;
     $('display-dialog').close(); syncModalBody(); showSelf(); $('self-display-settings').focus();
   }
-  async function saveDisplaySettings() {
-    if ($('save-display').disabled || !state.profile) return;
+  async function saveDisplaySettings(reset = false) {
+    if ((reset ? $('reset-display').disabled || $('reset-display').hidden : $('save-display').disabled) || !state.profile) return;
     const epoch = state.profileEpoch, request = ++state.displayRequest, resolution = state.displayDraft;
     state.displaySaving = true; displayMessage(); renderDisplaySettings();
     try {
       // A closed panel or player switch cannot undo a write already sent.
-      const result = await api('/api/settings/display', {method: 'PATCH', body: JSON.stringify({stream_resolution: resolution}), cancelOnProfileChange: false});
+      const result = await api(displaySettingsPath, {method: reset ? 'DELETE' : 'PATCH', ...(reset ? {} : {body: JSON.stringify({stream_resolution: resolution})}), cancelOnProfileChange: false});
       if (epoch !== state.profileEpoch || request !== state.displayRequest) return;
       if (!result?.settings || !result?.capabilities) throw interfaceError("未收到完整的保存结果，请重新读取设置确认。");
+      if (result.scope !== 'device' || result.device_id !== displayDeviceId) throw interfaceError('服务尚未支持设备独立设置，请在升级完成后重试。');
       state.displayData = result; state.displayDraft = result.settings.stream_resolution; state.displayFresh = true;
       displayMessage(t("已保存，下次启动云游戏时生效。{value1}", {value1: result.active || result.active_unknown ? t("当前游戏继续运行。") : ''}));
     } catch (error) {
@@ -412,7 +424,7 @@
     }
   }
   function focusModalAction(dialog, direction) {
-    const buttons = [...dialog.querySelectorAll('button:not(:disabled):not([hidden])')];
+    const buttons = [...dialog.querySelectorAll('button:not(:disabled):not([hidden]), select:not(:disabled):not([hidden])')].filter((button) => button.getClientRects().length);
     const index = buttons.indexOf(document.activeElement), delta = direction === 'left' || direction === 'up' ? -1 : 1;
     buttons[(index + delta + buttons.length) % buttons.length]?.focus();
   }
@@ -823,7 +835,7 @@
     $('stop-session').disabled = false; $('stop-play').disabled = false;
     $('scan-button').disabled = false; $('scan-button').innerHTML = `${icon('library')}<span>${escapeHTML(t("管理游戏库"))}</span>`;
     $('migration-banner').hidden = true; $('toast').hidden = true;
-    $('connection-label').textContent = t("连接中"); $('status-button').dataset.state = 'connecting';
+    state.connectionStatus = 'connecting';
     remember('retroone:last-profile', profile.id); renderCurrentProfile(); renderSession(); renderDetail(null); renderPlatforms(); renderFilters(); updateURL();
     renderFamilyPresence();
     $('profile-dialog').close(); syncModalBody();
@@ -1277,7 +1289,7 @@
     const note = state.selected?.id === game.id ? $('game-detail').querySelector('.detail-note') : null;
     if (note && game.mode === 'stream') note.textContent = t("首次解压可能需要数分钟，请稍候。");
     try {
-      const result = await api(`/api/games/${encodeURIComponent(game.id)}/launch`, {method: 'POST', body: JSON.stringify({mode: game.mode, ...(replaceSessionId ? {replace_session_id: replaceSessionId} : {}), ...(networkRoomId ? {network_room_id: networkRoomId} : {})}), timeoutMs: 30 * 60 * 1000});
+      const result = await api(`/api/games/${encodeURIComponent(game.id)}/launch`, {method: 'POST', body: JSON.stringify({mode: game.mode, device_id: displayDeviceId, ...(replaceSessionId ? {replace_session_id: replaceSessionId} : {}), ...(networkRoomId ? {network_room_id: networkRoomId} : {})}), timeoutMs: 30 * 60 * 1000});
       const url = localURL(result.play_url, [`${state.profile.base_path}/play/`, `${state.profile.base_path}/stream/`]);
       if (!url) throw interfaceError("没有收到有效的游戏入口，请重新加载游戏库。");
       state.activeNetworkRoomId = networkRoomId || sessionNetworkRoomId(result.session); renderFamilyPresence();
@@ -1395,8 +1407,7 @@
 
   function renderHealth() {
     const health = state.health, scan = health?.library?.scan ?? health?.scan, scanning = scanIsRunning(health);
-      $('status-button').dataset.state = 'online';
-      $('connection-label').textContent = scanning ? t("正在整理目录") : t("局域网已连接");
+      state.connectionStatus = 'online';
       const browser = health.browser?.available;
       const count = health.library?.count;
       $('health-detail').textContent = t("服务已连接{value1}{value2}{value3}。各游戏能否启动，以详情中的运行状态为准。", {value1: count != null ? t(" · 已索引 {value1} 款游戏", {value1: number(count)}) : '', value2: browser === false ? t(" · 浏览器模拟器资源尚未就绪") : '', value3: scanning ? t(" · 正在扫描游戏目录{value1}", {value1: scan?.scanned != null ? t("，已检查 {value1} 项", {value1: number(scan.scanned)}) : ''}) : ''});
@@ -1427,7 +1438,8 @@
       }
     } catch (error) {
       if (epoch !== state.profileEpoch || error.name === 'AbortError') return;
-      $('status-button').dataset.state = 'error'; $('connection-label').textContent = t("连接暂时中断");
+      if (state.connectionStatus === 'online') notify(t("连接暂时中断"), true);
+      state.connectionStatus = 'error';
       $('health-detail').textContent = errorMessage(error);
     } finally {
       if (epoch === state.profileEpoch) state.healthRefreshing = false;
@@ -1587,7 +1599,7 @@
         else if ($('self-dialog').open) {
           if (key === 'back') closeSelf();
           else if (directional) focusModalAction($('self-dialog'), key);
-          else if (key === 'accept') document.activeElement?.click();
+          else if (key === 'accept') activateFocused();
         }
         else if ($('network-dialog').open) {
           if (key === 'back') closeNetwork();
@@ -1642,7 +1654,8 @@
   $('close-display').addEventListener('click', closeDisplaySettings);
   $('back-from-display').addEventListener('click', closeDisplaySettings);
   $('retry-display').addEventListener('click', loadDisplaySettings);
-  $('save-display').addEventListener('click', saveDisplaySettings);
+  $('save-display').addEventListener('click', () => saveDisplaySettings());
+  $('reset-display').addEventListener('click', () => saveDisplaySettings(true));
   $('display-dialog').addEventListener('cancel', (event) => { event.preventDefault(); closeDisplaySettings(); });
   $('display-dialog').addEventListener('close', syncModalBody);
   $('display-options').addEventListener('click', (event) => {
@@ -1744,7 +1757,7 @@
     else if (action === 'scan') scanLibrary();
     else { loadPlatforms(); loadGames(); refreshHealth(); }
   });
-  ['help-button', 'footer-help', 'status-button'].forEach((id) => $(id).addEventListener('click', showHelp));
+  ['help-button', 'footer-help'].forEach((id) => $(id).addEventListener('click', showHelp));
   $('close-help').addEventListener('click', closeHelp);
   $('help-dialog').addEventListener('close', () => syncModalBody());
   $('help-dialog').addEventListener('click', (event) => { if (event.target === $('help-dialog')) { const rect = $('help-dialog').getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) closeHelp(); } });
@@ -1783,6 +1796,7 @@
     }
     if ($('self-dialog').open) {
       if (event.key === 'Escape') { event.preventDefault(); closeSelf(); }
+      else if (event.target.matches('select') && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.code)) return;
       else { const direction = {ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down', KeyA: 'left', KeyD: 'right', KeyW: 'up', KeyS: 'down'}[event.code]; if (direction) { event.preventDefault(); focusModalAction($('self-dialog'), direction); } }
       return;
     }
@@ -1819,7 +1833,7 @@
   window.addEventListener('gamepadconnected', startGamepads);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) { if (state.profile) { refreshHealth(); refreshSession(); refreshMigration(); heartbeatPresence(); } loadProfiles({silent: true}); startGamepads(); } else leavePresence(state.profile, true); });
   window.addEventListener('online', () => { if (!state.profile) { loadProfiles(); return; } heartbeatPresence(); refreshHealth(); refreshSession(); if (!state.games.length) loadGames(); });
-  window.addEventListener('offline', () => { $('status-button').dataset.state = 'error'; $('connection-label').textContent = t("网络已断开"); state.presenceStale = true; renderFamilyPresence(); });
+  window.addEventListener('offline', () => { state.connectionStatus = 'error'; $('health-detail').textContent = t("网络已断开"); notify(t("网络已断开"), true); state.presenceStale = true; renderFamilyPresence(); });
   window.addEventListener('popstate', () => {
     const params = new URLSearchParams(location.search);
     setFilter({platform: params.get('platform') || '', query: params.get('q') || '', mode: params.get('mode') || '', reviewFilter: validReviewFilter(params.get('review_filter')), favorites: params.get('favorite') === 'true', recent: params.get('recent') === 'true'});

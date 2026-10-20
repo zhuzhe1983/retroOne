@@ -58,6 +58,7 @@ class LaunchBody(BaseModel):
     mode: str | None = None
     replace_session_id: str | None = Field(default=None, min_length=1, max_length=128)
     network_room_id: UUID | None = None
+    device_id: UUID | None = None
 
 
 class StopBody(BaseModel):
@@ -396,7 +397,7 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
         response.headers['Referrer-Policy'] = 'same-origin'
         if request.url.path in {'/', '/index.html', '/app.js', '/styles.css', '/i18n.js', '/i18n-en.js'}:
             response.headers['Cache-Control'] = 'no-cache, max-age=0, must-revalidate'
-        if request.url.path == '/api/settings/interface':
+        if request.url.path in {'/api/settings/interface', '/api/settings/display'}:
             response.headers['Cache-Control'] = 'no-store'
         if not request.url.path.startswith('/stream/'):
             response.headers['Cross-Origin-Opener-Policy'] = 'same-origin'
@@ -567,19 +568,26 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
                 'browser': {'available': (browser_data / 'loader.js').is_file(), 'limit_bytes': BROWSER_LIMIT, 'engine': 'EmulatorJS', 'cores': sorted(p.name.removesuffix('-wasm.data') for p in (browser_data / 'cores').glob('*-wasm.data') if '-thread-' not in p.name and '-legacy-' not in p.name)},
                 'target_fps': 60}
 
-    def current_display_settings():
+    def current_display_settings(device_id: UUID | None = None):
         provider = getattr(runner, 'display_capabilities', None)
         runtime = provider() if provider else {'available': False, 'reason': '云端分辨率设置尚未就绪'}
-        return dict(display_view(display_settings.get(), runner.status(), runtime), profile_id=profile_id)
+        selected = display_settings.selection(device_id)
+        return dict(display_view(selected['settings'], runner.status(), runtime),
+                    **{key: value for key, value in selected.items() if key != 'settings'}, profile_id=profile_id)
 
     @app.get('/api/settings/display')
-    def get_display_settings():
-        return current_display_settings()
+    def get_display_settings(device_id: UUID | None = Query(None)):
+        return current_display_settings(device_id)
 
     @app.patch('/api/settings/display')
-    def update_display_settings(body: DisplayBody):
-        display_settings.update(body.model_dump())
-        return current_display_settings()
+    def update_display_settings(body: DisplayBody, device_id: UUID | None = Query(None)):
+        display_settings.update(body.model_dump(), device_id)
+        return current_display_settings(device_id)
+
+    @app.delete('/api/settings/display')
+    def reset_device_display_settings(device_id: UUID = Query(...)):
+        display_settings.reset_device(device_id)
+        return current_display_settings(device_id)
 
     @app.get('/api/settings/interface')
     def get_interface_settings():
@@ -684,7 +692,7 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
             # Preferences are a server-owned snapshot for a new session only.
             # Read before ending a confirmed old session so corrupt preferences
             # cannot turn an otherwise valid switch into an avoidable stop.
-            game = dict(game, _display=display_settings.launch_snapshot())
+            game = dict(game, _display=display_settings.launch_snapshot(body.device_id if body else None))
             if active:
                 runner.stop()
             try:

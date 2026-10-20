@@ -60,17 +60,20 @@
   const dialog=$('play-dialog'),frameWrap=$('play-frame-wrap'),toolbar=dialog.querySelector('.play-toolbar');
   const body=document.createElement('div');body.className='play-body';frameWrap.before(body);body.append(frameWrap);
   const left=document.createElement('div'),right=document.createElement('div'),system=document.createElement('div');
-  left.className='touch-rail touch-left';right.className='touch-rail touch-right';system.className='touch-system';body.prepend(left);body.append(right,system);
-  dialog.insertAdjacentHTML('beforeend',`<button id="mobile-menu-toggle" class="mobile-menu-toggle" type="button" aria-expanded="false" aria-controls="mobile-player-menu">☰</button><section id="mobile-player-menu" class="mobile-player-menu" hidden aria-label="${escape(t('游玩菜单'))}"><div class="mobile-menu-heading"><strong data-mobile-text="游玩菜单"></strong><button id="mobile-menu-close" class="button button-secondary" data-mobile-text="返回游戏"></button></div><div class="mobile-player-settings"><label><span data-mobile-text="触控手柄"></span><input id="touch-enabled" type="checkbox"></label><label><span data-mobile-text="按键布局"></span><select id="touch-preset"></select></label><label><span data-mobile-text="画面比例"></span><select id="touch-fit"><option value="contain" data-mobile-text="原比例居中"></option><option value="stretch" data-mobile-text="横向铺满"></option></select></label><label><span data-mobile-text="按键大小"></span><input id="touch-size" type="range" min="0.75" max="1.3" step="0.05"></label><label><span data-mobile-text="按键透明度"></span><input id="touch-opacity" type="range" min="0.35" max="1" step="0.01"></label></div><p class="mobile-menu-note" data-mobile-text="设置只保存在这台设备的当前玩家名下，不改变模拟器分辨率。"></p><p class="mobile-menu-note" data-mobile-text="模拟器与存档工具已展开；可在游戏画面内操作。"></p><p id="touch-status" class="mobile-menu-note" role="status"></p></section>`);
+  left.className='touch-rail touch-left';right.className='touch-rail touch-right';system.className='touch-system';body.prepend(left);body.append(right);
+  dialog.insertAdjacentHTML('beforeend',`<button id="mobile-menu-toggle" class="mobile-menu-toggle" type="button" aria-expanded="false" aria-controls="mobile-player-menu">☰</button><section id="mobile-player-menu" class="mobile-player-menu" hidden aria-label="${escape(t('游玩菜单'))}"><div class="mobile-menu-heading"><strong data-mobile-text="游玩菜单"></strong><button id="mobile-menu-close" class="button button-secondary" data-mobile-text="返回游戏"></button></div><section class="mobile-game-keys"><h3 data-mobile-text="游戏按键"></h3><div id="mobile-game-key-controls"></div><p class="mobile-menu-note" data-mobile-text="点击后返回游戏并发送一次按键。"></p></section><div class="mobile-player-settings"><label><span data-mobile-text="触控手柄"></span><input id="touch-enabled" type="checkbox"></label><label><span data-mobile-text="按键布局"></span><select id="touch-preset"></select></label><label><span data-mobile-text="画面比例"></span><select id="touch-fit"><option value="contain" data-mobile-text="原比例居中"></option><option value="stretch" data-mobile-text="横向铺满"></option></select></label><label><span data-mobile-text="按键大小"></span><input id="touch-size" type="range" min="0.75" max="1.3" step="0.05"></label><label><span data-mobile-text="按键透明度"></span><input id="touch-opacity" type="range" min="0.35" max="1" step="0.01"></label></div><p class="mobile-menu-note" data-mobile-text="设置只保存在这台设备的当前玩家名下，不改变模拟器分辨率。"></p><button id="mobile-native-tools" class="button button-secondary mobile-native-tools" data-mobile-text="模拟器工具"></button><p class="mobile-menu-note" data-mobile-text="打开原生键盘、存档和模拟器设置，完成后返回游戏。"></p><p id="touch-status" class="mobile-menu-note" role="status"></p></section>`);
+  $('mobile-game-key-controls').append(system);
+  const toolsBar=document.createElement('section');toolsBar.className='mobile-native-tools-bar';toolsBar.hidden=true;
+  toolsBar.innerHTML='<strong data-mobile-text="模拟器工具"></strong><div><button id="mobile-tools-menu" class="button button-secondary" data-mobile-text="游玩菜单"></button><button id="mobile-tools-back" class="button button-secondary" data-mobile-text="返回游戏"></button></div>';body.before(toolsBar);
   const menu=$('mobile-player-menu'),input=new TouchState(),pointers=new Map();
-  let context=null,prefs=preferences(null),ready=false,supported=true,menuOpen=false,sequence=0,timer=null,waitingTimer=null,immersive=false,fullscreenPending=false;
+  let context=null,prefs=preferences(null),ready=false,supported=true,menuOpen=false,toolsOpen=false,sequence=0,timer=null,waitingTimer=null,immersive=false,fullscreenPending=false,systemPulseTimer=null;
   function storageKey(){return `retroone:touch:${context.profileId}`;}
   function save(){try{localStorage.setItem(storageKey(),JSON.stringify(prefs));}catch{}}
   function post(payload){if(context?.iframe?.contentWindow)context.iframe.contentWindow.postMessage(payload,location.origin);}
-  function interactive(){return !!context&&dialog.open&&prefs.touch&&ready&&supported&&!menuOpen&&!document.hidden&&!document.querySelector('dialog[open]:not(#play-dialog)');}
+  function interactive(){return !!context&&dialog.open&&prefs.touch&&ready&&supported&&!menuOpen&&!toolsOpen&&!document.hidden&&!document.querySelector('dialog[open]:not(#play-dialog)');}
   function send(){if(context)post({type:'retroone:controls',version:1,...input.snapshot(),sequence:++sequence});}
-  function presentation(){if(context)post({type:'retroone:presentation',version:1,fit:prefs.fit,embedded:true,touch:prefs.touch,menu:menuOpen,immersive:immersive&&!menuOpen});}
-  function release(){input.clear();pointers.clear();for(const node of dialog.querySelectorAll('[data-touch-index], [data-touch-zone]')){node.classList.remove('is-pressed');node.style.removeProperty('--stick-x');node.style.removeProperty('--stick-y');}send();}
+  function presentation(){if(context)post({type:'retroone:presentation',version:1,fit:prefs.fit,embedded:true,touch:prefs.touch,menu:menuOpen||toolsOpen,immersive:(immersive||prefs.touch||!!document.fullscreenElement||innerWidth<=700)&&!menuOpen&&!toolsOpen});}
+  function release(){clearTimeout(systemPulseTimer);systemPulseTimer=null;input.clear();pointers.clear();for(const node of dialog.querySelectorAll('[data-touch-index], [data-touch-zone]')){node.classList.remove('is-pressed');node.style.removeProperty('--stick-x');node.style.removeProperty('--stick-y');}send();}
   function status(){
     $('touch-status').textContent=!ready?t('正在连接触控输入；也可使用原模拟器控件。'):!supported?t('此运行环境尚不支持这套触控，请使用原模拟器控件或实体手柄。'):effectivePreset()==='dos'?t('DOS 默认键盘布局；不同游戏可在模拟器内调整按键。'):t('实体手柄与键盘仍可使用。');
   }
@@ -86,11 +89,13 @@
     dialog.dataset.touchLayout=effectivePreset();update();
   }
   function update(){
-    dialog.classList.toggle('touch-active',!!context&&prefs.touch);dialog.classList.toggle('mobile-immersive',!!context&&immersive);dialog.classList.toggle('player-menu-open',menuOpen);
+    dialog.classList.toggle('touch-active',!!context&&prefs.touch);dialog.classList.toggle('mobile-immersive',!!context&&immersive);dialog.classList.toggle('player-menu-open',menuOpen);dialog.classList.toggle('native-tools-open',toolsOpen);
     dialog.style.setProperty('--touch-size',prefs.size);dialog.style.setProperty('--touch-opacity',prefs.opacity);
-    for(const rail of [left,right,system])rail.inert=!interactive();
+    for(const rail of [left,right])rail.inert=!interactive();
+    system.inert=!menuOpen||!canSystemInput();
+    for(const key of system.querySelectorAll('button'))key.disabled=!canSystemInput();
     $('touch-enabled').checked=prefs.touch;$('touch-preset').value=prefs.preset;$('touch-fit').value=prefs.fit;$('touch-size').value=prefs.size;$('touch-opacity').value=prefs.opacity;
-    $('mobile-menu-toggle').setAttribute('aria-expanded',String(menuOpen));menu.hidden=!menuOpen;status();presentation();
+    $('mobile-menu-toggle').setAttribute('aria-expanded',String(menuOpen));$('mobile-menu-toggle').hidden=toolsOpen;menu.hidden=!menuOpen;toolsBar.hidden=!toolsOpen;status();presentation();
   }
   function localize(){
     for(const element of dialog.querySelectorAll('[data-mobile-text]'))element.textContent=t(element.dataset.mobileText);
@@ -103,13 +108,44 @@
   }
   function setMenu(open){
     if(!context)return;
-    release();menuOpen=!!open;
+    release();toolsOpen=false;menuOpen=!!open;
     if(menuOpen)menu.append(toolbar);else dialog.insertBefore(toolbar,body);
     update();localize();
     if(menuOpen){menu.scrollTop=0;$('mobile-menu-close').focus({preventScroll:true});}
     else context.iframe.focus({preventScroll:true});
   }
+  function setTools(open){
+    if(!context)return;
+    release();toolsOpen=!!open;menuOpen=false;
+    dialog.insertBefore(toolbar,body);update();localize();
+    if(toolsOpen)$('mobile-tools-back').focus({preventScroll:true});
+    else context.iframe.focus({preventScroll:true});
+  }
+  function canSystemInput(){return !!context&&dialog.open&&prefs.touch&&ready&&supported&&!document.hidden&&!document.querySelector('dialog[open]:not(#play-dialog)');}
+  function pulseSystemButton(index){
+    if(!canSystemInput()||!menuOpen||![8,9,10,11].includes(index))return;
+    const playing=context;
+    // PostMessage preserves this order: close native menus, press, then release.
+    setMenu(false);
+    input.set('system-pulse',{buttons:{[index]:1}});send();
+    systemPulseTimer=setTimeout(()=>{
+      systemPulseTimer=null;
+      if(context!==playing)return;
+      input.remove('system-pulse');send();
+    },200);
+  }
+  system.addEventListener('click',event=>{
+    const key=event.target.closest('[data-touch-index]');
+    if(key){event.preventDefault();pulseSystemButton(Number(key.dataset.touchIndex));}
+  });
   function navigate(action){
+    if(toolsOpen){
+      if(action==='back'){setTools(false);return;}
+      const buttons=[$('mobile-tools-menu'),$('mobile-tools-back')],active=document.activeElement;
+      if(action==='accept'){if(buttons.includes(active))active.click();return;}
+      if(['left','right','up','down'].includes(action))buttons[active===buttons[0]?1:0].focus();
+      return;
+    }
     if(!menuOpen)return;
     if(action==='back'){setMenu(false);return;}
     const active=document.activeElement,delta=action==='left'?-1:1;
@@ -129,7 +165,7 @@
     close();context=options;ready=false;supported=true;
     let saved;try{saved=JSON.parse(localStorage.getItem(storageKey()));}catch{}
     const touch=global.matchMedia('(pointer: coarse)').matches||navigator.maxTouchPoints>0;
-    prefs=preferences(saved,touch);immersive=touch&&Math.min(innerWidth,innerHeight)<700;menuOpen=false;
+    prefs=preferences(saved,touch);immersive=touch&&Math.min(innerWidth,innerHeight)<700;menuOpen=false;toolsOpen=false;
     localize();renderControls();presentation();send();
     // A child can announce ready before its load event (for example, while media loads).
     const onLoad=()=>{release();presentation();status();};context.onLoad=onLoad;context.iframe.addEventListener('load',onLoad);
@@ -138,9 +174,9 @@
   }
   function close(){
     if(context){release();context.iframe.removeEventListener('load',context.onLoad);}
-    clearInterval(timer);clearTimeout(waitingTimer);context=null;ready=false;menuOpen=false;immersive=false;
+    clearInterval(timer);clearTimeout(waitingTimer);context=null;ready=false;menuOpen=false;toolsOpen=false;immersive=false;
     dialog.insertBefore(toolbar,body);
-    menu.hidden=true;dialog.classList.remove('touch-active','mobile-immersive','player-menu-open');$('mobile-menu-toggle').classList.remove('needs-attention');
+    menu.hidden=true;toolsBar.hidden=true;$('mobile-menu-toggle').hidden=false;dialog.classList.remove('touch-active','mobile-immersive','player-menu-open','native-tools-open');$('mobile-menu-toggle').classList.remove('needs-attention');
   }
   function pointerValue(event,target){
     const zone=target.dataset.touchZone;
@@ -171,10 +207,12 @@
   document.addEventListener('visibilitychange',()=>{if(document.hidden)release();});
   global.addEventListener('pagehide',release);
   global.addEventListener('resize',()=>{if(context){release();update();}});
+  document.addEventListener('fullscreenchange',()=>{if(context)update();});
   new MutationObserver(()=>{if(context&&!interactive()&&input.sources.size)release();}).observe(document.body,{subtree:true,attributes:true,attributeFilter:['open']});
   $('mobile-menu-toggle').addEventListener('click',()=>setMenu(!menuOpen));$('mobile-menu-close').addEventListener('click',()=>setMenu(false));
+  $('mobile-native-tools').addEventListener('click',()=>setTools(true));$('mobile-tools-back').addEventListener('click',()=>setTools(false));$('mobile-tools-menu').addEventListener('click',()=>setMenu(true));
   document.addEventListener('keydown',event=>{
-    if(!menuOpen||document.querySelector('dialog[open]:not(#play-dialog)')||event.ctrlKey||event.metaKey||event.altKey)return;
+    if(!(menuOpen||toolsOpen)||document.querySelector('dialog[open]:not(#play-dialog)')||event.ctrlKey||event.metaKey||event.altKey)return;
     const action={ArrowLeft:'left',ArrowRight:'right',ArrowUp:'up',ArrowDown:'down',KeyA:'left',KeyD:'right',KeyW:'up',KeyS:'down',Enter:'accept',Escape:'back'}[event.code];
     if(action){event.preventDefault();event.stopPropagation();navigate(action);}
   },true);
@@ -214,5 +252,5 @@
     finally{fullscreenPending=false;}
   }
   localize();
-  global.RetroMobilePlayer=Object.freeze({open,close,release,localize,toggleFullscreen,setMenu,navigate,isMenuOpen:()=>menuOpen});
+  global.RetroMobilePlayer=Object.freeze({open,close,release,localize,toggleFullscreen,setMenu,navigate,isMenuOpen:()=>menuOpen||toolsOpen});
 })(typeof window==='undefined'?globalThis:window);

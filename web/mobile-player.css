@@ -6,13 +6,13 @@
 .play-dialog>.play-toolbar{padding-right:66px}
 .mobile-menu-toggle{position:absolute;right:max(10px,env(safe-area-inset-right));top:max(10px,env(safe-area-inset-top));z-index:5;display:flex;align-items:center;justify-content:center;width:44px;height:44px;border:1px solid #6b829e88;border-radius:14px;color:#e4f1ff;background:#152334e8;font-size:22px;cursor:pointer;touch-action:manipulation}
 .mobile-menu-toggle.needs-attention{border-color:var(--warning);color:var(--warning)}
-.mobile-immersive>.play-toolbar{display:none}
+.mobile-immersive>.play-toolbar,.touch-active>.play-toolbar,:fullscreen .play-dialog>.play-toolbar{display:none}
 .mobile-immersive .play-body{padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
-.touch-active .play-body{display:grid;grid-template-columns:var(--rail-width) minmax(0,1fr) var(--rail-width);grid-template-rows:minmax(0,1fr) calc(var(--system-height) + 4px)}
+.touch-active .play-body{display:grid;grid-template-columns:var(--rail-width) minmax(0,1fr) var(--rail-width);grid-template-rows:minmax(0,1fr)}
 .touch-active .play-frame-wrap{grid-column:2;grid-row:1;align-self:stretch}
 .touch-active .touch-rail{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:4px;min-width:0;min-height:0}
 .touch-left{grid-column:1;grid-row:1}.touch-right{grid-column:3;grid-row:1}
-.touch-active .touch-system{display:flex;justify-content:center;align-items:center;gap:12px;grid-column:1/-1;grid-row:2;align-self:end;justify-self:center;z-index:2;padding:2px 10px;background:#03070ce6;border-radius:12px 12px 0 0}
+.touch-active .touch-right{padding-top:58px}.mobile-player-menu .touch-system{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;opacity:1;touch-action:manipulation}.mobile-game-keys{padding-bottom:16px;margin-bottom:16px;border-bottom:1px solid #35506c}.mobile-game-keys h3{margin:0 0 10px;font-size:12px;font-weight:500;color:#c2d2e5}
 .touch-rail,.touch-system{opacity:var(--touch-opacity);touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
 .touch-button{display:flex;align-items:center;justify-content:center;width:var(--action-target);height:var(--action-target);min-width:44px;min-height:44px;padding:0;border-radius:50%;border:1px solid #59718e;background:linear-gradient(150deg,#293d54,#142236);box-shadow:0 3px 0 #050b13;color:#eaf4ff;font-size:16px;font-weight:550;font-family:inherit;touch-action:none;cursor:pointer}
 .touch-button.is-pressed,.touch-dpad.is-pressed .touch-button{background:#496b8f;border-color:#badfff;box-shadow:0 1px 0 #050b13}
@@ -28,7 +28,7 @@
 [data-touch-layout=sega] .face-2{grid-column:1;grid-row:2}[data-touch-layout=sega] .face-0{grid-column:2;grid-row:2}[data-touch-layout=sega] .face-1{grid-column:3;grid-row:2}[data-touch-layout=sega] .face-4{grid-column:1;grid-row:1}[data-touch-layout=sega] .face-3{grid-column:2;grid-row:1}[data-touch-layout=sega] .face-5{grid-column:3;grid-row:1}
 .touch-shoulders{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;flex:none}
 .touch-shoulders .touch-button{width:min(clamp(52px,calc(64px*var(--touch-size)),84px),calc((var(--rail-width) - 16px)/2));height:var(--shoulder-height);border-radius:12px;font-size:13px}
-.touch-system .touch-button{width:clamp(52px,calc(64px*var(--touch-size)),76px);height:var(--system-height);border-radius:11px;font-size:11px}
+.touch-system .touch-button{flex:1;min-width:52px;width:auto;height:48px;border-radius:11px;font-size:12px;touch-action:manipulation}
 .touch-stick{position:relative;display:flex;align-items:center;justify-content:center;width:var(--stick-size);height:var(--stick-size);flex:none;border:1px solid #4e6380;border-radius:50%;background:radial-gradient(circle,#223850,#111d2c);touch-action:none}
 .touch-stick-knob{width:51%;height:51%;border:1px solid #7a93af;border-radius:50%;background:linear-gradient(140deg,#506b89,#263c55);transform:translate(var(--stick-x,0),var(--stick-y,0));pointer-events:none;box-shadow:0 3px 12px #0008}
 .touch-stick small{position:absolute;bottom:5px;font-size:9px;color:#9eb2cb;pointer-events:none}
@@ -51,7 +51,8 @@
 @media(orientation:landscape) and (max-height:540px){
  .play-dialog{--dpad-target:clamp(44px,calc(48px*var(--touch-size)),56px);--action-target:clamp(44px,calc(52px*var(--touch-size)),60px);--stick-size:clamp(72px,calc(96px*var(--touch-size)),96px);--shoulder-height:clamp(44px,calc(48px*var(--touch-size)),52px);--system-height:clamp(44px,calc(48px*var(--touch-size)),48px)}
  .touch-active .touch-rail{gap:6px}
- .touch-active .mobile-menu-toggle{top:auto;bottom:max(2px,env(safe-area-inset-bottom));width:var(--system-height);height:var(--system-height)}
+ .touch-active .touch-right{padding-top:4px;padding-bottom:54px}
+ .touch-active .mobile-menu-toggle{top:auto;bottom:max(2px,env(safe-area-inset-bottom));width:44px;height:44px}
  .mobile-player-menu{max-height:calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));width:min(420px,65%);padding:14px}
 }
 /* Keep every control available on short phones; preserve the saved size preference. */
@@ -62,19 +63,19 @@
 @media(orientation:landscape) and (max-height:340px){
  .play-dialog{--dpad-target:clamp(44px,calc(48px*var(--touch-size)),48px);--action-target:clamp(44px,calc(52px*var(--touch-size)),52px);--stick-size:72px;--system-height:44px}
  .touch-active .touch-rail{gap:2px;padding:2px}
+ .touch-active .touch-right{gap:0;padding-top:2px;padding-bottom:54px}
 }
 @media(orientation:portrait) and (max-width:700px){
  .play-dialog{--dpad-target:clamp(44px,calc(48px*var(--touch-size)),min(56px,calc((100vw - 32px)/6)));--action-target:clamp(44px,calc(52px*var(--touch-size)),min(60px,calc((100vw - 40px)/6)));--stick-size:clamp(72px,calc(96px*var(--touch-size)),112px)}
- .touch-active .play-body{grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:minmax(160px,1fr) auto calc(var(--system-height) + 4px);align-content:stretch;padding-top:max(52px,env(safe-area-inset-top))}
+ .touch-active .play-body{grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:minmax(160px,1fr) auto;align-content:stretch;padding-top:max(52px,env(safe-area-inset-top))}
  .touch-active .play-frame-wrap{grid-column:1/-1;grid-row:1;min-height:0}
  .touch-active .touch-rail{grid-row:2;gap:8px;flex-wrap:nowrap;padding:12px 4px 6px}.touch-active .touch-left{grid-column:1}.touch-active .touch-right{grid-column:2}
- .touch-active .touch-system{grid-column:1/-1;grid-row:3;align-self:center;max-width:100%;gap:8px;padding:2px 8px}
  .mobile-player-menu{max-height:55dvh;bottom:max(8px,env(safe-area-inset-bottom));right:8px;width:calc(100% - 16px);padding:15px}
  .mobile-player-settings select{font-size:16px}
 }
 /* Narrow portrait phones keep every stick reachable without scrolling across game inputs. */
 @media(orientation:portrait) and (max-width:380px){
- .touch-active .play-body{grid-template-rows:minmax(96px,1fr) auto calc(var(--system-height) + 4px)}
+ .touch-active .play-body{grid-template-rows:minmax(96px,1fr) auto}
  .play-dialog:is([data-touch-layout=nintendo3ds],[data-touch-layout=switch],[data-touch-layout=psp],[data-touch-layout=playstation],[data-touch-layout=standard]){--stick-size:clamp(72px,calc(88px*var(--touch-size)),96px)}
  .touch-active:is([data-touch-layout=nintendo3ds],[data-touch-layout=switch],[data-touch-layout=psp],[data-touch-layout=playstation],[data-touch-layout=standard]) .touch-rail{display:grid;grid-template-columns:48px minmax(0,1fr);grid-template-rows:auto auto;align-content:center;justify-items:center;gap:8px 4px;padding:4px}
  .touch-active:is([data-touch-layout=nintendo3ds],[data-touch-layout=switch],[data-touch-layout=psp],[data-touch-layout=playstation],[data-touch-layout=standard]) :is(.touch-dpad,.touch-face){grid-column:1/-1;grid-row:1}
@@ -83,3 +84,17 @@
  .touch-active:is([data-touch-layout=nintendo3ds],[data-touch-layout=switch],[data-touch-layout=psp],[data-touch-layout=playstation],[data-touch-layout=standard]) .touch-stick{grid-column:2;grid-row:2}
 }
 @media(prefers-reduced-motion:reduce){.touch-button,.touch-stick-knob{transition:none}}
+
+@media(max-width:700px){.play-dialog>.play-toolbar{display:none}}
+
+/* Native keyboard/save tools get an unobstructed frame; this mode is explicit. */
+.mobile-native-tools{width:100%;min-height:44px;margin-top:15px;white-space:normal}
+.mobile-native-tools-bar{display:flex;flex:none;align-items:center;justify-content:space-between;gap:10px;min-height:52px;padding:4px max(8px,env(safe-area-inset-right)) 4px max(8px,env(safe-area-inset-left));background:#101e2f;border-bottom:1px solid #35506c}
+.mobile-native-tools-bar>strong{min-width:0;font-size:12px;font-weight:500;overflow-wrap:anywhere}
+.mobile-native-tools-bar>div{display:flex;flex:none;gap:8px}
+.mobile-native-tools-bar .button{min-width:44px;min-height:44px;font-size:12px;padding:8px 10px;white-space:normal}
+.native-tools-open>.play-toolbar{display:none}
+.native-tools-open .play-body{display:flex;padding:0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+.native-tools-open .play-frame-wrap{flex:1;align-self:stretch}
+.play-dialog.native-tools-open .touch-rail{display:none}
+@media(max-width:380px){.mobile-native-tools-bar{gap:6px}.mobile-native-tools-bar>div{gap:5px}.mobile-native-tools-bar .button{font-size:11px;padding:8px}.mobile-native-tools-bar>strong{font-size:11px}}

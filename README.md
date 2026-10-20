@@ -14,7 +14,7 @@ Built on EmulatorJS, RetroArch, and Selkies, RetroOne uses Docker for deployment
 
 Library management keeps metadata, ROM-linked launch configurations, and personal saves separate. Resumable content audits identify exact cartridge duplicates while preserving variants and original save identities; audit results distinguish file checks from actual emulator observations.
 
-The interface supports **English**, **简体中文**, and **Browser default**. Use the language selector in the top bar or on the player selection screen. Each player’s preference is saved on the server; switching languages keeps the current game running. Game titles, descriptions, and save identities retain their original values.
+The interface supports **English**, **简体中文**, and **Browser default**. Open your own avatar → Player settings, or use the language selector on the player selection screen. Each player’s preference is saved on the server; switching languages keeps the current game running. Game titles, descriptions, and save identities retain their original values.
 
 On phones, touch controls adapt to the game platform, with landscape side controls and a portrait layout below the picture. The play menu offers fullscreen, aspect-preserving or horizontal-stretch presentation, and button size/opacity settings. Install the PWA from a supported HTTPS browser for a standalone window. Games still require a connection; the offline page does not cache ROMs or saves. See [mobile play](docs/mobile-play.md) for setup and limitations.
 
@@ -39,7 +39,8 @@ On phones, touch controls adapt to the game platform, with landscape side contro
 - **浏览自己的收藏**：按平台查找游戏，搜索名称，查看最近游玩和个人收藏；缺少封面时使用应用自带的文字卡片。
 - **一个入口，两种运行方式**：轻量游戏在浏览器运行；大型镜像留在服务器，通过串流游玩。
 - **全家各有进度**：自选昵称和头像，独立收藏、最近记录、设置与存档；首页“＋”可添加成员。
-- **看看谁在玩**：顶栏显示在线家人的头像与活动，本人的状态入口可以继续、结束游戏或调整画面设置。
+- **看看谁在玩**：顶栏显示在线家人的头像与活动，本人的状态入口可以继续、结束游戏或打开用户设置。
+- **每台设备各自的画质**：同一玩家可以在平板上用 1080p、手机上用 720p，互不覆盖。
 - **键盘和手柄导航**：支持 WASD、方向键、Xbox 和 PlayStation 手柄，无需先打开手柄模式。
 - **手机也能玩**：全屏播放、按平台切换的触控按键、横竖屏布局及 PWA 安装；按键大小、透明度和画面比例可在游玩菜单调整。
 - **保留原收藏**：游戏库只读挂载，运行时需要的解压副本和存档写到独立数据目录。
@@ -150,7 +151,7 @@ docker compose ps
 
 每次打开网页，先选自己的玩家档案。首次使用填写昵称并选头像；也可以点“＋”添加成员。新增成员准备好独立实例后才允许进入，失败时可重试。默认提供两个档案，成员数量上限可以配置，实际并发能力由主机资源决定。
 
-顶栏和玩家选择界面都可以切换 **简体中文 / English / 跟随浏览器**。未选玩家时，选择保存在当前浏览器；选定玩家后，使用这位玩家保存在服务器上的语言偏好。切换语言会立即更新网页，保留正在运行的游戏。浏览器模拟器内部菜单在下次打开时使用所选语言；游戏原文、玩家昵称和存档不受影响。添加翻译见 [界面语言说明](docs/i18n.md)。
+点击本人头像，在 **用户设置** 中切换 **简体中文 / English / 跟随浏览器**；玩家选择界面也保留语言菜单。未选玩家时，选择保存在当前浏览器；选定玩家后，使用这位玩家保存在服务器上的语言偏好。切换语言会立即更新网页，保留正在运行的游戏。浏览器模拟器内部菜单在下次打开时使用所选语言；游戏原文、玩家昵称和存档不受影响。添加翻译见 [界面语言说明](docs/i18n.md)。
 
 ![选择玩家示例：各自收藏与存档，支持键盘和手柄选择](docs/screenshots/members.png)
 
@@ -161,7 +162,7 @@ docker compose ps
 
 </details>
 
-顶栏直接显示谁在线、正在玩什么。在线状态来自浏览器连接，后台保留着云游戏并不等于这位家人还在线。点击自己的头像和状态，可以继续云游戏、结束云游戏、打开画面设置或切换玩家。
+顶栏直接显示谁在线、正在玩什么。在线状态来自浏览器连接，后台保留着云游戏并不等于这位家人还在线。点击自己的头像和状态，可以继续云游戏、结束云游戏、调整用户设置或切换玩家。界面语言和画面设置集中在这里。
 
 每个玩家最多保留一个云端会话。**关闭播放窗口或网页会保留云游戏；结束游戏需要再次确认。** 如果当前已有游戏运行，切换前会提示游戏名称与未保存风险。选择另一个家庭成员不会替对方结束游戏。
 
@@ -180,7 +181,7 @@ docker compose ps
 
 ### 手机游玩与 PWA
 
-手机进入游戏后自动显示触控手柄：横屏时主要按键靠两侧，竖屏时放在画面下方。点右上角 **☰** 打开游玩菜单，可全屏、切换原比例居中或横向铺满、调整按键大小与透明度，或手动选择布局。浏览器模拟器的存档工具也会随菜单展开。设置保存在这台设备的当前玩家名下，不改变服务器串流分辨率。
+手机进入游戏后自动显示触控手柄：横屏时主要按键靠两侧，竖屏时放在画面下方。游玩时收起顶部工具栏和串流工具入口，START、SELECT 等系统键也不再单独占用底部画面。点角落的 **☰** 打开游玩菜单，可返回游戏库、全屏、调整按键大小与透明度、选择布局或发送一次系统按键；结束游戏仍需确认。需要键盘或存档工具时，选择 **模拟器工具**，用完点 **返回游戏**。触控和画面比例设置保存在这台设备的当前玩家名下，不改变服务器串流分辨率。
 
 通过可信 HTTPS 地址打开 RetroOne，在 **顶栏自己的头像 → 安装应用** 中安装，或使用 Android Chrome 的浏览器安装菜单。安装后可从桌面以独立窗口启动；浏览器不允许系统全屏时仍提供沉浸布局。PWA 不提供离线游戏，断网只显示提示，不缓存 ROM、存档或家庭成员数据；新版本也不会强制刷新正在玩的页面。
 
@@ -188,15 +189,19 @@ docker compose ps
 
 ### 保存与恢复进度
 
-**浏览器游戏**：普通游戏存档保存在当前浏览器的 IndexedDB 中，并按玩家隔离。模拟器的“保存状态”会下载文件，同时备份到服务器；播放器顶部可以载入、导出或上传状态。服务器备份需要主动保存状态，不是持续同步普通存档。换设备、换域名或清理浏览器数据前，应先备份进度。
+**浏览器游戏**：普通游戏存档保存在当前浏览器的 IndexedDB 中，并按玩家隔离。模拟器的“保存状态”会下载文件，同时备份到服务器；在 **☰ → 模拟器工具** 中可以载入、导出或上传状态。服务器备份需要主动保存状态，不是持续同步普通存档。换设备、换域名或清理浏览器数据前，应先备份进度。
 
 **云端游戏**：游戏内存档和模拟器状态保存在该玩家的服务器数据目录。结束前先在游戏内保存；关闭网页本身不等于保存。镜像更新不会代替备份，迁移时应保留完整的 `data/` 和 `profiles/`，因为部分 PC 游戏把存档写在工作副本中。路径与备份方法见 [维护指南](docs/operations.md#存档与备份)。
 
-### 每位玩家通用的画面设置
+### 每位玩家、每台设备的画面设置
 
-从 **顶栏本人状态 → 画面设置** 选择 720p 或 1080p。偏好保存在服务器，对这个玩家的所有云端游戏通用；下次新启动时应用，保存设置不会中断或改变当前游戏。
+从 **顶栏本人状态 → 用户设置 → 画面设置** 选择 720p 或 1080p。同一玩家在平板上保存 1080p，在手机上保存 720p，各自的选择不会覆盖另一台设备。偏好保存在服务器，对该玩家从这台设备启动的云端游戏通用；下次新启动时应用，保存设置不会中断或改变当前游戏。**继续已有会话会保留它原来的分辨率。**
 
-![画面设置示例：已保存的1080p与当前720p会话分别显示](docs/screenshots/display-settings.png)
+首次使用沿用原有玩家默认值；点击“保存到这台设备”后独立保存，也可以“恢复玩家默认值”。设备用当前浏览器随机生成并保存的标识识别，不采集硬件指纹。同一设备的不同浏览器、不同访问域名以及清除网站数据后的浏览器，会被视为不同设备。界面语言仍跟随玩家，可跨设备使用。
+
+Display preferences are saved separately for each player and browser/device: use 1080p on a tablet and 720p on a phone. Changes apply to newly started cloud sessions; resuming an existing session preserves its current resolution.
+
+![旧版画面设置示例：已保存的1080p与当前720p会话分别显示；新版增加设备独立设置](docs/screenshots/display-settings.png)
 
 这是串流桌面与视频输出尺寸，**不是 AI 超分，也不是各模拟器内部渲染倍率**。界面区分已保存的偏好和当前会话实际尺寸；无法读取实际尺寸时会明确提示。浏览器运行的游戏继续使用模拟器自己的画面设置。
 

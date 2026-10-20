@@ -230,12 +230,19 @@
     root.classList.toggle('retroone-embedded', true);
     root.classList.toggle('retroone-touch', presentation.touch && switchSupported);
     root.classList.toggle('retroone-immersive', switchSupported && presentation.immersive === true && presentation.menu !== true);
+    root.classList.toggle('retroone-app-playing', presentation.menu !== true);
     if (!document.getElementById('retroone-stream-style')) {
       const style = document.createElement('style'); style.id = 'retroone-stream-style';
       // IDs from the pinned Selkies client. Do not change sink visibility,
       // intrinsic resolution, encoder settings, audio or transport ownership.
       style.textContent = `
         .retroone-immersive #root,.retroone-immersive #dashboard-root,.retroone-immersive #player-ui-root{display:none!important}
+        /* The pinned dashboard portals these two floating entry points into
+           dashboard-root. menu:true also covers the parent's native-tools
+           mode: its panel is dismissed so these controls can receive a real
+           user tap, preserving mobile keyboard activation and upstream state. */
+        .retroone-app-playing .dashboard-overlay-container .virtual-keyboard-button,
+        .retroone-app-playing .dashboard-overlay-container .toggle-handle{display:none!important}
         .retroone-touch #touch-gamepad-host,.retroone-touch #universal-touch-gamepad-controls-overlay{display:none!important}
         .retroone-embedded .video-container #stream,.retroone-embedded .video-container #videoStream,
         .retroone-embedded .video-container #videoCanvas,.retroone-embedded .video-container #videoWorkerCanvas,

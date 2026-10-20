@@ -76,7 +76,7 @@
         .retroone-embedded .ejs_canvas{position:absolute!important;
           width:var(--retroone-media-w,100%)!important;height:var(--retroone-media-h,100%)!important;
           left:var(--retroone-media-x,0px)!important;top:var(--retroone-media-y,0px)!important;object-fit:fill!important}
-        .retroone-embedded .ejs_canvas_parent{position:relative!important;overflow:hidden}
+        .retroone-embedded .ejs_canvas_parent{position:relative!important;overflow:hidden!important}
       `;
       (document.head || root).appendChild(style);
     }
@@ -91,8 +91,12 @@
     if (!(ratio > 0 && ratio < 10)) return;
     if (ratio !== aspect) { aspect = ratio; ready(); }
     if (!box?.width || !box?.height) return;
-    const containW = Math.min(box.width, box.height * ratio), h = containW / ratio;
-    const w = presentation.fit === 'stretch' ? box.width : containW;
+    // Display zoom must not resize the core framebuffer or reload its state.
+    const baseW = presentation.fit === 'cover'
+      ? Math.max(box.width, box.height * ratio) : Math.min(box.width, box.height * ratio);
+    const zoom = presentation.zoom ?? 1;
+    const w = (presentation.fit === 'stretch' ? box.width : baseW) * zoom;
+    const h = baseW / ratio * zoom;
     for (const [name, value] of Object.entries({w,h,x:(box.width-w)/2,y:(box.height-h)/2}))
       root.style.setProperty('--retroone-media-' + name, value + 'px');
   }
@@ -101,7 +105,8 @@
     const data = event.data;
     if (!data || data.version !== 1) return;
     if (data.type === 'retroone:presentation') {
-      if (data.embedded !== true || !['contain','stretch'].includes(data.fit) || typeof data.touch !== 'boolean' ||
+      if (data.embedded !== true || !['contain','stretch','cover'].includes(data.fit) || typeof data.touch !== 'boolean' ||
+          (data.zoom !== undefined && (typeof data.zoom !== 'number' || !Number.isFinite(data.zoom) || data.zoom < 1 || data.zoom > 3)) ||
           (data.menu !== undefined && typeof data.menu !== 'boolean') ||
           (data.immersive !== undefined && typeof data.immersive !== 'boolean')) return;
       const changedMenu = !!presentation?.menu !== !!data.menu;

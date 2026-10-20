@@ -114,6 +114,35 @@ test('presentation centers core-native aspect, stretches horizontally only and r
   const css=h.elements.get('retroone-emulator-style').textContent;assert.ok(css.includes('body>header'));assert.ok(css.includes('.ejs_virtualGamepad_parent'));assert.ok(css.includes('.retroone-immersive .ejs_virtualGamepad_open'));assert.equal(h.messages.at(-1).data.aspectRatio,4/3);
 });
 
+test('browser cover and zoom preserve core aspect and intrinsic framebuffer while centering both crop directions',()=>{
+  const h=harness(),root=h.document.documentElement;
+  const rect=()=>['w','h','x','y'].map(key=>parseFloat(root.props['--retroone-media-'+key]));
+  function check(expected){rect().forEach((value,i)=>assert.ok(Math.abs(value-expected[i])<1e-7,`${rect()} != ${expected}`));}
+  h.message(presentation({zoom:1.5}));check([800,600,50,-100]);
+  h.message(presentation({fit:'cover'}));check([900,675,0,-137.5]);
+  h.message(presentation({fit:'cover',zoom:2}));check([1800,1350,-450,-475]);
+  h.canvas.parentElement.getBoundingClientRect=()=>({width:300,height:500});
+  h.message(presentation({fit:'cover'}));check([2000/3,500,-550/3,0]);
+  h.message(presentation({zoom:2}));check([600,450,-150,25]);
+  h.message(presentation({fit:'stretch',zoom:2}));check([600,450,-150,25]);
+  h.message(presentation());check([300,225,0,137.5]);
+  assert.deepEqual([h.canvas.width,h.canvas.height],[256,240]);
+  assert.ok(h.elements.get('retroone-emulator-style').textContent.includes('overflow:hidden!important'));
+});
+
+test('browser rejects malformed zoom without releasing input and accepts old presentation messages',()=>{
+  const h=harness();h.message(presentation({zoom:2}));h.message(controls(1,{0:1}));
+  const before={...h.document.documentElement.props},count=h.calls.length;
+  for(const zoom of [null,'2',NaN,Infinity,-Infinity,0,.99,3.01,{},[]]){
+    h.message(presentation({zoom,fit:'cover',menu:true}));
+    assert.deepEqual(h.document.documentElement.props,before);
+    assert.equal(h.calls.length,count);
+  }
+  h.message(presentation({zoom:3}));assert.ok(Math.abs(parseFloat(h.document.documentElement.props['--retroone-media-h'])-1200)<1e-7);
+  h.message(presentation());assert.ok(Math.abs(parseFloat(h.document.documentElement.props['--retroone-media-h'])-400)<1e-7);
+  assert.equal(h.calls.length,count);
+});
+
 test('actual pinned GameManager preserves quick-save hotkey and netplay routing outside the touch map',{skip:!hasPinned},()=>{
   const h=harness();h.manager().simulateInput(0,24,1);assert.deepEqual(h.calls.at(-1),['save']);
   const network=[];h.manager().EJS.isNetplay=true;h.manager().EJS.netplay={simulateInput:(...args)=>network.push(args)};

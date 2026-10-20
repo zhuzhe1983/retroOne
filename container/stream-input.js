@@ -246,6 +246,7 @@
         .retroone-app-playing .dashboard-overlay-container .virtual-keyboard-button,
         .retroone-app-playing .dashboard-overlay-container .toggle-handle{display:none!important}
         .retroone-touch #touch-gamepad-host,.retroone-touch #universal-touch-gamepad-controls-overlay{display:none!important}
+        .retroone-embedded .video-container{overflow:hidden!important}
         .retroone-embedded .video-container #stream,.retroone-embedded .video-container #videoStream,
         .retroone-embedded .video-container #videoCanvas,.retroone-embedded .video-container #videoWorkerCanvas,
         .retroone-embedded .video-container #overlayInput{
@@ -260,8 +261,13 @@
     const ratio = (sink?.videoWidth || sink?.width) / (sink?.videoHeight || sink?.height);
     if (!(ratio > 0 && ratio < 10) || !box?.width || !box?.height) return;
     if (ratio !== aspect) { aspect = ratio; announce(); }
-    const containW = Math.min(box.width, box.height * ratio), h = containW / ratio;
-    const w = presentation.fit === 'stretch' ? box.width : containW;
+    // Scale only the displayed rectangle. Keep the encoded sink resolution and
+    // input overlay aligned; cover deliberately crops equally at both edges.
+    const baseW = presentation.fit === 'cover'
+      ? Math.max(box.width, box.height * ratio) : Math.min(box.width, box.height * ratio);
+    const zoom = presentation.zoom ?? 1;
+    const w = (presentation.fit === 'stretch' ? box.width : baseW) * zoom;
+    const h = baseW / ratio * zoom;
     for (const [name,value] of Object.entries({w,h,x:(box.width-w)/2,y:(box.height-h)/2}))
       root.style.setProperty('--retroone-media-' + name, value + 'px');
   }
@@ -281,7 +287,8 @@
     const data = event.data;
     if (!data || data.version !== 1) return;
     if (data.type === 'retroone:presentation') {
-      if (data.embedded !== true || !['contain','stretch'].includes(data.fit) || typeof data.touch !== 'boolean' ||
+      if (data.embedded !== true || !['contain','stretch','cover'].includes(data.fit) || typeof data.touch !== 'boolean' ||
+          (data.zoom !== undefined && (typeof data.zoom !== 'number' || !Number.isFinite(data.zoom) || data.zoom < 1 || data.zoom > 3)) ||
           (data.menu !== undefined && typeof data.menu !== 'boolean') ||
           (data.nativeTools !== undefined && typeof data.nativeTools !== 'boolean') ||
           (data.immersive !== undefined && typeof data.immersive !== 'boolean')) return;

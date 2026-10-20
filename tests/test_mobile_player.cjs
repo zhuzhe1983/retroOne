@@ -28,10 +28,20 @@ test('invalid state values never reach the standard wire payload',()=>{
   assert.deepEqual(value.buttons,[0,1,...Array(15).fill(0)]);assert.deepEqual(value.axes,[0,0,1,-1]);
 });
 test('device preferences are bounded, opt-in on desktop, and contain by default',()=>{
-  assert.deepEqual(preferences(null),{fit:'contain',size:1,opacity:.78,touch:false,preset:'auto'});
+  assert.deepEqual(preferences(null),{fit:'contain',zoom:1,size:1,opacity:.78,touch:false,preset:'auto'});
   assert.equal(preferences(null,true).touch,true);
-  assert.deepEqual(preferences({fit:'cover',size:20,opacity:-5,preset:'evil',touch:'true'}),{fit:'contain',size:1.3,opacity:.35,touch:false,preset:'auto'});
+  assert.deepEqual(preferences({fit:'cover',size:20,opacity:-5,preset:'evil',touch:'true'}),{fit:'cover',zoom:1,size:1.3,opacity:.35,touch:false,preset:'auto'});
   assert.equal(preferences({size:NaN}).size,1);
+});
+test('display preferences migrate old records and keep fit independent from bounded numeric zoom',()=>{
+  assert.equal(preferences({fit:'stretch',touch:true}).zoom,1);
+  for(const zoom of [null,undefined,'2',NaN,Infinity,-Infinity,{},[]])assert.equal(preferences({zoom}).zoom,1);
+  assert.equal(preferences({zoom:-1}).zoom,1);assert.equal(preferences({zoom:4}).zoom,3);
+  for(const fit of ['contain','stretch','cover'])for(const zoom of [1,1.05,1.5,2,2.95,3]){
+    const saved=preferences(JSON.parse(JSON.stringify({fit,zoom,size:1.2,opacity:.6,touch:true,preset:'psp'})));
+    assert.equal(saved.fit,fit);assert.equal(saved.zoom,zoom);assert.equal(saved.preset,'psp');
+  }
+  assert.equal(preferences({fit:'invalid',zoom:2}).fit,'contain');
 });
 test('automatic controls distinguish small consoles, arcade, MD, DOS and modern pads',()=>{
   for(const [platform,preset]of Object.entries({nes:'classic',gba:'gba',snes:'nintendo',nds:'nintendo','3ds':'nintendo3ds',psp:'psp',switch:'switch',ps2:'playstation',dos:'dos',mame:'arcade',fbneo:'arcade',neogeo:'arcade',megadrive:'sega'}))assert.equal(automaticPreset(platform),preset);

@@ -309,6 +309,40 @@ test('presentation preserves stream intrinsic dimensions, centers contain, stret
   assert.equal(h.messages.at(-1).data.aspectRatio,1280/720);
 });
 
+test('stream cover and manual zoom crop around the viewport center without changing encoded resolution',async()=>{
+  const h=harness();await h.settle();
+  let box={width:800,height:600};
+  const sink={width:1280,height:720,parentElement:{getBoundingClientRect:()=>box}};
+  h.elements.set('videoCanvas',sink);
+  const rect=()=>['w','h','x','y'].map(key=>parseFloat(h.document.documentElement.props['--retroone-media-'+key]));
+  function check(expected){rect().forEach((value,i)=>assert.ok(Math.abs(value-expected[i])<1e-7,`${rect()} != ${expected}`));}
+  h.message(presentation({zoom:1.5}));check([1200,675,-200,-37.5]);
+  h.message(presentation({fit:'cover'}));check([3200/3,600,-400/3,0]);
+  h.message(presentation({fit:'cover',zoom:1.5}));check([1600,900,-400,-150]);
+  box={width:1200,height:600};h.tick(100);check([1800,1012.5,-300,-206.25]);
+  h.message(presentation({fit:'stretch',zoom:1.5}));check([1800,900,-300,-150]);
+  h.message(presentation());check([3200/3,600,200/3,0]);
+  assert.deepEqual([sink.width,sink.height],[1280,720]);
+  const css=h.elements.get('retroone-stream-style').textContent;
+  assert.ok(css.includes('.video-container{overflow:hidden!important}'));
+  assert.ok(css.includes('#overlayInput'),'mouse input rectangle shares the visual transform');
+});
+
+test('stream invalid zoom is ignored without changing geometry or held input; old messages reset to 100%',async()=>{
+  const h=harness();await h.session({engine:'RetroArch'});
+  h.elements.set('videoCanvas',{width:1280,height:720,parentElement:{getBoundingClientRect:()=>({width:800,height:600})}});
+  h.message(presentation({zoom:2}));h.message(controls(1,{0:1}));h.tick(40);
+  const before={...h.document.documentElement.props};
+  for(const zoom of [null,'2',NaN,Infinity,-Infinity,0,.99,3.01,{},[]]){
+    h.message(presentation({zoom,fit:'cover',menu:true}));
+    assert.deepEqual(h.document.documentElement.props,before);
+    assert.equal(h.read()[0].buttons[0].value,1);
+  }
+  h.message(presentation({zoom:3}));assert.equal(h.document.documentElement.props['--retroone-media-w'],'2400px');
+  h.message(presentation());assert.equal(h.document.documentElement.props['--retroone-media-w'],'800px');
+  assert.equal(h.read()[0].buttons[0].value,1);
+});
+
 test('actual pinned Selkies poller sees touch, physical merge and timeout release',{skip:!process.env.SELKIES_BUNDLE},async()=>{
   const h=harness(),bundle=fs.readFileSync(process.env.SELKIES_BUNDLE,'utf8');const start=bundle.indexOf('D=class{constructor(e,t,n,r){this.gamepad=');const end=bundle.indexOf('};function xe',start);
   assert.ok(start>=0&&end>start);h.context.T=4;h.context.E='linux';vm.runInContext('GamepadManager = '+bundle.slice(start+2,end+1),h.context);

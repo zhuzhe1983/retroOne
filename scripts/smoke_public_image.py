@@ -5,9 +5,12 @@ No GPU, ROM mount, Docker socket, host save directory, or production service.
 The container is always removed, including failures and interruptions.
 """
 import argparse
+import hashlib
 import json
+import re
 import subprocess
 import time
+from urllib.parse import urljoin
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
@@ -57,6 +60,18 @@ def check(image):
             with urlopen(base + '/' + resource, timeout=10) as response:
                 if len(response.read()) < 100:
                     raise RuntimeError('Missing mobile player resource: ' + resource)
+        stream_url = base + '/p/player1/stream/'
+        with urlopen(stream_url, timeout=10) as response:
+            stream_html = response.read().decode()
+            if 'no-cache' not in response.headers.get('Cache-Control', ''):
+                raise RuntimeError('Stream page can reuse a stale mobile input bridge')
+        bridges = re.findall(r'<script src="(\./retroone-input\.js\?v=([0-9a-f]{16}))"></script>', stream_html)
+        if len(bridges) != 1:
+            raise RuntimeError('Stream page is missing a unique versioned input bridge')
+        bridge_url, bridge_version = bridges[0]
+        with urlopen(urljoin(stream_url, bridge_url), timeout=10) as response:
+            if hashlib.sha256(response.read()).hexdigest()[:16] != bridge_version:
+                raise RuntimeError('Stream bridge URL does not match its content')
         with urlopen(base + '/service-worker.js', timeout=10) as response:
             worker = response.read()
             if response.headers.get('Service-Worker-Allowed') != '/' or b'__RETROONE_PWA_VERSION__' in worker:
@@ -75,7 +90,8 @@ def check(image):
         probe = "from pathlib import Path; import shutil; assert all(not any(p.is_file() for p in Path(root).rglob('*')) for root in ('/opt/retroone/libretro','/opt/retroone/vendor','/opt/retroone/system','/roms','/artwork')); assert not shutil.which('pcsx2'); assert not shutil.which('sdlpal'); assert not shutil.which('retroone-eden'); assert not shutil.which('eden'); assert not Path('/opt/eden').exists(); print('no private runtime, ROM, firmware or artwork payloads')"
         subprocess.run(['docker', 'exec', name, '/lsiopy/bin/python', '-c', probe], check=True)
         report = {'health': health, 'empty_library': True, 'profiles_endpoint': bool(profiles), 'interface_language_saved': 'en',
-                  'pwa_manifest_and_worker': True, 'mobile_player_assets': True, 'private_vendor_payloads': False}
+                  'pwa_manifest_and_worker': True, 'mobile_player_assets': True, 'stream_bridge_cache_safe': True,
+                  'private_vendor_payloads': False}
         print(json.dumps(report, ensure_ascii=False))
     finally:
         subprocess.run(['docker', 'logs', '--tail', '80', name], check=False)

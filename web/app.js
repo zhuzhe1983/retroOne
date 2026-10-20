@@ -3,6 +3,7 @@
   'use strict';
 
   const I18n = window.RetroI18n;
+  const clientRevision = new URL(document.currentScript?.src || location.href).searchParams.get('v');
   // Only our explicit status messages are replayed; catalog metadata is never scanned.
   const messageRecipes = new Map(), statusMessages = new Map();
   const t = (source, params = {}) => {
@@ -1302,6 +1303,11 @@
     iframe.id = 'game-frame'; iframe.title = t("{value1} · 游戏画面", {value1: title || 'RetroOne'});
     iframe.allow = 'autoplay; fullscreen; gamepad; clipboard-write; keyboard-map';
     iframe.addEventListener('load', () => { $('play-loading').hidden = true; iframe.focus(); }, {once: true});
+    if (mode === 'stream' && clientRevision) {
+      const streamURL = new URL(url, location.href);
+      streamURL.searchParams.set('retroone_client', clientRevision);
+      url = streamURL.href;
+    }
     iframe.src = url;
     $('play-frame-wrap').append(iframe);
     $('play-dialog').showModal(); document.body.classList.add('body-modal');

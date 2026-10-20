@@ -182,3 +182,31 @@ def test_product_icons_require_own_mark_and_exact_reviewed_bytes(tmp_path):
     manifest['files'][0]['path'] = 'cover.png'
     (folder / 'manifest.json').write_text(json.dumps(manifest))
     assert violations(['web/icons/cover.png'], tmp_path)
+
+
+@pytest.mark.parametrize('old_tag', [
+    '',
+    '<script src="./retroone-input.js"></script>',
+    '<script src="./retroone-input.js?v=older-release"></script>',
+])
+def test_stream_boot_versions_bridge_once_and_preserves_upstream_assets(tmp_path, old_tag):
+    init = Path(__file__).resolve().parents[1] / 'container/root/custom-cont-init.d/99-retroone'
+    code = init.read_text().split("python3 - <<'PY'\n", 1)[1].rsplit('\nPY', 1)[0]
+    page = tmp_path / 'index.html'
+    bridge = tmp_path / 'retroone-input.js'
+    upstream = '<script type="module" src="./assets/selkies-original.js"></script>'
+    page.write_text('<html><head>'+old_tag+upstream+'</head><body></body></html>')
+    bridge.write_text('// generated bridge version one')
+    code = code.replace("Path('/usr/share/selkies/web/index.html')", f'Path({str(page)!r})')
+    exec(compile(code, str(init), 'exec'), {})
+    first = page.read_text()
+    assert first.count('retroone-input.js') == 1
+    assert upstream in first
+    assert '?v='+hashlib.sha256(bridge.read_bytes()).hexdigest()[:16] in first
+    exec(compile(code, str(init), 'exec'), {})
+    assert page.read_text() == first
+    bridge.write_text('// generated bridge version two')
+    exec(compile(code, str(init), 'exec'), {})
+    assert page.read_text() != first
+    assert page.read_text().count('retroone-input.js') == 1
+    assert upstream in page.read_text()

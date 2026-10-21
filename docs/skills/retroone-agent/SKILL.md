@@ -1,15 +1,15 @@
 ---
 name: retroone-agent
-description: Play or observe authorized RetroOne game sessions through a connected RetroOne MCP service, including explicit cloud launches and multiplayer mode selection. This is a preview contract; it does not install or supply the MCP server.
+description: Play or observe authorized RetroOne game sessions through a connected RetroOne MCP service, including explicit cloud launches, screenshots, and bounded controller actions. Requires a configured MCP connection and scoped token.
 metadata:
-  short-description: RetroOne visual play and read-only observation (preview)
+  short-description: RetroOne visual play and read-only observation
 ---
 
-# RetroOne Agent — preview
+# RetroOne Agent
 
-This skill describes a planned integration. RetroOne has not released these MCP tools yet. Discover the connected tools and capabilities first. If they are unavailable, report that the integration is not installed; do not fabricate tool results, call guessed endpoints, or substitute SSH/browser control. Installing this file alone does not enable play or observation.
+Connect to the deployed Streamable HTTP endpoint `/mcp` with the assigned Bearer token. Discover tools and call `retroone_capabilities` first. If the connection is missing, report the missing connection; do not invent results or substitute SSH/browser control. Installing this file alone does not configure the connection. Setup and current limitations: [MCP guide](../../mcp.md).
 
-Use actual discovered schemas over the illustrative tool names below. The deployment must authenticate the caller and grant access to specific profiles, sessions, and actions. A player name or profile ID is not authorization.
+Use the actual discovered schemas. This release exposes `retroone_capabilities`, `retroone_list_games`, `retroone_sessions`, `retroone_watch`, `retroone_observe`, `retroone_launch`, `retroone_claim_control`, `retroone_act`, `retroone_release_control`, and `retroone_stop`; a read-only token only exposes the first five. The deployment must authenticate the caller and grant access to specific profiles, sessions, and actions. A player name or profile ID is not authorization.
 
 ## Choose the requested role
 
@@ -21,17 +21,19 @@ If a profile already has another game, preserve it unless the user has authorize
 
 ## Observe and act
 
-For a play session, the intended loop is capabilities/catalog → launch or resume → claim an authorized controller slot → observe → finite action → observe. For an observation request, use only the observation subset.
+For a play session, the loop is capabilities/catalog → launch or resume → claim an authorized controller slot → observe → finite action → observe. For an observation request, use only the observation subset.
 
-Use `retroone_observe` or its discovered equivalent to get an actual image with session ID, observation ID, capture time, and completed action sequence. Inspect that image; do not infer that a game reached its menu just because a process exists. Ask for a permitted higher-resolution crop when text is unclear. Missing or stale images are not evidence of gameplay.
+Use `retroone_observe` or its discovered equivalent to get an actual image with session ID, observation ID, capture time, and completed action sequence. Inspect that image; do not infer that a game reached its menu just because a process exists. Increase `max_width` up to 1920 when text is unclear; this version has no crop argument. Missing or stale images are not evidence of gameplay.
 
-With a valid control lease, issue a bounded button/axis action using the expected session, observation ID, action ID, and duration. Follow the server's duration limits and allow only one in-flight action per slot. Afterward inspect a fresh frame associated with the completed action. Retry a timed-out action with the same action ID or query its result; do not issue a new ID blindly and duplicate input.
+With a valid control lease, issue a bounded button/axis action using `lease_id`, `expected_session_id`, `observation_id`, `action_id`, and `duration_ms` (1–1000). Observations expire after 30 seconds and are consumed by any action attempt, including failure/cancellation; request a new one before another action. Leases last 90 seconds and valid actions renew them. Follow the server's duration limits and allow only one in-flight action per slot. Afterward inspect a fresh frame associated with the completed action. Retry a timed-out action with the same action ID; do not issue a new ID blindly and duplicate input. After a launch timeout, call `retroone_sessions` before attempting another launch: the emulator may already have started. Service restart invalidates ephemeral handles and leases; reacquire them instead of replaying old input.
 
 The first version runs in real time. Do not treat screenshot IDs as emulator frame counts or claim frame-exact stepping unless the connected runtime explicitly provides and verifies it. Prefer short, deliberate decisions for menus and turn-based games. If action macros or a local reflex controller are available and used, disclose that assistance when reporting performance.
 
-If the session changes, authorization is revoked, observations remain unavailable, or the user's time/action budget is exhausted, stop sending input and release your own lease when possible. The server is responsible for neutralizing inputs on expiry/disconnect; do not assume a lost connection sent a key-up. Do not reacquire control after a human revocation. End only the sessions the user has authorized you to end; releasing control does not require stopping a game.
+If the session changes, authorization is revoked, observations remain unavailable, or the user's time/action budget is exhausted, stop sending input and release your own lease when possible. Normal action completion submits neutral input and closes the input connection. The upstream silent-disconnect heartbeat fallback can take about 2.1 seconds; do not assume a lost connection immediately sent a key-up. Submission is not game-effect acknowledgment, so inspect a fresh image. Do not reacquire control after a human revocation. End only the sessions the user has authorized you to end; releasing control does not require stopping a game.
 
 ## Multi-agent play and live audiences
+
+This release supports separate authorized profiles and server-enforced slot leases. SameConsole requires per-game validation and explicit slot permissions (default slot 1). It does not expose native Network lobby tools, live-chat connectors, or save-state tools. Do not describe these future workflows as implemented merely because a game runtime supports them.
 
 For SameConsole, each active player holds a distinct authorized controller slot. For native Network, each has its own session, virtual console identity, and saves; enter the game's own lobby and verify independent characters and mutual visibility. Coordinate through permitted team messages, not by writing another player's controller state.
 

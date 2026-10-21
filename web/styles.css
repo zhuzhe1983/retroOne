@@ -108,3 +108,6 @@
 .display-actions .button{min-height:44px;white-space:normal;overflow-wrap:anywhere}
 @media(max-width:380px){.self-setting-row{align-items:stretch;flex-direction:column;gap:8px}.self-setting-row select{width:100%}.self-settings{padding:16px 0}.display-dialog{padding:22px}}
 @media(max-height:500px){.self-dialog,.display-dialog{max-height:calc(100dvh - 24px);scroll-padding:14px}}
+
+/* Spectating is a separate read-only view; the player iframe is kept alive. */
+.family-watch-actions{margin:0 0 18px}.family-watch-actions>.button{width:100%;white-space:normal}.family-watch-note{font-size:11px;line-height:1.8;color:var(--muted);margin:9px 0 0}.watch-dialog{padding:0}.watch-frame-wrap{flex:1;min-height:0;background:#07111f}.watch-frame-wrap iframe{display:block;border:0;width:100%;height:100%}.watch-dialog .play-toolbar{flex:none}.watch-dialog[open]{display:flex;flex-direction:column}.watch-dialog .play-heading{min-width:0}.watch-dialog .play-heading strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

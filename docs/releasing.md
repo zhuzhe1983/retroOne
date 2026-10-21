@@ -74,9 +74,22 @@ git push origin v0.1.0
 ```sh
 python3 -m pip install -r requirements-dev.txt
 python3 scripts/check_public_source.py
-python3 -m pytest -q
+python3 -m pytest -q tests
 docker compose config --quiet
 node --check web/app.js
 ```
 
 公开文件检查使用 Git 已跟踪文件列表；待发布文件需要先纳入 Git 暂存区才能接受审计。文档截图只允许清单中逐张审核的界面图片，并校验 SHA256。此检查用于防止误带文件，维护者仍需人工确认截图来源、展示范围与隐私处理；文件校验本身不能代替内容审核。
+
+## MCP 伴随镜像
+
+`Dockerfile.mcp` 使用独立的 `requirements-mcp.txt`，不与模拟器 API 的依赖环境混装。构建上下文采用独立允许列表，只包含服务代码和依赖声明；不包含 ROM、运行缓存、私人凭证或家庭存档。
+
+```sh
+docker build -f Dockerfile.mcp -t retroone-mcp:local .
+docker compose --env-file /srv/retroone/mcp/compose.env -f compose.mcp.yaml up -d --no-build
+```
+
+GitHub Actions 的 `mcp` 任务检查鉴权、幂等输入、只读代理，以及官方 MCP 2.3.0 / 1.30.0 客户端兼容性，然后构建伴随镜像。`main` 和 PR 只测试、构建；版本标签或手动 `publish` 会推送 `ghcr.io/<owner>/<repo小写>-mcp:<版本>`，RetroOne 仓库对应 `ghcr.io/zhuzhe1983/retroone-mcp`。发布任务成功前，不应把尚未推送的标签写成可下载镜像。
+
+主镜像构建等待基础检查和 MCP 检查通过。伴随服务的私有配置始终由部署者单独提供，使用说明与 Skill 随源码发布：[MCP 指南](mcp.md)、[RetroOne Agent Skill](skills/retroone-agent/SKILL.md)。

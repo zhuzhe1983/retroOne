@@ -21,3 +21,6 @@ display-test/
 network-test/
 .pytest_cache/
 .playwright-cli/
+
+# Private optional MCP deployment config, keys and request journal.
+/mcp/

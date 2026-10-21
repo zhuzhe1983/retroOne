@@ -43,6 +43,7 @@
     profile: null, profiles: [], profileEpoch: 0, profileRequests: new Set(), profileEditing: null, profileEditEnter: false, profileAvatar: 'pixel', pendingProfile: null, profileSaving: false,
     profileRegistryEpoch: 0, profileLoading: false, profileCreateRequestId: null, profileWatchId: null, profileRetrying: new Set(), profileCapacity: null,
     playGameId: null, familySelectedId: null, presenceStale: false, presenceEpoch: 0,
+    familySessions: new Map(), familySessionsLoading: false, familySessionsAvailable: false, watchBusy: false, watchRequest: 0, watchTarget: null,
     pendingLaunch: null,
     displayData: null, displayDraft: null, displayLoading: false, displaySaving: false, displayRequest: 0, displayFresh: false, displayReadController: null,
     managementData: null, managementFresh: false, managementLoading: false, managementBusy: false, managementRequest: 0, managementController: null, managementTimer: null,
@@ -64,6 +65,9 @@
   document.querySelector('.mode-filters').insertAdjacentHTML('beforeend', '<button class="filter-button review-filter" id="review-filter" type="button"></button>');
   $('scan-button').innerHTML = `${icon('library')}<span>${escapeHTML(t("管理游戏库"))}</span>`;
   document.body.insertAdjacentHTML('beforeend', `<dialog id="management-dialog" class="help-dialog management-dialog" aria-labelledby="management-title" aria-describedby="management-description"><div class="dialog-heading"><div><p class="eyebrow">LIBRARY CARE</p><h2 id="management-title" data-i18n="管理游戏库">${escapeHTML(t("管理游戏库"))}</h2></div><button class="icon-button" id="close-management" data-i18n-aria-label="关闭游戏库管理" aria-label="${escapeHTML(t("关闭游戏库管理"))}">${icon('close')}</button></div><p class="management-description" id="management-description" data-i18n="扫描识别文件并生成启动配置；内容核验检查重复和损坏；独立试运行需配置检测环境。">${escapeHTML(t("扫描识别文件并生成启动配置；内容核验检查重复和损坏；独立试运行需配置检测环境。"))}</p><dl class="management-summary" id="management-summary"></dl><section class="management-progress" data-i18n-aria-label="当前任务" aria-label="${escapeHTML(t("当前任务"))}"><p id="management-scan">${escapeHTML(t("正在读取扫描状态…"))}</p><strong id="management-job">${escapeHTML(t("正在读取内容核验状态…"))}</strong><p id="management-progress"></p><p class="is-warning" id="management-error" hidden></p></section><p class="management-message" id="management-message" role="status"></p><div class="management-actions"><button class="button button-secondary" id="management-scan-button" data-i18n="扫描游戏目录" disabled>${escapeHTML(t("扫描游戏目录"))}</button><button class="button" id="management-audit-button" disabled>${escapeHTML(t("开始内容核验"))}</button><button class="text-button" id="management-retry" data-i18n="重新读取状态" hidden>${escapeHTML(t("重新读取状态"))}</button></div><p class="management-note" id="management-storage">${escapeHTML(t("检测记录与游戏资料、原始文件及玩家存档分别保存。"))}</p><p class="management-note" data-i18n="核验会分批进行，暂停后可继续。关闭此窗口不会停止服务器任务。">${escapeHTML(t("核验会分批进行，暂停后可继续。关闭此窗口不会停止服务器任务。"))}</p><p class="management-note" id="management-observe">${escapeHTML(t("独立试运行尚未配置。"))}</p></dialog>`);
+
+  $('family-invite-actions').insertAdjacentHTML('beforebegin', `<div class="family-watch-actions"><button class="button" id="family-watch" hidden></button><p id="family-watch-note" class="family-watch-note"></p></div>`);
+  document.body.insertAdjacentHTML('beforeend', `<dialog id="watch-dialog" class="play-dialog watch-dialog" aria-labelledby="watch-title"><div class="play-toolbar"><button class="button button-secondary" id="close-watch" data-i18n="退出观看">${escapeHTML(t('退出观看'))}</button><div class="play-heading"><strong id="watch-title"></strong><span id="watch-note" data-i18n="只读观看 · 你的游戏会继续保留">${escapeHTML(t('只读观看 · 你的游戏会继续保留'))}</span></div></div><div class="watch-frame-wrap" id="watch-frame-wrap"></div></dialog>`);
 
   function syncLanguagePickers() {
     for (const picker of document.querySelectorAll('[data-language-picker]')) {
@@ -123,6 +127,7 @@
     if ($('management-dialog').open) renderLibraryManagement();
     if ($('network-dialog').open) renderNetwork();
     renderPendingLaunch();
+    if (state.watchTarget) $('watch-title').textContent = t('正在观看 {value1} · {value2}', {value1: state.watchTarget.name, value2: state.watchTarget.title});
     $('scan-button').innerHTML = `${icon('library')}<span>${escapeHTML(t('管理游戏库'))}</span>`;
     $('gamepad-status').innerHTML = `${icon('controller')}${escapeHTML(gamepadName ? t('手柄已连接') : t('键盘 / 手柄'))}`;
     $('gamepad-help').textContent = window.isSecureContext ? t('若手柄没有响应，先点击游戏画面，再按手柄任意键。') : t('当前使用 HTTP。部分浏览器只允许在 HTTPS 下读取手柄；未识别时请使用键盘，或通过 HTTPS 访问。');
@@ -252,6 +257,8 @@
     return crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => { const value = crypto.getRandomValues(new Uint8Array(1))[0] & 15; return (char === 'x' ? value : (value & 3) | 8).toString(16); });
   }
   function presenceLabel(profile) {
+    const session = state.familySessions.get(profile?.id);
+    if (session) return t('云端运行 {value1}', {value1: session.game_title || session.title || t('云端游戏')});
     const presence = profile?.presence;
     if (state.presenceStale || !presence) return t("动态暂不可用");
     if (!presence.online) return t("暂时离开");
@@ -259,11 +266,11 @@
   }
   function renderFamilyPresence() {
     const strip = $('family-strip'), focusedId = document.activeElement?.dataset.familyProfile, inboxFocused = document.activeElement?.matches('[data-open-network]');
-    const online = state.presenceStale ? [] : state.profiles.filter((profile) => profile.presence?.online && profile.id !== state.profile?.id);
-    const known = state.profiles.some((profile) => profile.presence);
+    const online = state.profiles.filter((profile) => profile.id !== state.profile?.id && (state.familySessions.has(profile.id) || (!state.presenceStale && profile.presence?.online)));
+    const known = state.familySessionsAvailable || state.profiles.some((profile) => profile.presence);
     const inviteCount = state.networkInvites.filter((invite) => ['pending', 'accepted'].includes(invite.status) && !['closed', 'expired'].includes(invite.room_status)).length;
     const invitation = inviteCount ? `<button class="family-inbox" data-open-network aria-label="${escapeHTML(t("查看 {value1} 条联机邀请", {value1: inviteCount}))}">${escapeHTML(t("联机邀请 "))}<b>${inviteCount}</b></button>` : '';
-    const html = invitation + (online.length ? `<span class="family-online-label"><i></i>${escapeHTML(t("{value1} 位家人在线", {value1: online.length}))}</span>${online.map((profile) => `<button class="family-person" data-family-profile="${escapeHTML(profile.id)}" title="${escapeHTML(profile.name)} · ${escapeHTML(presenceLabel(profile))}" aria-label="${escapeHTML(t("{value1}，{value2}，查看动态", {value1: profile.name, value2: presenceLabel(profile)}))}">${avatarHTML(profile.avatar)}<span><strong>${escapeHTML(profile.name)}</strong><small>${escapeHTML(presenceLabel(profile))}</small></span></button>`).join('')}` : `<span class="family-empty">${escapeHTML(state.presenceStale || !known ? t("家人动态暂不可用") : t("其他家人暂时离开"))}</span>`);
+    const html = invitation + (online.length ? `<span class="family-online-label"><i></i>${escapeHTML(t("{value1} 位家人有动态", {value1: online.length}))}</span>${online.map((profile) => `<button class="family-person" data-family-profile="${escapeHTML(profile.id)}" title="${escapeHTML(profile.name)} · ${escapeHTML(presenceLabel(profile))}" aria-label="${escapeHTML(t("{value1}，{value2}，查看动态", {value1: profile.name, value2: presenceLabel(profile)}))}">${avatarHTML(profile.avatar)}<span><strong>${escapeHTML(profile.name)}</strong><small>${escapeHTML(presenceLabel(profile))}</small></span></button>`).join('')}` : `<span class="family-empty">${escapeHTML(state.presenceStale || !known ? t("家人动态暂不可用") : t("其他家人暂时离开"))}</span>`);
     if (strip.innerHTML !== html) {
       const scroll = strip.scrollLeft;
       strip.innerHTML = html; strip.scrollLeft = scroll;
@@ -278,20 +285,75 @@
     const profile = state.profiles.find((item) => item.id === state.familySelectedId);
     if (!profile) return;
     $('family-title').textContent = profile.name;
-    const presence = profile.presence;
-    $('family-details').innerHTML = `${avatarHTML(profile.avatar)}<div><strong>${escapeHTML(presenceLabel(profile))}</strong><p>${escapeHTML(state.presenceStale || !presence ? t("暂时无法获取在线状态，请稍后再看。") : !presence.online ? t("这位家人暂时离开了游戏馆。") : presence.activity === 'browser' ? t("浏览器游戏") : presence.activity === 'stream' ? t("云端游戏") : t("在游戏馆浏览收藏。"))}</p></div>`;
+    const presence = profile.presence, session = state.familySessions.get(profile.id);
+    const watch = $('family-watch');
+    watch.hidden = profile.id === state.profile?.id || !session;
+    watch.disabled = state.watchBusy;
+    watch.textContent = state.watchBusy ? t('正在连接观看…') : t('观看 {value1} 的游戏', {value1: profile.name});
+    $('family-watch-note').textContent = session ? t('观看实时画面和声音，不会接管手柄或切换玩家。') : state.familySessionsLoading ? t('正在检查可观看的游戏…') : !state.familySessionsAvailable ? t('观看服务暂不可用，请稍后重试。') : presence?.activity === 'browser' ? t('浏览器游戏暂不支持观看。') : t('这位家人目前没有可观看的云端游戏。');
+    $('family-details').innerHTML = `${avatarHTML(profile.avatar)}<div><strong>${escapeHTML(presenceLabel(profile))}</strong><p>${escapeHTML(session ? t('云端游戏') : state.presenceStale || !presence ? t("暂时无法获取在线状态，请稍后再看。") : !presence.online ? t("这位家人暂时离开了游戏馆。") : presence.activity === 'browser' ? t("浏览器游戏") : presence.activity === 'stream' ? t("云端游戏") : t("在游戏馆浏览收藏。"))}</p></div>`;
     const inviteButtons = profile.id !== state.profile?.id && presence?.online && !state.presenceStale && state.networkCapabilities?.available ? state.networkCapabilities.games.map((game) => `<button class="button" data-send-invite="${escapeHTML(game.game_id)}" ${state.networkBusy ? 'disabled' : ''}>${escapeHTML(t("邀请一起玩《{value1}》", {value1: game.title}))}</button>`).join('') : '';
     if ($('family-invite-actions').innerHTML !== inviteButtons) $('family-invite-actions').innerHTML = inviteButtons;
   }
   function showFamily(profileId) {
     $('family-invite-message').hidden = true;
-    state.familySelectedId = profileId; renderFamilyDetails();
+    state.familySelectedId = profileId; renderFamilyDetails(); refreshFamilySessions();
     $('family-dialog').showModal(); syncModalBody(); $('close-family').focus();
   }
   function closeFamily() {
     $('family-dialog').close(); syncModalBody();
     ([...$('family-strip').querySelectorAll('[data-family-profile]')].find((button) => button.dataset.familyProfile === state.familySelectedId) || $('profile-button')).focus();
   }
+  async function refreshFamilySessions() {
+    if (state.familySessionsLoading) return;
+    state.familySessionsLoading = true;
+    try {
+      const result = await api('/spectate/api/sessions', {global: true, timeoutMs: 6000});
+      if (!Array.isArray(result.sessions)) throw interfaceError('观看服务暂不可用，请稍后重试。');
+      const sessions = new Map();
+      for (const entry of result.sessions) {
+        const session = entry.session;
+        if (typeof entry.profile_id === 'string' && session && typeof session.id === 'string' && session.id) sessions.set(entry.profile_id, session);
+      }
+      state.familySessions = sessions; state.familySessionsAvailable = true;
+    } catch {
+      state.familySessions = new Map(); state.familySessionsAvailable = false;
+    } finally {
+      state.familySessionsLoading = false; renderFamilyPresence();
+    }
+  }
+  async function watchFamily() {
+    const target = state.profiles.find((profile) => profile.id === state.familySelectedId);
+    const session = state.familySessions.get(target?.id), viewer = state.profile;
+    if (!target || !viewer || target.id === viewer.id || !session || state.watchBusy) return;
+    const request = ++state.watchRequest, epoch = state.profileEpoch;
+    state.watchBusy = true; $('family-invite-message').hidden = true; renderFamilyDetails();
+    try {
+      const result = await api('/spectate/api/watch', {global: true, method: 'POST', body: JSON.stringify({viewer_profile_id: viewer.id, target_profile_id: target.id, expected_session_id: session.id})});
+      if (request !== state.watchRequest || epoch !== state.profileEpoch || !$('family-dialog').open || state.familySelectedId !== target.id) return;
+      const url = new URL(result.watch_url, location.origin);
+      if (url.origin !== location.origin || !/^\/spectate\/[A-Za-z0-9_-]{24,160}\/$/.test(url.pathname) || url.search || url.hash) throw interfaceError('观看服务返回了无效地址。');
+      state.watchTarget = {name: target.name, title: session.game_title || session.title || t('云端游戏')};
+      $('watch-title').textContent = t('正在观看 {value1} · {value2}', {value1: state.watchTarget.name, value2: state.watchTarget.title});
+      const frame = document.createElement('iframe');
+      frame.src = url.href; frame.title = $('watch-title').textContent; frame.allow = 'autoplay; fullscreen'; frame.referrerPolicy = 'no-referrer';
+      $('watch-frame-wrap').replaceChildren(frame);
+      closeFamily(); $('watch-dialog').showModal(); syncModalBody(); $('close-watch').focus();
+    } catch (error) {
+      if (request === state.watchRequest && epoch === state.profileEpoch && $('family-dialog').open) {
+        $('family-invite-message').textContent = errorMessage(error); $('family-invite-message').hidden = false;
+        refreshFamilySessions();
+      }
+    } finally {
+      if (request === state.watchRequest) { state.watchBusy = false; if ($('family-dialog').open) renderFamilyDetails(); }
+    }
+  }
+  function closeWatch() {
+    state.watchRequest++; state.watchBusy = false; state.watchTarget = null;
+    $('watch-frame-wrap').replaceChildren(); $('watch-dialog').close(); syncModalBody();
+    ([...$('family-strip').querySelectorAll('[data-family-profile]')].find((button) => button.dataset.familyProfile === state.familySelectedId) || $('profile-button')).focus();
+  }
+
   function heartbeatPresence() {
     if (!state.profile || document.hidden) return;
     const epoch = state.presenceEpoch;
@@ -698,7 +760,7 @@
       const changed = JSON.stringify(profiles) !== JSON.stringify(state.profiles) || JSON.stringify(capacity) !== JSON.stringify(state.profileCapacity);
       state.profileCapacity = capacity;
       state.profiles = profiles;
-      state.presenceStale = false; renderFamilyPresence();
+      state.presenceStale = false; renderFamilyPresence(); refreshFamilySessions();
       if (!silent && !state.profileEditing && !state.pendingProfile) showProfileCards();
       else if (changed && !$('profile-grid').hidden) renderProfileCards();
       const current = profiles.find((profile) => profile.id === state.profile?.id);
@@ -1576,6 +1638,10 @@
           else if (key === 'accept') $('close-help').click();
           else if (key === 'up' || key === 'down') $('help-dialog').scrollBy({top: key === 'up' ? -130 : 130, behavior: 'smooth'});
         }
+        else if ($('watch-dialog').open) {
+          if (key === 'back') closeWatch();
+          else if (key === 'accept') $('close-watch').click();
+        }
         else if ($('family-dialog').open) {
           if (key === 'back') closeFamily();
           else if (directional) focusModalAction($('family-dialog'), key);
@@ -1642,6 +1708,14 @@
       if (!validRoom(room)) throw interfaceError("联机步骤暂时无法读取，请稍后再试。");
       state.networkRoom = room; showNetwork({keepRoom: true});
     } catch (error) { if (epoch === state.profileEpoch) notify(errorMessage(error), true); }
+  });
+  $('family-watch').addEventListener('click', watchFamily);
+  $('close-watch').addEventListener('click', closeWatch);
+  $('watch-dialog').addEventListener('cancel', (event) => { event.preventDefault(); closeWatch(); });
+  $('watch-dialog').addEventListener('close', syncModalBody);
+  window.addEventListener('message', (event) => {
+    const frame = $('watch-frame-wrap').querySelector('iframe');
+    if (frame && event.source === frame.contentWindow && event.origin === location.origin && event.data?.type === 'retroone:watch-close') closeWatch();
   });
   $('close-family').addEventListener('click', closeFamily);
   $('back-from-family').addEventListener('click', closeFamily);
@@ -1803,6 +1877,10 @@
     if ($('replace-dialog').open) {
       if (event.key === 'Escape') { event.preventDefault(); closeLaunchConflict(); }
       else if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'KeyA', 'KeyD', 'KeyW', 'KeyS'].includes(event.code)) { event.preventDefault(); (document.activeElement === $('keep-current-game') ? $('replace-current-game') : $('keep-current-game')).focus(); }
+      return;
+    }
+    if ($('watch-dialog').open) {
+      if (event.code === 'Escape') { event.preventDefault(); closeWatch(); }
       return;
     }
     if ($('family-dialog').open) {

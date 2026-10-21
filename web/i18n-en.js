@@ -1,5 +1,19 @@
 /* Interface translations only. Game metadata and server diagnostics retain their original text. */
 window.RetroI18n.add('en', {
+  "云端运行 {value1}": "Running in the cloud: {value1}",
+  "{value1} 位家人有动态": "{value1} family members with activity",
+  "退出观看": "Exit viewing",
+  "只读观看 · 你的游戏会继续保留": "Read-only viewing · Your game stays running",
+  "正在连接观看…": "Connecting to live view…",
+  "观看 {value1} 的游戏": "Watch {value1}’s game",
+  "观看实时画面和声音，不会接管手柄或切换玩家。": "Watch live video and audio without taking control or switching players.",
+  "正在检查可观看的游戏…": "Checking for games to watch…",
+  "观看服务暂不可用，请稍后重试。": "Live viewing is temporarily unavailable. Try again later.",
+  "浏览器游戏暂不支持观看。": "Browser games cannot be watched yet.",
+  "这位家人目前没有可观看的云端游戏。": "This family member has no cloud game to watch right now.",
+  "观看服务返回了无效地址。": "The viewing service returned an invalid address.",
+  "正在观看 {value1} · {value2}": "Watching {value1} · {value2}",
+
   "游戏按键": "Game buttons",
   "点击后返回游戏并发送一次按键。": "Returns to the game and presses the button once.",
   "模拟器工具": "Emulator tools",

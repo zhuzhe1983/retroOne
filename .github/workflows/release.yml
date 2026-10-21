@@ -43,12 +43,64 @@ jobs:
       - name: Unit and API regression tests (no copyrighted fixtures)
         env:
           RETROONE_FETCH_ARTWORK: '0'
-        run: python -m pytest -q
+        run: python -m pytest -q tests
       - name: Browser input bridge regression tests (generated fixtures)
         run: node --test tests/test_*.cjs
 
+  mcp:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.12'
+      - name: Install isolated MCP dependency set
+        run: |
+          python -m pip install -r requirements-mcp.txt pytest==8.3.5
+          python -m venv /tmp/mcp-v1-client
+          /tmp/mcp-v1-client/bin/pip install mcp==1.30.0
+      - name: Check permissions, protocol compatibility and spectator isolation
+        env:
+          MCP_V1_CLIENT_PYTHON: /tmp/mcp-v1-client/bin/python
+        run: python -m pytest -q tests/test_mcp_*.py tests/test_spectate.py
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build the isolated MCP image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: Dockerfile.mcp
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: retroone-mcp:ci
+          cache-from: type=gha,scope=retroone-mcp-amd64
+          cache-to: type=gha,mode=max,scope=retroone-mcp-amd64
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish)
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish tested MCP companion image
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish)
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}-mcp"
+          version="sha-${GITHUB_SHA:0:12}"
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            python -c 'import os,re; assert re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?", os.environ["GITHUB_REF_NAME"])'
+            version="$GITHUB_REF_NAME"
+          fi
+          docker tag retroone-mcp:ci "$image:$version"
+          docker push "$image:$version"
+
   build:
-    needs: checks
+    needs: [checks, mcp]
     runs-on: ubuntu-24.04
     timeout-minutes: 50
     permissions:

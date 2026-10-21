@@ -163,7 +163,19 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt pytest httpx
 ROM_ROOT=/path/to/one CONFIG_ROOT="$PWD/data/dev" \
   .venv/bin/python -m uvicorn retroone.api:app --host 127.0.0.1 --port 18780
-.venv/bin/python -m pytest -q
+.venv/bin/python -m pytest -q tests
 ```
 
 开发库同样需要正确的 `library/<平台>/<来源>/<收藏>/` 层级。macOS 可开发目录与网页；浏览器播放还需自己的 EmulatorJS 资源，云端需要 Linux 图形、音频和串流环境。API 与组件边界见 [ARCHITECTURE.md](../ARCHITECTURE.md)。
+
+## MCP 与观战检查
+
+可选服务的安装与私有配置见 [MCP 指南](mcp.md)。核心检查如下：
+
+- `docker inspect retroone-mcp` 的 health 为 healthy；`http://127.0.0.1:8790/healthz` 返回正常。配置目录只读，state 目录由 `compose.env` 中的 UID/GID 写入，SQLite 位于持久卷。
+- 对外 `POST /mcp` 未带凭证返回 401。使用授权客户端完成 initialize、list_tools、sessions；只读凭证看不到控制工具，手工调用 stop 仍被拒绝。不要把 token 写在 curl 命令、URL 或日志中。
+- 首页与 `app.js` 必须来自同一版完整 `web/` 目录。以自己身份点开家人活动，再点“观看”，确认真实画面持续更新；退出后本人身份、目标游戏 session/PID/分辨率保持不变。
+- 独立 AI 测试档案用一个小 ROM 显式 `stream` 启动，检查真实截图、Start/方向/动作的画面效果、释放与重复 action ID。不能拿“输入已提交”代替游戏实际响应。
+- 游戏停止或更换后，旧 watch handle 不能继续获取画面；断开观战不能结束目标游戏。使用测试实例检查，不切换正在玩的家庭游戏。
+
+升级 MCP 只重建伴随服务，会使旧 handle/控制租约失效，不需要重启家庭模拟器。升级网页应同步完整静态目录；Nginx 代理配置先 `nginx -t` 再平滑重载。回滚时使用部署前的静态文件与代理备份；停掉 MCP 后，普通游戏库仍可工作。`scripts/create_mcp_runtime.py --rollback` 只恢复它创建且当前空闲的 AI 实例，保留成员与存档，不能作为删除家庭档案的工具。

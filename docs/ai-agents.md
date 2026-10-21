@@ -1,10 +1,12 @@
 # AI Agent、指定运行方式与家庭观战
 
-状态：**开发方案，尚未开放 MCP 或网页观战入口。** 2026-10-21 基于应用提交 `3fdc53e`、私有部署的 Selkies 2.0.0 / Pixelflux 2.1.0 审查。下文明确区分已有能力和待开发功能；接口草案不代表可以立即调用。
+状态：**MCP 第一版与家庭云游戏观战已实现。** 当前使用方式、工具参数、鉴权配置与限制以 [MCP 与只读观战](mcp.md) 为准；[正式 Agent Skill](skills/retroone-agent/SKILL.md) 可配合已连接的服务使用。
 
-English: This proposal adds per-launch cloud selection, authenticated read-only spectating, and visual AI agents through MCP. It reuses existing emulator and streaming components. The MCP tools, spectator UI, and agent skill are not released capabilities yet.
+English: MCP v1 and read-only cloud spectating are implemented. See the [current setup guide](mcp.md) and [agent skill](skills/retroone-agent/SKILL.md). The design record below includes future work and is not a list of shipped features.
 
-## 目标与现状
+以下保留最初的设计记录。**逐人批准观战、玩家踢出观看者、网页单次模式选择、双 Agent 同场验证、Network MCP 工具与弹幕连接器仍属后续范围。** 当前家庭观战由管理员为可信家庭网络开启，点开顶栏家人活动后会显示独立的“观看”按钮；不是在玩家选择窗口点头像。MCP 输入上限为 1000 ms，截图只支持最大宽度，没有裁图参数。
+
+## 最初设计：目标与现状（历史记录）
 
 家人继续按原有规则玩游戏；AI 可以单次指定云端运行，包括 NES 等小型游戏。爸爸可以保留自己的玩家身份和游戏，只读观看儿子的当前云游戏。AI 也可以作为观察者，或在获得授权后控制自己的游戏、同机多人中的一个手柄，或原生联网中的一个独立实例。
 
@@ -169,6 +171,6 @@ MCP 负责工具调用和截图结果，视频继续走现有串流链路；不�
 
 ## Skill 与文档发布
 
-已提供 [RetroOne Agent Skill 预览](skills/retroone-agent/SKILL.md)，用于审阅操作约定，**目前不能靠安装此文件获得尚未实现的工具**。正式实现后，将 Skill 与服务的兼容版本、认证配置、安装入口一起加入 Release，并在此页给出已测试客户端的连接示例。
+已提供 [RetroOne Agent Skill](skills/retroone-agent/SKILL.md)。连接参数与部署步骤见 [MCP 指南](mcp.md)；Skill 文件本身不包含服务或凭证。
 
 正式 Skill 负责指导 Agent 选择自己的档案、强制云端、按截图采取有限动作、区分四类多人玩法，以及只读观战；授权仍由服务端执行。发布包仅包含代码、说明和自有测试夹具，不含 ROM、固件、密钥、真实玩家存档、凭证或未确认可公开的游戏画面。

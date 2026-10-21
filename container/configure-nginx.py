@@ -41,6 +41,29 @@ if os.environ.get('RETROONE_GATEWAY', 'true').lower() == 'true':
 {headers}
   }}
 '''
+    mcp_route_file = Path('/config/retroone/mcp-upstream')
+    mcp_upstream = os.environ.get('RETROONE_MCP_UPSTREAM', '') or (mcp_route_file.read_text().strip() if mcp_route_file.is_file() else '')
+    if mcp_upstream:
+        if not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9.-]*:[0-9]{1,5}', mcp_upstream) or not 1 <= int(mcp_upstream.rsplit(':', 1)[1]) <= 65535:
+            raise SystemExit('Invalid configured MCP upstream')
+        for location in ('= /mcp', '^~ /spectate/'):
+            routes += f'''  location {location} {{
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    set $retroone_mcp http://{mcp_upstream};
+    proxy_pass $retroone_mcp;
+    proxy_set_header Host $http_host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_http_version 1.1;
+    proxy_read_timeout 1800s;
+    proxy_send_timeout 1800s;
+    proxy_buffering off;
+    proxy_request_buffering off;
+    client_max_body_size 64k;
+    access_log off;
+  }}
+'''
 source = Path('/opt/retroone/nginx.template.conf').read_text()
 source = source.replace('  RETROONE_ROUTES', routes)
 source = source.replace('RETROONE_LEGACY_STREAM', base + '/stream/')

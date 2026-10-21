@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import subprocess
 
-PRIVATE_ROOTS = {'vendor', 'data', 'library-data', '.butler', 'profiles', 'artifacts', 'output', 'backups', 'logs', 'roms', 'firmware', 'bios', 'display-test', 'network-test', '.venv', 'test-data'}
+PRIVATE_ROOTS = {'vendor', 'data', 'library-data', '.butler', 'profiles', 'artifacts', 'output', 'backups', 'logs', 'roms', 'firmware', 'bios', 'display-test', 'network-test', '.venv', 'test-data', 'mcp'}
 BINARY_EXTENSIONS = {'.so', '.dll', '.exe', '.appimage', '.zip', '.7z', '.rar', '.tar', '.gz', '.xz', '.iso', '.cso', '.chd', '.nes', '.fds', '.smc', '.sfc', '.gb', '.gbc', '.gba', '.nds', '.3ds', '.cia', '.nsp', '.xci', '.nca', '.nro', '.nso', '.nsz', '.xcz', '.kip', '.npdm', '.pfs0', '.hfs0', '.nax0', '.tik', '.ticket', '.cert', '.sav', '.srm', '.state', '.bin', '.rom', '.pem', '.key', '.keys'}
 # Eden can write extracted keys without a conventional final extension. Include
 # renamed/backup forms so a text payload cannot bypass the binary-byte check.

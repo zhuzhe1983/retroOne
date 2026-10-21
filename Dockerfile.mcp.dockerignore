@@ -1,0 +1,9 @@
+# A separate allowlist keeps private runtime, ROMs and credentials out of MCP builds.
+**
+!Dockerfile.mcp
+!requirements-mcp.txt
+!retroone_mcp/
+!retroone_mcp/**
+**/__pycache__
+**/*.pyc
+**/.DS_Store

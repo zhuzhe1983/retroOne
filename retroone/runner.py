@@ -410,11 +410,15 @@ class Runner:
         # for slow motion. Explicitly clear gameplay-letter hotkeys.
         for hotkey in ("toggle_fullscreen", "state_slot_increase", "state_slot_decrease", "toggle_fast_forward", "hold_fast_forward", "shader_next", "shader_prev", "shader_toggle", "rewind", "movie_record_toggle", "pause_toggle", "frame_advance", "reset", "cheat_index_plus", "cheat_index_minus", "cheat_toggle", "netplay_flip_players", "slowmotion", "hold_slowmotion", "toggle_slowmotion", "toggle_vrr_runloop", "overlay_next", "disk_eject_toggle", "disk_next", "toggle_statistics"):
             settings["input_" + hotkey] = "nul"
+        # Selkies exposes an Xbox 360 pad that SDL recognizes as a GameController.
+        # RetroArch's sdl2 driver reads SDL_CONTROLLER_* enums for such devices,
+        # not Linux joydev button/axis indices; recognized pads have no hats.
+        # https://github.com/libretro/RetroArch/blob/v1.20.0/input/drivers_joypad/sdl_joypad.c
         for player in range(1, 5):
             settings[f"input_player{player}_joypad_index"] = str(player - 1)
-            for axis, value in {"l_x_minus":"-0", "l_x_plus":"+0", "l_y_minus":"-1", "l_y_plus":"+1", "r_x_minus":"-3", "r_x_plus":"+3", "r_y_minus":"-4", "r_y_plus":"+4", "l2":"+2", "r2":"+5"}.items():
+            for axis, value in {"l_x_minus":"-0", "l_x_plus":"+0", "l_y_minus":"-1", "l_y_plus":"+1", "r_x_minus":"-2", "r_x_plus":"+2", "r_y_minus":"-3", "r_y_plus":"+3", "l2":"+4", "r2":"+5"}.items():
                 settings[f"input_player{player}_{axis}_axis"] = value
-            for button, index in {"b": "0", "a": "1", "y": "2", "x": "3", "l": "4", "r": "5", "select": "6", "start": "7", "l3": "9", "r3": "10", "up": "h0up", "down": "h0down", "left": "h0left", "right": "h0right"}.items():
+            for button, index in {"b": "0", "a": "1", "y": "2", "x": "3", "l": "9", "r": "10", "select": "4", "start": "6", "l3": "7", "r3": "8", "up": "11", "down": "12", "left": "13", "right": "14"}.items():
                 settings[f"input_player{player}_{button}_btn"] = index
         if game["platform"] == "3ds":
             settings["video_driver"] = "glcore"

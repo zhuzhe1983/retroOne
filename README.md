@@ -39,7 +39,8 @@ On phones, touch controls adapt to the game platform, with landscape side contro
 - **浏览自己的收藏**：按平台查找游戏，搜索名称，查看最近游玩和个人收藏；缺少封面时使用应用自带的文字卡片。
 - **一个入口，两种运行方式**：轻量游戏在浏览器运行；大型镜像留在服务器，通过串流游玩。
 - **全家各有进度**：自选昵称和头像，独立收藏、最近记录、设置与存档；首页“＋”可添加成员。
-- **看看谁在玩**：顶栏显示在线家人的头像与活动，本人的状态入口可以继续、结束游戏或打开用户设置。
+- **看看谁在玩**：顶栏显示在线家人的头像与活动；开启观战服务后，可点开家人活动，再点独立的“观看”按钮，只读观看当前云游戏。本人的状态入口可以继续、结束游戏或打开用户设置。
+- **让 AI 玩或看**：可选 MCP 服务提供授权档案、强制云端启动、截图与限时手柄输入。小型 NES 游戏也可只对这一次改为云端，不影响家庭的默认玩法。
 - **每台设备各自的画质**：同一玩家可以在平板上用 1080p、手机上用 720p，互不覆盖。
 - **键盘和手柄导航**：支持 WASD、方向键、Xbox 和 PlayStation 手柄，无需先打开手柄模式。
 - **手机也能玩**：全屏播放、按平台切换的触控按键、横竖屏布局及 PWA 安装；按键大小、透明度和画面比例可在游玩菜单调整。
@@ -234,7 +235,8 @@ Display preferences are saved separately for each player and browser/device: use
 
 ## 文档与开发
 
-- [AI Agent、指定云端运行与家庭观战：开发方案](docs/ai-agents.md) · [Skill 预览](docs/skills/retroone-agent/SKILL.md)（MCP 与观战入口尚未发布）
+- [MCP 与只读观战：安装、连接和使用](docs/mcp.md) · [Agent Skill](docs/skills/retroone-agent/SKILL.md)
+- [AI Agent 设计记录与后续多人计划](docs/ai-agents.md)
 - [AI 直播选题与弹幕互动建议](docs/ai-live-games.md)
 - [部署、存档、升级与 ROM 整理](docs/operations.md)
 - [镜像构建与发布](docs/releasing.md)
@@ -245,6 +247,6 @@ Display preferences are saved separately for each player and browser/device: use
 - [上游组件、版本与许可证记录](container/UPSTREAM.md)
 - [真实图库与示例截图的来源说明](docs/screenshots/README.md)
 
-Planned integration: [visual AI agents and read-only spectating](docs/ai-agents.md), with per-launch cloud selection and a [preview agent skill](docs/skills/retroone-agent/SKILL.md). The MCP service and spectator UI are not available yet.
+Optional [MCP and read-only spectating](docs/mcp.md) are available: scoped Agent profiles, explicit cloud launches, screenshots, and bounded controller actions. The home screen has a separate Watch action for active cloud sessions. Connect the MCP service before using the [Agent Skill](docs/skills/retroone-agent/SKILL.md). Native Network MCP tools, browser-local sharing, and live-chat integration remain future work.
 
 本地开发可以在 macOS / Linux 启动目录 API 与网页；云端模拟和串流需要 Linux 容器环境。开发启动、检查命令见维护指南。游戏、固件、独立封面缓存、用户数据和本地验收录屏均应留在自己的存储中，不随代码提交或公开发布。文档仅收录截图清单中逐张确认的界面图片。

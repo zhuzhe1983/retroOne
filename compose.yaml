@@ -43,6 +43,7 @@ services:
       RETROONE_PROFILE_ID: player1
       RETROONE_BASE_PATH: /p/player1
       RETROONE_GATEWAY: "true"
+      RETROONE_MCP_UPSTREAM: "${RETROONE_MCP_UPSTREAM:-}"
       SUBFOLDER: /p/player1/stream/
     volumes:
       # Keep the existing player's entire config/save directory in place.

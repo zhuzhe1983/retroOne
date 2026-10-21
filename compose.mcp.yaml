@@ -1,0 +1,36 @@
+# Optional sidecar. Start with: docker compose -f compose.mcp.yaml up -d --build
+# Connects to an already running RetroOne Docker network; it never mounts Docker,
+# ROMs, family save directories, or emulator binaries.
+services:
+  mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp
+    image: "${RETROONE_MCP_IMAGE:-retroone-mcp:local}"
+    container_name: retroone-mcp
+    restart: unless-stopped
+    user: "${RETROONE_MCP_UID:-10001}:${RETROONE_MCP_GID:-10001}"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=32m"]
+    ports:
+      - "${RETROONE_MCP_BIND:-127.0.0.1}:${RETROONE_MCP_PORT:-8790}:8090"
+    environment:
+      RETROONE_MCP_CONFIG: /config/mcp.json
+      RETROONE_MCP_STATE: /state/requests.sqlite
+      RETROONE_MCP_ALLOWED_HOSTS: "${RETROONE_MCP_ALLOWED_HOSTS:-localhost,127.0.0.1,retroone-mcp}"
+      RETROONE_MCP_ALLOWED_ORIGINS: "${RETROONE_MCP_ALLOWED_ORIGINS:-}"
+    volumes:
+      - "${RETROONE_MCP_CONFIG_PATH:-./mcp/config}:/config:ro"
+      - "${RETROONE_MCP_STATE_PATH:-./mcp/state}:/state:rw"
+    networks: [retroone]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+networks:
+  retroone:
+    external: true
+    name: "${RETROONE_DOCKER_NETWORK:-retroone_default}"

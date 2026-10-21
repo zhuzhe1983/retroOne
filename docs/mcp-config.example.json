@@ -1,0 +1,37 @@
+{
+  "profiles": {
+    "player1": {
+      "name": "Family member",
+      "api_url": "http://retroone:3000/p/player1",
+      "selkies_url": "http://retroone:3000/p/player1/stream",
+      "control_enabled": false
+    },
+    "player5": {
+      "name": "AI A",
+      "api_url": "http://retroone-player5:3000/p/player5",
+      "selkies_url": "http://retroone-player5:3000/p/player5/stream",
+      "control_enabled": true,
+      "selkies_tokens": {"1": "REPLACE_WITH_PRIVATE_SLOT_TOKEN"},
+      "selkies_viewer_token": "REPLACE_WITH_PRIVATE_VIEWER_TOKEN"
+    }
+  },
+  "credentials": [
+    {
+      "id": "agent-a",
+      "token_sha256": "REPLACE_WITH_SHA256_OF_RANDOM_CLIENT_TOKEN",
+      "observe_profiles": ["player5"],
+      "control_profiles": ["player5"],
+      "launch_profiles": ["player5"],
+      "stop_profiles": ["player5"]
+    },
+    {
+      "id": "family-observer",
+      "token_sha256": "REPLACE_WITH_SHA256_OF_ANOTHER_RANDOM_CLIENT_TOKEN",
+      "observe_profiles": ["player1"],
+      "control_profiles": [],
+      "launch_profiles": [],
+      "stop_profiles": []
+    }
+  ],
+  "family_watch": {"enabled": false, "profiles": ["player1", "player5"]}
+}

@@ -191,6 +191,9 @@ def test_secure_slot_input_uses_standard_protocol_and_always_releases():
     async def check():
         async with peer() as (runtime, state, _):
             result = await runtime.perform("ai", 2, ["a", "lt", "up"], {"lx": -0.75, "ry": 0.5}, 35, "session-a")
+            # perform() confirms local submission, not completion of this peer's
+            # receive loop. Its finally event marks the complete message list.
+            await asyncio.wait_for(state["closed"].wait(), 0.2)
             assert state["ws_query"] == {"token": "slot-two-secret"}
             assert state["messages"][0].startswith("js,c,1,")
             assert state["messages"][0].endswith(",4,17")
@@ -202,7 +205,6 @@ def test_secure_slot_input_uses_standard_protocol_and_always_releases():
             assert result["delivery"] == "submitted" and result["submitted_messages"] == 5
             assert result["neutralization_submitted"] and not result["game_effect_confirmed"]
             assert all(text.startswith("js,") for text in state["messages"])
-            await asyncio.wait_for(state["closed"].wait(), 0.2)
     run(check())
 
 
@@ -215,8 +217,8 @@ def test_refused_handshake_never_associates_or_sends_input(options, code):
             with pytest.raises(RuntimeFailure) as error:
                 await runtime.perform("ai", 2, ["a"], {}, 20, "session-a")
             assert error.value.code == code
-            assert not state["messages"]
             await asyncio.wait_for(state["closed"].wait(), 0.2)
+            assert not state["messages"]
     run(check())
 
 
@@ -245,6 +247,7 @@ def test_action_deadline_is_independent_of_a_slow_status_poll():
         async with peer(status_delay_after=3) as (runtime, state, _):
             result = await runtime.perform("ai", 2, ["a"], {}, 35, "session-a")
             assert result["elapsed_ms"] < 200
+            await asyncio.wait_for(state["closed"].wait(), 0.2)
             assert state["messages"][-1] == "js,d,1"
     run(check())
 
@@ -257,8 +260,8 @@ def test_task_cancellation_releases_before_propagating():
             task.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await task
-            assert state["messages"][-1] == "js,d,1"
             await asyncio.wait_for(state["closed"].wait(), 0.2)
+            assert state["messages"][-1] == "js,d,1"
     run(check())
 
 

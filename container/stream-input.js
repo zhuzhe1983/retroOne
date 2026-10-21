@@ -29,6 +29,10 @@
   const switchButtons = {KeyJ:0,KeyK:1,KeyU:2,KeyI:3,KeyQ:4,KeyE:5,Digit1:6,Digit3:7,ShiftLeft:8,ShiftRight:8,Enter:9,KeyZ:10,KeyX:11,KeyT:12,KeyF:14,KeyG:13,KeyH:15};
   const switchAxes = [['KeyA','KeyD'],['KeyW','KeyS'],['ArrowLeft','ArrowRight'],['ArrowUp','ArrowDown']];
   const switchCodes = new Set([...Object.keys(switchButtons), ...switchAxes.flat()]);
+  // Keyboard bindings are stable across old and new live RetroArch sessions.
+  // Sending these touch buttons as both keys and a pad would double-trigger or
+  // hit a different action in a session using the older SDL button numbering.
+  const retroarchTouchKeys = {0:'KeyK',1:'KeyJ',2:'KeyU',3:'KeyI',4:'KeyQ',5:'KeyE',8:'ShiftLeft',9:'Enter',12:'KeyW',13:'KeyS',14:'KeyA',15:'KeyD'};
   const nativeGetGamepads = navigator.getGamepads?.bind(navigator);
   const switchId = 'RetroOne Switch Controller';
   let switchActive = false, switchSupported = false, switchPhase = 'off', switchTransition = 0, switchTimer, installedRead;
@@ -47,7 +51,8 @@
     const buttons = Array.from({length:17}, (_, index) => {
       const original = source?.buttons[index];
       const keyboard = Object.keys(switchButtons).some(code => switchButtons[code] === index && switchKeys.has(code));
-      const virtual = keyboard ? 1 : touchButtons[index];
+      const touch = /RetroArch/.test(engine) && Object.hasOwn(retroarchTouchKeys, index) ? 0 : touchButtons[index];
+      const virtual = keyboard ? 1 : touch;
       return {value:Math.max(virtual, original?.value || 0), pressed:virtual > .5 || !!original?.pressed, touched:virtual > 0 || !!original?.touched};
     });
     return {id:switchId, index:0, connected:true, mapping:'standard', axes, buttons,
@@ -149,6 +154,7 @@
   const held = new Set();
   const keyboardHeld = new Set();
   const gamepadKeys = {ArrowUp:['ArrowUp',38],ArrowDown:['ArrowDown',40],ArrowLeft:['ArrowLeft',37],ArrowRight:['ArrowRight',39],Enter:['Enter',13],Escape:['Escape',27],Space:[' ',32],ControlLeft:['Control',17],AltLeft:['Alt',18],ShiftLeft:['Shift',16],KeyZ:['z',90],KeyX:['x',88],Digit1:['1',49],Digit5:['5',53]};
+  for (const letter of 'wasdjkuieq') gamepadKeys['Key' + letter.toUpperCase()] = [letter, letter.toUpperCase().charCodeAt(0)];
   function emitPadKey(code, down) {
     if (keyboardHeld.has(code)) return;
     const [key, keyCode] = gamepadKeys[code];
@@ -161,6 +167,9 @@
   }
   function updateGamepad() {
     const wanted = new Set();
+    if (touchEnabled && /RetroArch/.test(engine) && document.visibilityState === 'visible' && !presentation?.menu) {
+      for (const [index, code] of Object.entries(retroarchTouchKeys)) if (touchButtons[index] > .5) wanted.add(code);
+    }
     if ((/DOSBox/.test(engine) || touchEnabled && /SDLPAL|^MAME$/.test(engine)) && document.visibilityState === 'visible') {
       // Preserve existing physical DOS controls. MAME/SDLPAL only add the
       // parent touch source; their native joystick mapping remains independent.

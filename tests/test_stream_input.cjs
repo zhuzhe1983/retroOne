@@ -260,7 +260,7 @@ test('actual pinned Selkies poller emits menu releases and restores native and m
 });
 
 test('parent touch full snapshots merge simultaneous controls, neutral releases only touch, and iframe blur is harmless',async()=>{
-  const h=harness();await h.session({engine:'RetroArch',platform:'psp'});
+  const h=harness();await h.session({engine:'PCSX2',platform:'psp'});
   const physical=pad(2);h.pads([null,null,physical,null]);h.message(presentation());h.tick(40);
   h.message(controls(1,{0:1,4:1,6:.8,12:1},[.75,-1,-.4,.2]));
   assert.deepEqual(plain(h.read()[0].axes),[.75,-1,-.4,.2]);assert.equal(h.read()[0].buttons[4].value,1);assert.equal(h.read()[0].buttons[6].value,.8);
@@ -329,7 +329,7 @@ test('stream cover and manual zoom crop around the viewport center without chang
 });
 
 test('stream invalid zoom is ignored without changing geometry or held input; old messages reset to 100%',async()=>{
-  const h=harness();await h.session({engine:'RetroArch'});
+  const h=harness();await h.session({engine:'PCSX2'});
   h.elements.set('videoCanvas',{width:1280,height:720,parentElement:{getBoundingClientRect:()=>({width:800,height:600})}});
   h.message(presentation({zoom:2}));h.message(controls(1,{0:1}));h.tick(40);
   const before={...h.document.documentElement.props};
@@ -372,7 +372,7 @@ test('actual pinned Selkies poller sees touch, physical merge and timeout releas
   const h=harness(),bundle=fs.readFileSync(process.env.SELKIES_BUNDLE,'utf8');const start=bundle.indexOf('D=class{constructor(e,t,n,r){this.gamepad=');const end=bundle.indexOf('};function xe',start);
   assert.ok(start>=0&&end>start);h.context.T=4;h.context.E='linux';vm.runInContext('GamepadManager = '+bundle.slice(start+2,end+1),h.context);
   const changes=[];let manager;h.window.addEventListener('gamepadconnected',event=>{manager ||= new h.context.GamepadManager(event.gamepad,(...args)=>changes.push(['button',...args]),(...args)=>changes.push(['axis',...args]));});
-  await h.session({engine:'RetroArch'});const physical=pad(2);h.pads([null,null,physical,null]);h.message(presentation());h.tick(40);
+  await h.session({engine:'PCSX2'});const physical=pad(2);h.pads([null,null,physical,null]);h.message(presentation());h.tick(40);
   h.message(controls(1,{0:1,4:1},[-.9,.8,0,0]));h.tick(16);
   assert.ok(changes.some(c=>c[0]==='button'&&c[2]===0&&c[3]===1));assert.ok(changes.some(c=>c[0]==='axis'&&c[2]===0&&c[3]===-.9));
   h.blur();h.tick(16);assert.equal(h.read()[0].buttons[0].value,1);changes.length=0;h.tick(1250);
@@ -388,9 +388,37 @@ test('touch uses upstream gamepadControl to re-enable a disabled pinned poller; 
   const commandStart=bundle.indexOf('case`gamepadControl`:');const commandEnd=bundle.indexOf('case`clipboardUpdateFromUI`:',commandStart);
   assert.ok(commandStart>=0&&commandEnd>commandStart);h.context.N=false;h.context.j=new Set();h.context.Gt=()=>{};h.context.er=()=>{};h.context.ir=()=>manager.enable();
   vm.runInContext('upstreamToggle = t => { switch(t.type) { '+bundle.slice(commandStart,commandEnd)+' } }',h.context);
-  h.window.addEventListener('message',e=>{if(e.source===h.window)h.context.upstreamToggle(e.data);});await h.session({engine:'RetroArch'});
+  h.window.addEventListener('message',e=>{if(e.source===h.window)h.context.upstreamToggle(e.data);});await h.session({engine:'PCSX2'});
   h.message(presentation({touch:false}));h.tick(100);assert.equal(h.selfMessages.length,0);assert.equal(h.context.N,false);
   h.message(presentation());h.tick(40);h.message(controls(1,{0:1}));h.tick(16);assert.equal(h.context.N,true);assert.ok(changes.some(c=>c[1]===0&&c[2]===1));assert.equal(h.selfMessages.length,1);
   h.window.webrtcInput={gamepadManager:manager};h.tick(100);assert.equal(h.selfMessages.length,2,'late transport attachment replays enable once');h.tick(100);assert.equal(h.selfMessages.length,2);
   h.message(presentation({touch:false}));h.tick(100);assert.equal(h.selfMessages.length,2,'closing overlay does not disable physical input');manager.destroy();
+});
+
+
+test('RetroArch touch uses stable keyboard bindings without duplicate joystick buttons, including current old sessions',async()=>{
+  const h=harness();await h.session({engine:'RetroArch / ppsspp',platform:'psp'});
+  h.message(presentation());h.tick(40);
+  const mappings={0:'KeyK',1:'KeyJ',2:'KeyU',3:'KeyI',4:'KeyQ',5:'KeyE',8:'ShiftLeft',9:'Enter',12:'KeyW',13:'KeyS',14:'KeyA',15:'KeyD'};
+  let seq=0;
+  for(const [index,code] of Object.entries(mappings)){
+    h.forwarded.length=0;h.message(controls(++seq,{[index]:1}));h.frame();
+    assert.equal(h.read()[0].buttons[index].value,0,'touch key must not also hit an old joystick binding');
+    assert.ok(h.forwarded.some(e=>e.type==='keydown'&&e.code===code));
+    h.message(controls(++seq));h.frame();
+    assert.ok(h.forwarded.some(e=>e.type==='keyup'&&e.code===code));
+  }
+  const native={...pad(2,[.7,-.6,.1,.2]),buttons:Array.from({length:17},(_,i)=>({value:i===9?1:0,pressed:i===9}))};
+  h.pads([null,null,native,null]);
+  assert.equal(h.read()[0].buttons[9].value,1,'physical input stays native');
+  assert.deepEqual(plain(h.read()[0].axes),native.axes);
+});
+
+test('RetroArch touch Start releases on menu, hidden page, timeout and overlay removal',async()=>{
+  for(const release of [h=>h.message(presentation({menu:true})),h=>h.hidden(true),h=>h.tick(1300),h=>h.message(presentation({touch:false}))]){
+    const h=harness();await h.session({engine:'RetroArch / ppsspp'});h.message(presentation());h.tick(40);
+    h.message(controls(1,{9:1}));h.frame();
+    assert.ok(h.forwarded.some(e=>e.type==='keydown'&&e.code==='Enter'));
+    release(h);h.frame();assert.ok(h.forwarded.some(e=>e.type==='keyup'&&e.code==='Enter'));
+  }
 });

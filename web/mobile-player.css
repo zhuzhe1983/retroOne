@@ -95,15 +95,10 @@
  .mobile-player-menu{max-height:55dvh;bottom:max(8px,env(safe-area-inset-bottom));right:8px;width:calc(100% - 16px);padding:15px}
  .mobile-player-settings select{font-size:16px}
 }
-/* Narrow portrait phones keep every stick reachable without scrolling across game inputs. */
+/* Narrow phones keep the analog stick beside SELECT without shrinking tap targets. */
 @media(orientation:portrait) and (max-width:380px){
- .touch-active .play-body{grid-template-rows:minmax(96px,1fr) auto}
  .play-dialog:is([data-touch-layout=nintendo3ds],[data-touch-layout=switch],[data-touch-layout=psp],[data-touch-layout=playstation],[data-touch-layout=standard]){--stick-size:clamp(72px,calc(88px*var(--touch-size)),96px)}
- .touch-active:is([data-touch-layout=nintendo3ds],[data-touch-layout=switch],[data-touch-layout=psp],[data-touch-layout=playstation],[data-touch-layout=standard]) .touch-rail{display:grid;grid-template-columns:48px minmax(0,1fr);grid-template-rows:auto auto;align-content:center;justify-items:center;gap:8px 4px;padding:4px}
- .touch-active:is([data-touch-layout=nintendo3ds],[data-touch-layout=switch],[data-touch-layout=psp],[data-touch-layout=playstation],[data-touch-layout=standard]) :is(.touch-dpad,.touch-face){grid-column:1/-1;grid-row:1}
- .touch-active:is([data-touch-layout=nintendo3ds],[data-touch-layout=switch],[data-touch-layout=psp],[data-touch-layout=playstation],[data-touch-layout=standard]) .touch-shoulders{grid-column:1;grid-row:2;flex-direction:column;gap:4px}
- .touch-active:is([data-touch-layout=nintendo3ds],[data-touch-layout=switch],[data-touch-layout=psp],[data-touch-layout=playstation],[data-touch-layout=standard]) .touch-shoulders .touch-button{width:48px}
- .touch-active:is([data-touch-layout=nintendo3ds],[data-touch-layout=switch],[data-touch-layout=psp],[data-touch-layout=playstation],[data-touch-layout=standard]) .touch-rail-bottom{grid-column:2;grid-row:2;flex-direction:column;gap:4px}.touch-active .touch-side-system{width:44px}
+ .touch-active .touch-side-system{width:44px}
 }
 @media(prefers-reduced-motion:reduce){.touch-button,.touch-stick-knob{transition:none}}
 
@@ -117,7 +112,13 @@
 .touch-active.touch-overlay .touch-right{right:env(safe-area-inset-right)}
 .touch-overlay .touch-rail :is(.touch-button,.touch-stick){pointer-events:auto}
 @media(orientation:portrait) and (max-width:700px){
- .touch-active.touch-overlay .touch-rail{top:auto;bottom:env(safe-area-inset-bottom);width:calc((100% - env(safe-area-inset-left) - env(safe-area-inset-right))/2)}
+ /* Portrait has room below the picture. Never let the landscape overlay rule
+    recenter the video across the whole screen or cover the game's lower HUD. */
+ .play-dialog.touch-active:not(.native-tools-open) .play-body{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:minmax(0,1fr) auto;padding:max(56px,env(safe-area-inset-top)) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+ .play-dialog.touch-active:not(.native-tools-open) .play-frame-wrap{position:relative;inset:auto;grid-column:1/-1;grid-row:1;align-self:start;width:100%;height:100%;max-height:calc((100vw - env(safe-area-inset-left) - env(safe-area-inset-right))/var(--game-aspect,1.777778));min-height:0}
+ .play-dialog.touch-active:not(.native-tools-open) .touch-rail{position:relative;inset:auto;grid-row:2;width:auto;display:flex;flex-direction:column;justify-content:flex-start;gap:8px;padding:12px 4px 6px}
+ .play-dialog.touch-active:not(.native-tools-open) .touch-left{grid-column:1}.play-dialog.touch-active:not(.native-tools-open) .touch-right{grid-column:2}
+ .play-dialog.touch-active:not(.native-tools-open):is([data-touch-layout=nintendo3ds],[data-touch-layout=switch],[data-touch-layout=psp],[data-touch-layout=playstation],[data-touch-layout=standard]) .touch-rail-bottom{min-height:var(--stick-size)}
 }
 
 /* Native keyboard/save tools get an unobstructed frame; this mode is explicit. */
@@ -131,3 +132,11 @@
 .native-tools-open .play-frame-wrap{flex:1;align-self:stretch}
 .play-dialog.native-tools-open .touch-rail{display:none}
 @media(max-width:380px){.mobile-native-tools-bar{gap:6px}.mobile-native-tools-bar>div{gap:5px}.mobile-native-tools-bar .button{font-size:11px;padding:8px}.mobile-native-tools-bar>strong{font-size:11px}}
+
+/* Watching has its own controls: keep exit/fullscreen reachable on phones too. */
+.play-dialog.watch-dialog>.play-toolbar{display:flex;padding-right:12px}
+.watch-dialog #fullscreen-watch{flex:none;min-width:44px;min-height:44px}
+:fullscreen .play-dialog.watch-dialog>.play-toolbar{position:absolute;z-index:3;top:max(8px,env(safe-area-inset-top));right:max(8px,env(safe-area-inset-right));gap:8px;min-height:0;padding:0;background:transparent;border:0}
+:fullscreen .watch-dialog .play-heading{display:none}
+:fullscreen .watch-dialog :is(#close-watch,#fullscreen-watch){background:#152334e8;border:1px solid #6b829e88;border-radius:12px}
+@media(max-width:700px){.watch-dialog .play-heading{display:none}.play-dialog.watch-dialog>.play-toolbar{gap:8px;justify-content:space-between;padding:8px max(8px,env(safe-area-inset-right)) 8px max(8px,env(safe-area-inset-left))}}

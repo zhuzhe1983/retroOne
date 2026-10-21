@@ -11,18 +11,20 @@ function harness() {
       showModal() {this.open=true;}, close() {this.open=false;}});
     return elements.get(id);
   };
-  const requests = [], pending = [];
+  const requests = [], pending = [], fullscreen = [];
+  const document = {createElement:()=>({}), fullscreenElement:null, documentElement:{}, async exitFullscreen(){fullscreen.push('exit');this.fullscreenElement=null;}};
+  document.documentElement.requestFullscreen=async()=>{fullscreen.push('enter');document.fullscreenElement=document.documentElement;};
   const state = {profiles:[{id:'player2',name:'Me'},{id:'player1',name:'Family',presence:{online:false}}],profile:{id:'player2',name:'Me'},profileEpoch:0,
     session:{id:'own-session'},playMode:'stream',familySelectedId:'player1',familySessions:new Map([['player1',{id:'family-session',title:'PSP Game'}]]),
     familySessionsLoading:false,familySessionsAvailable:true,watchBusy:false,watchRequest:0};
   element('family-dialog').open=true;
-  const context=vm.createContext({state,Map,URL,location:{origin:'https://retro.test'},document:{createElement:()=>({})},$:element,
+  const context=vm.createContext({state,Map,URL,location:{origin:'https://retro.test'},document,$:element,
     t:(s,p={})=>s.replace(/\{(\w+)\}/g,(_,k)=>p[k]??''),interfaceError:s=>new Error(s),errorMessage:e=>e.message,
-    renderFamilyDetails(){},renderFamilyPresence(){},syncModalBody(){},
+    renderFamilyDetails(){},renderFamilyPresence(){},syncModalBody(){},notify(){},
     api:(url,opts)=>{requests.push({url,opts});return new Promise((resolve,reject)=>pending.push({resolve,reject}));}});
-  const names=['closeFamily','refreshFamilySessions','watchFamily','closeWatch'];
-  for(const name of names){const start=source.indexOf(`  ${name==='watchFamily'||name==='refreshFamilySessions'?'async ':''}function ${name}(`);assert.ok(start>=0);const end=source.indexOf('\n  }',start)+4;vm.runInContext(source.slice(start,end),context);}
-  return {context,state,element,requests,pending};
+  const names=['closeFamily','refreshFamilySessions','watchFamily','closeWatch','toggleWatchFullscreen'];
+  for(const name of names){const start=source.indexOf(`  ${name==='watchFamily'||name==='refreshFamilySessions'||name==='toggleWatchFullscreen'?'async ':''}function ${name}(`);assert.ok(start>=0);const end=source.indexOf('\n  }',start)+4;vm.runInContext(source.slice(start,end),context);}
+  return {context,state,element,requests,pending,document,fullscreen};
 }
 const grant='/spectate/abcdefghijklmnopqrstuvwxyz012345/';
 test('watching binds an exact family session and retains the current player and game',async()=>{
@@ -57,4 +59,21 @@ test('foreign or controller URLs cannot be embedded by a malformed grant respons
     assert.equal(h.element('watch-dialog').open,false);assert.equal(h.element('watch-frame-wrap').children.length,0);
     assert.equal(h.element('family-invite-message').hidden,false);
   }
+});
+
+test('watch fullscreen retains iframe and never mutates a player session',async()=>{
+  const h=harness();h.element('watch-dialog').open=true;
+  const iframe={src:grant};h.element('watch-frame-wrap').children=[iframe];
+  await h.context.toggleWatchFullscreen();assert.equal(h.document.fullscreenElement,h.document.documentElement);
+  assert.equal(h.element('watch-frame-wrap').children[0],iframe);assert.equal(h.requests.length,0);
+  await h.context.toggleWatchFullscreen();assert.equal(h.document.fullscreenElement,null);
+  await h.context.toggleWatchFullscreen();h.context.closeWatch();assert.equal(h.document.fullscreenElement,null);
+  assert.equal(h.state.session.id,'own-session');assert.equal(h.requests.length,0);
+});
+test('a late fullscreen response after leaving watch is unwound',async()=>{
+  const h=harness();h.element('watch-dialog').open=true;
+  let finish;h.document.documentElement.requestFullscreen=()=>new Promise(resolve=>{finish=()=>{h.document.fullscreenElement=h.document.documentElement;resolve();};});
+  const pending=h.context.toggleWatchFullscreen();h.context.closeWatch();finish();await pending;
+  assert.equal(h.document.fullscreenElement,null);assert.equal(h.state.watchFullscreenPending,false);
+  assert.equal(h.element('watch-dialog').open,false);assert.equal(h.requests.length,0);
 });

@@ -43,7 +43,7 @@
     profile: null, profiles: [], profileEpoch: 0, profileRequests: new Set(), profileEditing: null, profileEditEnter: false, profileAvatar: 'pixel', pendingProfile: null, profileSaving: false,
     profileRegistryEpoch: 0, profileLoading: false, profileCreateRequestId: null, profileWatchId: null, profileRetrying: new Set(), profileCapacity: null,
     playGameId: null, familySelectedId: null, presenceStale: false, presenceEpoch: 0,
-    familySessions: new Map(), familySessionsLoading: false, familySessionsAvailable: false, watchBusy: false, watchRequest: 0, watchTarget: null,
+    familySessions: new Map(), familySessionsLoading: false, familySessionsAvailable: false, watchBusy: false, watchRequest: 0, watchTarget: null, watchFullscreenPending: false, watchFullscreenOwned: false,
     pendingLaunch: null,
     displayData: null, displayDraft: null, displayLoading: false, displaySaving: false, displayRequest: 0, displayFresh: false, displayReadController: null,
     managementData: null, managementFresh: false, managementLoading: false, managementBusy: false, managementRequest: 0, managementController: null, managementTimer: null,
@@ -67,7 +67,7 @@
   document.body.insertAdjacentHTML('beforeend', `<dialog id="management-dialog" class="help-dialog management-dialog" aria-labelledby="management-title" aria-describedby="management-description"><div class="dialog-heading"><div><p class="eyebrow">LIBRARY CARE</p><h2 id="management-title" data-i18n="管理游戏库">${escapeHTML(t("管理游戏库"))}</h2></div><button class="icon-button" id="close-management" data-i18n-aria-label="关闭游戏库管理" aria-label="${escapeHTML(t("关闭游戏库管理"))}">${icon('close')}</button></div><p class="management-description" id="management-description" data-i18n="扫描识别文件并生成启动配置；内容核验检查重复和损坏；独立试运行需配置检测环境。">${escapeHTML(t("扫描识别文件并生成启动配置；内容核验检查重复和损坏；独立试运行需配置检测环境。"))}</p><dl class="management-summary" id="management-summary"></dl><section class="management-progress" data-i18n-aria-label="当前任务" aria-label="${escapeHTML(t("当前任务"))}"><p id="management-scan">${escapeHTML(t("正在读取扫描状态…"))}</p><strong id="management-job">${escapeHTML(t("正在读取内容核验状态…"))}</strong><p id="management-progress"></p><p class="is-warning" id="management-error" hidden></p></section><p class="management-message" id="management-message" role="status"></p><div class="management-actions"><button class="button button-secondary" id="management-scan-button" data-i18n="扫描游戏目录" disabled>${escapeHTML(t("扫描游戏目录"))}</button><button class="button" id="management-audit-button" disabled>${escapeHTML(t("开始内容核验"))}</button><button class="text-button" id="management-retry" data-i18n="重新读取状态" hidden>${escapeHTML(t("重新读取状态"))}</button></div><p class="management-note" id="management-storage">${escapeHTML(t("检测记录与游戏资料、原始文件及玩家存档分别保存。"))}</p><p class="management-note" data-i18n="核验会分批进行，暂停后可继续。关闭此窗口不会停止服务器任务。">${escapeHTML(t("核验会分批进行，暂停后可继续。关闭此窗口不会停止服务器任务。"))}</p><p class="management-note" id="management-observe">${escapeHTML(t("独立试运行尚未配置。"))}</p></dialog>`);
 
   $('family-invite-actions').insertAdjacentHTML('beforebegin', `<div class="family-watch-actions"><button class="button" id="family-watch" hidden></button><p id="family-watch-note" class="family-watch-note"></p></div>`);
-  document.body.insertAdjacentHTML('beforeend', `<dialog id="watch-dialog" class="play-dialog watch-dialog" aria-labelledby="watch-title"><div class="play-toolbar"><button class="button button-secondary" id="close-watch" data-i18n="退出观看">${escapeHTML(t('退出观看'))}</button><div class="play-heading"><strong id="watch-title"></strong><span id="watch-note" data-i18n="只读观看 · 你的游戏会继续保留">${escapeHTML(t('只读观看 · 你的游戏会继续保留'))}</span></div></div><div class="watch-frame-wrap" id="watch-frame-wrap"></div></dialog>`);
+  document.body.insertAdjacentHTML('beforeend', `<dialog id="watch-dialog" class="play-dialog watch-dialog" aria-labelledby="watch-title"><div class="play-toolbar"><button class="button button-secondary" id="close-watch" data-i18n="退出观看">${escapeHTML(t('退出观看'))}</button><div class="play-heading"><strong id="watch-title"></strong><span id="watch-note" data-i18n="只读观看 · 你的游戏会继续保留">${escapeHTML(t('只读观看 · 你的游戏会继续保留'))}</span></div><button class="icon-button" id="fullscreen-watch" aria-label="全屏观看" data-i18n-aria-label="全屏观看" title="全屏观看" data-i18n-title="全屏观看"><svg class="icon"><use href="#i-fullscreen"/></svg></button></div><div class="watch-frame-wrap" id="watch-frame-wrap"></div></dialog>`);
 
   function syncLanguagePickers() {
     for (const picker of document.querySelectorAll('[data-language-picker]')) {
@@ -348,7 +348,25 @@
       if (request === state.watchRequest) { state.watchBusy = false; if ($('family-dialog').open) renderFamilyDetails(); }
     }
   }
+  async function toggleWatchFullscreen() {
+    if (!$('watch-dialog').open || state.watchFullscreenPending) return;
+    state.watchFullscreenPending = true;
+    const request = state.watchRequest;
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen(); state.watchFullscreenOwned = false;
+      } else {
+        await document.documentElement.requestFullscreen({navigationUI: 'hide'});
+        if (!$('watch-dialog').open || request !== state.watchRequest) {
+          if (document.fullscreenElement === document.documentElement) await document.exitFullscreen();
+        } else state.watchFullscreenOwned = true;
+      }
+    } catch { notify(t('无法进入全屏，请使用浏览器菜单或将网页添加到主屏幕。')); }
+    finally { state.watchFullscreenPending = false; }
+  }
   function closeWatch() {
+    if (state.watchFullscreenOwned && document.fullscreenElement === document.documentElement) document.exitFullscreen().catch(() => {});
+    state.watchFullscreenOwned = false;
     state.watchRequest++; state.watchBusy = false; state.watchTarget = null;
     $('watch-frame-wrap').replaceChildren(); $('watch-dialog').close(); syncModalBody();
     ([...$('family-strip').querySelectorAll('[data-family-profile]')].find((button) => button.dataset.familyProfile === state.familySelectedId) || $('profile-button')).focus();
@@ -1342,6 +1360,23 @@
     state.activeNetworkRoomId = sessionNetworkRoomId(session); renderFamilyPresence();
     if (session) openPlayer(localURL(session.play_url, [`${state.profile.base_path}/stream/`]) || `${state.profile.base_path}/stream/`, sessionTitle(session), 'stream', sessionGameId(session) || null, session.game || session);
   }
+  async function requestGameLaunch(gameId, body) {
+    const path = `/api/games/${encodeURIComponent(gameId)}/launch`;
+    const request = value => api(path, {method: 'POST', body: JSON.stringify(value), timeoutMs: 30 * 60 * 1000});
+    try { return await request(body); }
+    catch (error) {
+      // Old workers reject the newer device preference before launching anything.
+      // Retry only this exact validation failure; never replay uncertain launches
+      // or remove session-replacement / network safeguards.
+      const issue = Array.isArray(error.detail) && error.detail.length === 1 ? error.detail[0] : null;
+      if (error.status !== 422 || issue?.type !== 'extra_forbidden' ||
+          JSON.stringify(issue.loc) !== '["body","device_id"]' || !Object.hasOwn(body, 'device_id')) throw error;
+      const {device_id, ...compatible} = body;
+      const result = await request(compatible);
+      return {...result, device_preferences_supported: false};
+    }
+  }
+
   async function launchGame(game, {replaceSessionId = null, networkRoomId = null} = {}) {
     const epoch = state.profileEpoch;
     if (!game || game.mode === 'unavailable' || state.playMode || state.launching) return;
@@ -1351,12 +1386,13 @@
     const note = state.selected?.id === game.id ? $('game-detail').querySelector('.detail-note') : null;
     if (note && game.mode === 'stream') note.textContent = t("首次解压可能需要数分钟，请稍候。");
     try {
-      const result = await api(`/api/games/${encodeURIComponent(game.id)}/launch`, {method: 'POST', body: JSON.stringify({mode: game.mode, device_id: displayDeviceId, ...(replaceSessionId ? {replace_session_id: replaceSessionId} : {}), ...(networkRoomId ? {network_room_id: networkRoomId} : {})}), timeoutMs: 30 * 60 * 1000});
+      const result = await requestGameLaunch(game.id, {mode: game.mode, device_id: displayDeviceId, ...(replaceSessionId ? {replace_session_id: replaceSessionId} : {}), ...(networkRoomId ? {network_room_id: networkRoomId} : {})});
       const url = localURL(result.play_url, [`${state.profile.base_path}/play/`, `${state.profile.base_path}/stream/`]);
       if (!url) throw interfaceError("没有收到有效的游戏入口，请重新加载游戏库。");
       state.activeNetworkRoomId = networkRoomId || sessionNetworkRoomId(result.session); renderFamilyPresence();
       if ($('network-dialog').open) closeNetwork();
       openPlayer(url, game.title, result.mode || game.mode, game.id, game);
+      if (result.device_preferences_supported === false && result.mode === 'stream') notify(t('当前游戏实例沿用玩家默认画质。'));
       refreshSession();
     } catch (error) { if (epoch === state.profileEpoch) { if (error.status === 409 && error.detail?.code === 'session_conflict') showLaunchConflict(game, error.detail, {networkRoomId}); else { notify(errorMessage(error), true); if (networkRoomId && $('network-dialog').open) networkMessage(errorMessage(error), true); refreshSession(); } } }
     finally { if (epoch !== state.profileEpoch) return; state.launching = false; if (state.selected?.id === game.id) renderDetail(state.selected); }
@@ -1640,7 +1676,8 @@
         }
         else if ($('watch-dialog').open) {
           if (key === 'back') closeWatch();
-          else if (key === 'accept') $('close-watch').click();
+          else if (directional) focusModalAction($('watch-dialog'), key);
+          else if (key === 'accept') document.activeElement?.click();
         }
         else if ($('family-dialog').open) {
           if (key === 'back') closeFamily();
@@ -1711,6 +1748,13 @@
   });
   $('family-watch').addEventListener('click', watchFamily);
   $('close-watch').addEventListener('click', closeWatch);
+  $('fullscreen-watch').addEventListener('click', toggleWatchFullscreen);
+  document.addEventListener('fullscreenchange', () => {
+    const key = document.fullscreenElement ? '退出全屏' : '全屏观看';
+    const button = $('fullscreen-watch'); button.dataset.i18nAriaLabel = key; button.dataset.i18nTitle = key;
+    button.setAttribute('aria-label', t(key)); button.title = t(key);
+    if (!document.fullscreenElement) state.watchFullscreenOwned = false;
+  });
   $('watch-dialog').addEventListener('cancel', (event) => { event.preventDefault(); closeWatch(); });
   $('watch-dialog').addEventListener('close', syncModalBody);
   window.addEventListener('message', (event) => {
@@ -1881,6 +1925,8 @@
     }
     if ($('watch-dialog').open) {
       if (event.code === 'Escape') { event.preventDefault(); closeWatch(); }
+      else if (event.code === 'KeyF') { event.preventDefault(); toggleWatchFullscreen(); }
+      else { const direction = {ArrowLeft:'left', ArrowRight:'right', ArrowUp:'up', ArrowDown:'down'}[event.code]; if (direction) { event.preventDefault(); focusModalAction($('watch-dialog'), direction); } }
       return;
     }
     if ($('family-dialog').open) {

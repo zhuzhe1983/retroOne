@@ -1,5 +1,10 @@
 /* Interface translations only. Game metadata and server diagnostics retain their original text. */
 window.RetroI18n.add('en', {
+  "竖屏时，按键自动排列在画面下方；横屏时使用所选位置。": "Portrait puts controls below the picture; landscape uses your chosen placement.",
+  "全屏观看": "Watch fullscreen",
+  "退出全屏": "Exit fullscreen",
+  "无法进入全屏，请使用浏览器菜单或将网页添加到主屏幕。": "Fullscreen is unavailable. Try the browser menu or add this page to your home screen.",
+  "当前游戏实例沿用玩家默认画质。": "This game instance uses the player's default display quality.",
   "云端运行 {value1}": "Running in the cloud: {value1}",
   "{value1} 位家人有动态": "{value1} family members with activity",
   "退出观看": "Exit viewing",

@@ -234,6 +234,8 @@ Display preferences are saved separately for each player and browser/device: use
 
 ## 文档与开发
 
+- [AI Agent、指定云端运行与家庭观战：开发方案](docs/ai-agents.md) · [Skill 预览](docs/skills/retroone-agent/SKILL.md)（MCP 与观战入口尚未发布）
+- [AI 直播选题与弹幕互动建议](docs/ai-live-games.md)
 - [部署、存档、升级与 ROM 整理](docs/operations.md)
 - [镜像构建与发布](docs/releasing.md)
 - [性能与声音排查](docs/performance.md)
@@ -242,5 +244,7 @@ Display preferences are saved separately for each player and browser/device: use
 - [Switch 模拟器、依赖准备与验证边界](docs/switch-runtime.md)
 - [上游组件、版本与许可证记录](container/UPSTREAM.md)
 - [真实图库与示例截图的来源说明](docs/screenshots/README.md)
+
+Planned integration: [visual AI agents and read-only spectating](docs/ai-agents.md), with per-launch cloud selection and a [preview agent skill](docs/skills/retroone-agent/SKILL.md). The MCP service and spectator UI are not available yet.
 
 本地开发可以在 macOS / Linux 启动目录 API 与网页；云端模拟和串流需要 Linux 容器环境。开发启动、检查命令见维护指南。游戏、固件、独立封面缓存、用户数据和本地验收录屏均应留在自己的存储中，不随代码提交或公开发布。文档仅收录截图清单中逐张确认的界面图片。

@@ -2,6 +2,7 @@ import copy
 import importlib.util
 import json
 from pathlib import Path
+import sqlite3
 
 import pytest
 
@@ -145,3 +146,85 @@ def test_family_sharing_requires_operator_enablement_and_rerun_preserves_revocat
     assert updated["family_watch"] == {"enabled": True, "profiles": ["player1"]}
     assert updated["credentials"][0]["enabled"] is False
     assert updated["credentials"][0]["observe_profiles"] == ["player5"]
+
+
+def ownership_ledger(root, profiles):
+    path = root / "state/requests.sqlite"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(path) as connection:
+        connection.execute("CREATE TABLE created_profiles (profile_id TEXT)")
+        connection.executemany("INSERT INTO created_profiles VALUES (?)", [(profile,) for profile in profiles])
+    return path
+
+
+def test_rerun_preserves_creation_policy_and_leaves_owned_profiles_dynamic(tmp_path):
+    _, _, state, _ = fixture()
+    records = [{"id": "player1", "name": "Family"}, {"id": "player5", "name": "AI A"}]
+    deploy.write_config(tmp_path, state, records)
+    path = tmp_path / "config/mcp.json"
+    existing = json.loads(path.read_text())
+    existing["profile_creation"] = {"enabled": True, "api_url": "http://trusted-gateway:3000",
+                                    "allow_legacy_input": True, "share_with_family": False}
+    existing["credentials"][0].update(create_profiles=True, max_created_profiles=2,
+                                       created_profile_permissions=["observe", "control", "launch", "stop"])
+    path.write_text(json.dumps(existing))
+    ledger = ownership_ledger(tmp_path, ["player6", None])
+    before = ledger.read_bytes()
+
+    deploy.write_config(tmp_path, state, records + [{"id": "player6", "name": "Own Agent"}])
+    updated = json.loads(path.read_text())
+    assert updated == existing
+    assert "player6" not in updated["profiles"]
+    assert ledger.read_bytes() == before
+
+
+def test_explicit_owned_profile_and_operator_control_policy_survive_rerun(tmp_path):
+    _, _, state, _ = fixture()
+    records = [{"id": "player1", "name": "Family"}, {"id": "player5", "name": "AI A"}]
+    deploy.write_config(tmp_path, state, records)
+    path = tmp_path / "config/mcp.json"
+    existing = json.loads(path.read_text())
+    existing["profiles"]["player5"]["control_enabled"] = False
+    existing["profiles"]["player6"] = {
+        "name": "Operator Agent", "api_url": "http://explicit-worker:8080",
+        "selkies_url": "http://explicit-worker:3000/stream", "control_enabled": True,
+        "selkies_tokens": {"1": "explicit-slot-secret"}, "selkies_viewer_token": "explicit-viewer-secret",
+    }
+    existing["profile_creation"] = {"enabled": False}
+    path.write_text(json.dumps(existing))
+    ownership_ledger(tmp_path, ["player6"])
+
+    deploy.write_config(tmp_path, state, records + [{"id": "player6", "name": "Registry Agent"}])
+    assert json.loads(path.read_text()) == existing
+
+
+@pytest.mark.parametrize("legacy_ledger", [False, True])
+def test_config_generation_accepts_missing_or_legacy_ownership_table(tmp_path, legacy_ledger):
+    _, _, state, _ = fixture()
+    ledger = tmp_path / "state/requests.sqlite"
+    if legacy_ledger:
+        ledger.parent.mkdir()
+        with sqlite3.connect(ledger) as connection:
+            connection.execute("CREATE TABLE requests (id TEXT)")
+        before = ledger.read_bytes()
+    deploy.write_config(tmp_path, state, [{"id": "player1", "name": "Family"},
+                                        {"id": "player5", "name": "AI A"}])
+    config = json.loads((tmp_path / "config/mcp.json").read_text())
+    assert list(config["profiles"]) == ["player1", "player5"]
+    assert "profile_creation" not in config
+    if legacy_ledger:
+        assert ledger.read_bytes() == before
+    else:
+        assert not ledger.exists()
+
+
+def test_unreadable_ownership_ledger_does_not_replace_existing_config(tmp_path):
+    _, _, state, _ = fixture()
+    records = [{"id": "player1", "name": "Family"}, {"id": "player5", "name": "AI A"}]
+    deploy.write_config(tmp_path, state, records)
+    path = tmp_path / "config/mcp.json"
+    before = path.read_bytes()
+    (tmp_path / "state/requests.sqlite").write_bytes(b"corrupted ledger")
+    with pytest.raises(deploy.DeployError, match="ownership ledger"):
+        deploy.write_config(tmp_path, state, records + [{"id": "player6", "name": "Own Agent"}])
+    assert path.read_bytes() == before

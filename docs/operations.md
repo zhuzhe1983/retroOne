@@ -175,6 +175,8 @@ ROM_ROOT=/path/to/one CONFIG_ROOT="$PWD/data/dev" \
 可选服务的安装与私有配置见 [MCP 指南](mcp.md)。核心检查如下：
 
 - `docker inspect retroone-mcp` 的 health 为 healthy；`http://127.0.0.1:8790/healthz` 返回正常。配置目录只读，state 目录由 `compose.env` 中的 UID/GID 写入，SQLite 位于持久卷。
+- 开启 MCP 创建玩家后，验证有创建权限的凭证能发现 `retroone_create_profile`，只读凭证不能；同一请求重试得到相同玩家，另一个 Agent 无法获得该玩家的控制权。`retroone_profile_status` 为 `ready` 后才启动。SQLite 同时保存创建所有权，必须与配置一起备份；准备失败由管理员处理现有成员，不能用反复新增来规避配额。
+- 更新设备独立画面设置时须同步部署后端，不能只换网页静态文件。升级后用专用测试设备 UUID 检查 `/api/settings/display?device_id=...` 的 `scope/device_id/default_settings/source`，完成 PATCH→GET→DELETE，确认恢复玩家默认值且其他设备设置不变。
 - 对外 `POST /mcp` 未带凭证返回 401。使用授权客户端完成 initialize、list_tools、sessions；只读凭证看不到控制工具，手工调用 stop 仍被拒绝。不要把 token 写在 curl 命令、URL 或日志中。
 - 首页与 `app.js` 必须来自同一版完整 `web/` 目录。以自己身份点开家人活动，再点“观看”，确认真实画面持续更新；退出后本人身份、目标游戏 session/PID/分辨率保持不变。
 - 独立 AI 测试档案用一个小 ROM 显式 `stream` 启动，检查真实截图、Start/方向/动作的画面效果、释放与重复 action ID。不能拿“输入已提交”代替游戏实际响应。

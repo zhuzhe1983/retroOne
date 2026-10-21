@@ -77,6 +77,8 @@ async def peer(**options):
 
     app.router.add_get("/profile/api/session", status)
     app.router.add_get("/profile/api/games", generic)
+    app.router.add_get("/api/profiles", generic)
+    app.router.add_post("/api/profiles", generic)
     app.router.add_post("/profile/api/games/{game}/launch", generic)
     app.router.add_post("/profile/api/session/stop", generic)
     app.router.add_get("/profile/stream/api/screenshot", screenshot)
@@ -293,3 +295,18 @@ def test_invalid_controls_never_reach_runtime(slot, buttons, axes, duration):
             assert error.value.code == "invalid_argument"
             assert not state["requests"] and state["connections"] == 0
     run(check())
+
+
+def test_profile_creation_adapter_sends_only_identity_and_stable_uuid():
+    async def run():
+        async with peer() as (runtime, state, _):
+            from urllib.parse import urlsplit
+            parsed = urlsplit(runtime.profiles['ai']['api_url'])
+            gateway = f'{parsed.scheme}://{parsed.netloc}'
+            await runtime.create_profile(gateway, 'Agent', 'cat', '12345678-1234-5678-1234-567812345678')
+            await runtime.list_profiles(gateway)
+            assert state['requests'] == [
+                ('POST', '/api/profiles', {}, {'name': 'Agent', 'avatar': 'cat', 'request_id': '12345678-1234-5678-1234-567812345678'}),
+                ('GET', '/api/profiles', {}, None),
+            ]
+    asyncio.run(run())

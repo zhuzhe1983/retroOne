@@ -17,6 +17,7 @@ import os
 from pathlib import Path
 import secrets
 import socket
+import sqlite3
 import subprocess
 import sys
 import time
@@ -263,15 +264,45 @@ def wait_ready(docker, profile, timeout=300):
     raise DeployError("Timed out waiting for the new AI profile; existing players were not changed.")
 
 
+def created_profile_ids(root):
+    """Read durable Agent ownership without creating or changing the ledger."""
+    path = root / "state" / "requests.sqlite"
+    if path.is_symlink():
+        raise DeployError("Refusing a symlink for the MCP ownership ledger.")
+    if not path.exists():
+        return set()
+    try:
+        connection = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
+        try:
+            if not connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='created_profiles'").fetchone():
+                return set()  # Older sidecars have only the mutation ledger.
+            return {row[0] for row in connection.execute("SELECT profile_id FROM created_profiles WHERE profile_id IS NOT NULL")}
+        finally:
+            connection.close()
+    except sqlite3.Error as error:
+        raise DeployError("The MCP ownership ledger could not be read; existing configuration was preserved.") from error
+
+
 def write_config(root, state, records):
     (root / 'state').mkdir(parents=True, exist_ok=True, mode=0o700)
+    path = root / "config" / "mcp.json"
+    existing = read_json(path) if path.exists() else {}
+    # A marker prevents silently replacing unrelated operator credentials.
+    if path.exists() and existing.get("deployment_owner") != state["owner"]:
+        raise DeployError("An unrelated MCP config already exists; it was not overwritten.")
+    owned = created_profile_ids(root)
     if 'observer_token' not in state:
         state['observer_token'] = secrets.token_urlsafe(48)
         private_json(root / 'private' / 'deployment.json', state)
-    profiles = {}
+    # Explicit operator profiles retain their endpoints and control policy.
+    # Dynamically owned profiles are resolved by the sidecar from its ledger;
+    # a generated read-only static entry would override that authorization.
+    profiles = copy.deepcopy(existing.get('profiles', {}))
     entries = {entry["profile_id"]: entry for entry in state["entries"]}
     for record in records:
         identifier = record["id"]
+        if identifier in profiles or identifier in owned:
+            continue
         container = "retroone" if identifier == "player1" else "retroone-" + identifier
         base = "http://" + container + ":3000/p/" + identifier
         entry = entries.get(identifier)
@@ -289,19 +320,17 @@ def write_config(root, state, records):
                         'token_sha256': hashlib.sha256(state['observer_token'].encode()).hexdigest(),
                         'observe_profiles': list(profiles), 'control_profiles': [],
                         'launch_profiles': [], 'stop_profiles': [], 'enabled': True})
-    path = root / "config" / "mcp.json"
-    # A marker prevents silently replacing unrelated operator credentials.
-    if path.exists() and read_json(path).get("deployment_owner") != state["owner"]:
-        raise DeployError("An unrelated MCP config already exists; it was not overwritten.")
-    existing = read_json(path) if path.exists() else {}
     # Reconciliation must not silently undo operator revocation or replace
     # credentials they added after the first deployment.
     previous = {item['id']: item for item in existing.get('credentials', [])}
     for credential in credentials:
         previous.setdefault(credential['id'], credential)
     credentials = list(previous.values())
-    private_json(path, {"deployment_owner": state["owner"], "profiles": profiles, "credentials": credentials,
-                        "family_watch": existing.get('family_watch', {"enabled": False, "profiles": list(profiles)})})
+    config = {"deployment_owner": state["owner"], "profiles": profiles, "credentials": credentials,
+              "family_watch": existing.get('family_watch', {"enabled": False, "profiles": list(profiles)})}
+    if 'profile_creation' in existing:
+        config['profile_creation'] = existing['profile_creation']
+    private_json(path, config)
     tokens = {entry["agent_id"]: {"token": entry["client_token"], "profile_id": entry["profile_id"]} for entry in state["entries"]}
     tokens['family-observer'] = {'token': state['observer_token'], 'profile_id': None}
     private_json(root / "private" / "client-tokens.json", tokens)

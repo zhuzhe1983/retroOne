@@ -115,8 +115,26 @@ async def test_official_modern_client_discovery_and_call():
         transport = streamable_http_client("http://localhost/mcp", http_client=http)
         async with Client(transport, mode="auto") as client:
             assert client.protocol_version == "2026-07-28"
-            assert len((await client.list_tools()).tools) == 10
+            assert len((await client.list_tools()).tools) == 12
             assert (await client.call_tool("retroone_capabilities", {})).structured_content["ok"]
+
+
+@pytest.mark.anyio
+async def test_create_profile_protocol_defaults_strict_fields_and_observer_denial():
+    service = FakeService()
+    async with mcp_client(service) as (client, _):
+        created = await client.call_tool('retroone_create_profile', {'name': 'My Agent', 'request_id': 'profile-1'})
+        assert not created.is_error
+        assert created.structured_content['arguments']['avatar'] == 'rocket'
+        before = len(service.calls)
+        for fields in ({'profile_id': 'player1'}, {'api_url': 'http://evil.invalid'}, {'avatar': 'invalid'}, {'name': 'x' * 21}):
+            result = await client.call_tool('retroone_create_profile', {'name': 'Agent', 'request_id': 'new', **fields})
+            assert result.is_error
+        assert len(service.calls) == before
+    async with mcp_client(FakeService(), token='watcher-token') as (client, _):
+        assert 'retroone_create_profile' not in {tool.name for tool in (await client.list_tools()).tools}
+        denied = await client.call_tool('retroone_create_profile', {'name': 'Agent', 'request_id': 'new'})
+        assert denied.is_error
 
 
 @pytest.mark.anyio
@@ -140,7 +158,7 @@ async def run():
         async with ClientSession(read, write) as client:
             initialized = await client.initialize()
             assert initialized.serverInfo.name == "RetroOne"
-            assert len((await client.list_tools()).tools) == 10
+            assert len((await client.list_tools()).tools) == 12
             result = await client.call_tool("retroone_observe", {"handle": "h-1"})
             assert result.isError is False
             assert result.content[1].type == "image"

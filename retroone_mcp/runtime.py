@@ -141,6 +141,13 @@ class RuntimeClient:
     async def status(self, profile: str) -> dict:
         return await self._request("GET", self._base(self._profile(profile), "api_url") + "/api/session")
 
+    async def create_profile(self, gateway: str, name: str, avatar: str, request_id: str) -> dict:
+        return await self._request("POST", gateway + "/api/profiles",
+                                   payload={"name": name, "avatar": avatar, "request_id": request_id})
+
+    async def list_profiles(self, gateway: str) -> dict:
+        return await self._request("GET", gateway + "/api/profiles")
+
     async def games(self, profile: str, q: str = "", platform: str = "",
                     limit: int = 60, offset: int = 0) -> dict:
         return await self._request("GET", self._base(self._profile(profile), "api_url") + "/api/games",

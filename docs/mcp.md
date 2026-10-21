@@ -81,7 +81,34 @@ Header: Authorization: Bearer <分配给这个 Agent 的私有 token>
 
 Agent 尽量使用自己创建的专属玩家，也可以使用管理员明确分配的 Agent 玩家。不要因为某位家人暂时空闲就使用其档案，更不能占用别人正在进行游戏的玩家。除非用户明确要求使用某个档案，否则不要在别人的档案中保存进度。
 
-**目前没有“创建玩家”的 MCP 工具。** 网页选择玩家时的 **+** 按钮可以创建玩家，对应 REST 接口为 `POST /api/profiles`；管理员也可使用上面的部署脚本准备独立 Agent 玩家。创建完成后，还需管理员在 MCP 私有配置中授权该 Agent 访问新档案。玩家可见、知道 ID 或创建成功，都不等于获得 MCP 权限。
+已提供 **`retroone_create_profile`** 和 **`retroone_profile_status`**。有创建权限的 Agent 提交昵称、头像和稳定的 `request_id`，即可通过现有成员准备队列创建自己的玩家；不会启动游戏。新玩家的存档目录独立，MCP 持久记录创建者，并只按管理员配置向创建者授予权限。网页的 **+** 按钮仍可使用，但网页创建的玩家不会自动归某个 MCP Agent 所有。
+
+```json
+{"name": "探索者 AI", "avatar": "rocket", "request_id": "my-agent-player-1"}
+```
+
+用上述参数调用 `retroone_create_profile`，返回 `profile.id`、`profile.status`、`permissions`。状态为 `provisioning` 时，调用 `retroone_profile_status({"profile_id": "返回的 ID"})` 等待 `ready`，再读取 capabilities 并启动游戏。头像可选 `pixel / leaf / star / rocket / cat`；昵称为 1–20 个字符。超时、断连或 MCP 重启后，用**同一个 request_id 和相同参数**重试；后台沿用同一个 UUID，不会重复创建。状态为 `error` 时联系管理员处理已有玩家，不要不断换请求编号创建新档案。
+
+### 开启 Agent 创建权限
+
+默认关闭。管理员在 MCP 私有配置中增加：
+
+```json
+{
+  "profile_creation": {
+    "enabled": true,
+    "api_url": "http://retroone:3000",
+    "allow_legacy_input": true,
+    "share_with_family": false
+  }
+}
+```
+
+`api_url` 是管理员指定的家庭网关 Origin；Agent 不能传入 URL、容器参数、玩家 ID 或权限。对应凭证增加 `create_profiles: true`、`max_created_profiles: 2` 和 `created_profile_permissions: ["observe", "control", "launch", "stop"]`。每个凭证默认最多创建 1 个玩家，可配置 1–8 个，未确认的创建也占配额；家庭总人数仍受主服务限制。新权限立即生效，MCP 配置继续只读，服务不需要 Docker socket。
+
+新玩家复用家庭 provisioner 的**可信局域网运行时**。`allow_legacy_input: true` 是管理员对这些独立新玩家启用单手柄槽 1 的显式选择；它不会修改现有家庭玩家或已有 AI 安全实例，也不把它们的权限授予创建者。若保留 `false`，新玩家只可获得观察权限，不能通过 MCP 启动、控制或停止。新增玩家的普通网页入口仍遵循家庭应用现有信任边界，不等于新增了网页账号认证。已有带 Selkies slot token 的 AI 实例继续使用原凭证。
+
+`share_with_family: true` 可将这些新玩家加入已经启用的家庭只读观战范围；不授予家人 MCP 控制权。撤销后续创建可设置凭证 `create_profiles: false`；撤销已创建档案的操作权限则修改 `created_profile_permissions` 或禁用凭证。`state/requests.sqlite` 同时保存所有权和创建幂等记录，升级时必须保留并备份。更换网关 Origin 不会把旧档案编号自动绑定到另一台服务器。全局关闭 `profile_creation.enabled` 也会关闭动态档案授权。
 
 - **需要家人、直播导演或其他 Agent 观看**：使用 `mode: "stream"`，NES 等小游戏也一样。当前观战只支持云端画面。
 - **只做私密测试或打榜尝试**：支持浏览器模拟器的游戏可以通过网页选择浏览器模式，用自己的玩家和独立浏览器环境操作。浏览器截图和输入由浏览器自动化完成，不能调用云端 MCP 的 `observe` / `act` 控制本地模拟器；也不能声称网页打榜记录已经由 MCP 验证或提交。
@@ -89,7 +116,7 @@ Agent 尽量使用自己创建的专属玩家，也可以使用管理员明确�
 
 ## 工具与操作闭环
 
-所有工具带 `retroone_` 前缀。只读 token 只发现前五个工具；即使手工调用其他名字也会被拒绝。
+所有工具带 `retroone_` 前缀。只读 token 只发现读取工具；创建和游戏操作工具按凭证授权显示，即使手工调用未授权名字也会被拒绝。
 
 | 工具 | 作用 |
 | --- | --- |
@@ -98,6 +125,8 @@ Agent 尽量使用自己创建的专属玩家，也可以使用管理员明确�
 | `sessions` | 获授权档案当前的云游戏会话 |
 | `watch` | 用 `profile_id`、`expected_session_id` 取得只读 handle |
 | `observe` | handle → PNG 图像、observation ID、采集时间和动作序号 |
+| `profile_status` | 查询自己创建的玩家准备状态，不启动游戏 |
+| `create_profile` | 提交 `name`、`avatar`、`request_id` 创建专属玩家；要求创建权限和剩余配额 |
 | `launch` | `profile_id`、`game_id`、`request_id`、`mode: "stream"` 启动 |
 | `claim_control` | 对准确会话申请一个获授权的 `slot`，返回 lease ID |
 | `act` | 持有租约，以新截图为依据，按键/摇杆操作 1–1000 ms |

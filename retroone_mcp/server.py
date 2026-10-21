@@ -57,6 +57,16 @@ class LaunchArguments(Arguments):
     replace_session_id: Identifier | None = None
 
 
+class CreateProfileArguments(Arguments):
+    name: Annotated[str, Field(min_length=1, max_length=20)]
+    avatar: Literal["pixel", "leaf", "star", "rocket", "cat"] = "rocket"
+    request_id: Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{1,128}$")]
+
+
+class ProfileStatusArguments(Arguments):
+    profile_id: ProfileId
+
+
 class SessionArguments(Arguments):
     profile_id: ProfileId
     expected_session_id: Identifier
@@ -102,6 +112,8 @@ TOOL_SPECS: dict[str, tuple[type[Arguments], str, bool]] = {
     "capabilities": (Arguments, "Describe authorized profiles, runtime support, and safe control limits.", True),
     "list_games": (ListGamesArguments, "Search games available to one authorized profile; returns stable game identifiers.", True),
     "sessions": (Arguments, "List the current sessions of authorized profiles.", True),
+    "profile_status": (ProfileStatusArguments, "Read preparation status for your own created profile; does not start a game.", True),
+    "create_profile": (CreateProfileArguments, "Create your own isolated player with name, avatar and stable request_id. Requires an explicit creation grant and quota. Retry the same ID after a timeout; poll profile_status until ready. Never takes over an existing player or launches a game.", False),
     "launch": (LaunchArguments, "Launch a game with an idempotent request_id. Replacing an active session requires its exact replace_session_id.", False),
     "watch": (SessionArguments, "Obtain an observation handle for the exact current session without taking control.", True),
     "observe": (ObserveArguments, "Read a fresh screenshot and observation_id. Supply after_action_id to observe after a completed action.", True),
@@ -259,7 +271,7 @@ def create_app(
                 name=PREFIX + name, description=description, input_schema=model.model_json_schema(),
                 annotations=types.ToolAnnotations(
                     read_only_hint=readonly, destructive_hint=name in {"launch", "stop", "act"},
-                    idempotent_hint=name in {"capabilities", "list_games", "sessions", "observe", "launch", "act", "release_control", "stop"},
+                    idempotent_hint=name in {"capabilities", "list_games", "sessions", "profile_status", "create_profile", "observe", "launch", "act", "release_control", "stop"},
                     open_world_hint=False,
                 ),
             )
@@ -292,7 +304,7 @@ def create_app(
         return TOOL_SPECS[short][0].model_json_schema() if name.startswith(PREFIX) and short in TOOL_SPECS else None
 
     server = Server(
-        "RetroOne", version="1.0.0", on_list_tools=list_tools,
+        "RetroOne", version="1.1.0", on_list_tools=list_tools,
         on_call_tool=call_tool, get_tool_input_schema=input_schema,
     )
     # HTTP auth/host/origin checks above are exact and shared by both protocol

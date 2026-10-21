@@ -1,4 +1,10 @@
 {
+  "profile_creation": {
+    "enabled": false,
+    "api_url": "http://retroone:3000",
+    "allow_legacy_input": false,
+    "share_with_family": false
+  },
   "profiles": {
     "player1": {
       "name": "Family member",
@@ -18,6 +24,9 @@
   "credentials": [
     {
       "id": "agent-a",
+      "create_profiles": false,
+      "max_created_profiles": 2,
+      "created_profile_permissions": ["observe", "control", "launch", "stop"],
       "token_sha256": "REPLACE_WITH_SHA256_OF_RANDOM_CLIENT_TOKEN",
       "observe_profiles": ["player5"],
       "control_profiles": ["player5"],

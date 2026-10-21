@@ -20,6 +20,8 @@ import time
 from typing import Any
 from urllib.parse import urlsplit
 
+from .profiles import AVATARS, PERMISSIONS, PLAYER_ID, OwnedProfiles, policy, validate_credential
+
 
 class ServiceFailure(Exception):
     def __init__(self, code: str, message: str):
@@ -71,7 +73,7 @@ class Ledger:
 ID = re.compile(r'^[A-Za-z0-9_-]{1,128}$')
 BUTTONS = {'a', 'b', 'x', 'y', 'lb', 'rb', 'lt', 'rt', 'back', 'start', 'l3', 'r3', 'up', 'down', 'left', 'right'}
 AXES = {'lx', 'ly', 'rx', 'ry'}
-READ_TOOLS = {'capabilities', 'list_games', 'sessions', 'watch', 'observe'}
+READ_TOOLS = {'capabilities', 'list_games', 'sessions', 'watch', 'observe', 'profile_status'}
 
 
 def _id(value, field='identifier'):
@@ -100,12 +102,14 @@ class Service:
     def __init__(self, config_path: Path, state_path: Path, runtime=None):
         self.config_path = Path(config_path)
         self.settings = self._read_config()
-        self.profiles = self.settings['profiles']
+        self.profiles = dict(self.settings['profiles'])
         if runtime is None:
             from .runtime import RuntimeClient
             runtime = RuntimeClient(self.profiles)
         self.runtime = runtime
         self.ledger = Ledger(Path(state_path))
+        self.owned_profiles = OwnedProfiles(self.ledger.db)
+        self.creation_lock = asyncio.Lock()
         self.handles: dict[str, dict] = {}
         self.leases: dict[str, dict] = {}
         self.observations: dict[str, dict] = {}
@@ -114,12 +118,14 @@ class Service:
         self.capture_slots = asyncio.Semaphore(3)
         self.call_slots = asyncio.Semaphore(16)
         self.rates: dict[str, list[float]] = {}
+        self._refresh_profiles()
 
     def _read_config(self):
         try:
             if self.config_path.stat().st_size > 256 * 1024:
                 raise ValueError('size')
             config = json.loads(self.config_path.read_text())
+            policy(config)
             profiles = config['profiles']
             if not isinstance(profiles, dict) or not 1 <= len(profiles) <= 32:
                 raise ValueError('profiles')
@@ -132,6 +138,7 @@ class Service:
             seen = set()
             digests = set()
             for credential in config.get('credentials', []):
+                validate_credential(credential)
                 _id(credential['id'])
                 digest = credential['token_sha256']
                 if credential['id'] in seen or digest in digests or not re.fullmatch('[a-f0-9]{64}', digest):
@@ -169,10 +176,51 @@ class Service:
                 return entry
         raise ServiceFailure('unauthorized', 'This credential is no longer authorized.')
 
+    def _refresh_profiles(self):
+        creation = policy(self._read_config())
+        if not creation:
+            return
+        for row in self.owned_profiles.all():
+            profile = row['profile_id']
+            if not profile or row['gateway'] != creation['api_url']:
+                continue
+            if profile not in self.settings['profiles']:
+                base = creation['api_url'] + '/p/' + profile
+                self.profiles[profile] = {'name': row['name'], 'api_url': base, 'selkies_url': base + '/stream',
+                                          'control_enabled': creation.get('allow_legacy_input', False),
+                                          'allow_legacy_input': creation.get('allow_legacy_input', False)}
+            self.locks.setdefault(profile, asyncio.Lock())
+
+    def _owned(self, principal):
+        creation = policy(self._read_config())
+        if not creation:
+            return set()
+        return {row['profile_id'] for row in self.owned_profiles.all(principal.identifier)
+                if row['profile_id'] and row['gateway'] == creation['api_url']}
+
+    def _allowed(self, principal, permission, credential=None):
+        entry = credential or self._credential(principal)
+        allowed = set(entry.get(permission + '_profiles', []))
+        if permission in entry.get('created_profile_permissions', []):
+            owned = self._owned(principal)
+            if permission in {'control', 'launch', 'stop'}:
+                creation = policy(self._read_config())
+                owned = {p for p in owned if (p in self.settings['profiles'] and self.profiles[p].get('control_enabled'))
+                         or (creation and creation.get('allow_legacy_input', False))}
+            allowed.update(owned)
+        return allowed
+
+    def _slots(self, principal, profile, credential):
+        # New trusted-LAN workers have one implicit controller. Never advertise
+        # other slots without explicitly configured upstream slot credentials.
+        slots = credential.get('slots', [1])
+        return [s for s in slots if s == 1] if profile in self._owned(principal) and profile not in self.settings['profiles'] else slots
+
     def _scope(self, principal, profile, permission):
         _id(profile, 'profile')
         entry = self._credential(principal)
-        if profile not in self.profiles or profile not in entry.get(permission + '_profiles', []):
+        self._refresh_profiles()
+        if profile not in self.profiles or profile not in self._allowed(principal, permission, entry):
             raise ServiceFailure('forbidden', 'This credential does not permit this operation for that profile.')
         if permission in {'control', 'launch', 'stop'} and not self.profiles[profile].get('control_enabled', False):
             raise ServiceFailure('control_disabled', 'This profile is configured for observation only.')
@@ -181,11 +229,13 @@ class Service:
     def tool_names(self, principal):
         credential = self._credential(principal)
         names = set(READ_TOOLS)
-        if credential.get('control_profiles'):
+        if self._allowed(principal, 'control', credential):
             names.update({'claim_control', 'act', 'release_control'})
         for operation in ('launch', 'stop'):
-            if credential.get(operation + '_profiles'):
+            if self._allowed(principal, operation, credential):
                 names.add(operation)
+        if credential.get('create_profiles', False) and policy(self._read_config()):
+            names.add('create_profile')
         return names
 
     def _cleanup(self):
@@ -225,9 +275,10 @@ class Service:
         return active
 
     async def _capabilities(self, principal):
+        self._refresh_profiles()
         credential = self._credential(principal)
         profiles = []
-        allowed = set().union(*(set(credential.get(k + '_profiles', [])) for k in ('observe', 'control', 'launch', 'stop')))
+        allowed = set().union(*(self._allowed(principal, k, credential) for k in PERMISSIONS))
         for key in sorted(allowed):
             try:
                 snapshot = await self.runtime.status(key)
@@ -237,10 +288,16 @@ class Service:
             except Exception:
                 runtime, error = {}, 'worker_unavailable'
             profiles.append({'id': key, 'name': self.profiles[key].get('name', key),
-                             'permissions': [k for k in ('observe', 'control', 'launch', 'stop') if key in credential.get(k + '_profiles', [])],
-                             'controller_slots': credential.get('slots', [1]) if key in credential.get('control_profiles', []) else [],
+                             'permissions': [k for k in PERMISSIONS if key in self._allowed(principal, k, credential)],
+                             'owned': key in self._owned(principal),
+                             'controller_slots': self._slots(principal, key, credential) if key in self._allowed(principal, 'control', credential) else [],
                              'platforms': runtime, 'error': error})
-        return {'version': '1.0', 'profiles': profiles, 'default_launch_mode': 'stream',
+        records = self.owned_profiles.all(principal.identifier)
+        return {'version': '1.1', 'profiles': profiles, 'default_launch_mode': 'stream',
+                'profile_creation': {'enabled': 'create_profile' in self.tool_names(principal),
+                                     'limit': credential.get('max_created_profiles', 1), 'used': len(records),
+                                     'avatars': list(AVATARS),
+                                     'requests': [{'request_id': r['request_id'], 'profile_id': r['profile_id'], 'name': r['name']} for r in records]},
                 'observation': {'cloud': True, 'browser_publisher': False, 'max_age_seconds': self.OBSERVATION_AGE},
                 'control': {'buttons': sorted(BUTTONS), 'axes': sorted(AXES), 'max_duration_ms': 1000, 'lease_seconds': self.LEASE_TTL,
                             'timing': 'real_time', 'frame_stepping': False, 'delivery_ack': False,
@@ -253,7 +310,8 @@ class Service:
         return {'games': [_game(g) for g in result.get('games', [])], 'total': result.get('total', 0), 'offset': offset}
 
     async def _sessions(self, principal):
-        allowed = self._credential(principal).get('observe_profiles', [])
+        self._refresh_profiles()
+        allowed = sorted(self._allowed(principal, 'observe'))
         async def view(profile):
             try:
                 snapshot = await self.runtime.status(profile)
@@ -261,6 +319,63 @@ class Service:
             except Exception:
                 return {'profile_id': profile, 'session': None, 'error': 'worker_unavailable'}
         return {'sessions': await asyncio.gather(*(view(p) for p in allowed))}
+
+    @staticmethod
+    def _public_profile(record):
+        if (not isinstance(record, dict) or not isinstance(record.get('id'), str)
+                or not PLAYER_ID.fullmatch(record['id'])
+                or record.get('status') not in {'provisioning', 'ready', 'error'}):
+            raise ServiceFailure('profile_response_invalid', 'The profile registry returned an invalid result.')
+        return {k: record.get(k) for k in ('id', 'name', 'avatar', 'status')} | {
+            'error': 'provisioning_failed' if record['status'] == 'error' else None}
+
+    async def _profile_status(self, principal, profile_id):
+        self._credential(principal)
+        if profile_id not in self._owned(principal):
+            raise ServiceFailure('forbidden', 'Only your own created profile preparation status is available.')
+        creation = policy(self._read_config())
+        snapshot = await self.runtime.list_profiles(creation['api_url'])
+        record = next((p for p in snapshot.get('profiles', []) if p.get('id') == profile_id), None)
+        if not record:
+            raise ServiceFailure('profile_not_found', 'The created profile is no longer present; contact the administrator.')
+        self._credential(principal)
+        if profile_id not in self._owned(principal):
+            raise ServiceFailure('forbidden', 'Profile access has changed.')
+        return {'profile': self._public_profile(record), 'owned': True,
+                'permissions': [p for p in PERMISSIONS if profile_id in self._allowed(principal, p)]}
+
+    async def _create_profile(self, principal, name, request_id, avatar='rocket'):
+        _id(request_id, 'profile request ID')
+        if (not isinstance(name, str) or not 1 <= len(name.strip()) <= 20
+                or any(ord(c) < 32 or 127 <= ord(c) < 160 for c in name) or avatar not in AVATARS):
+            raise ServiceFailure('invalid_argument', 'Use a name of 1–20 characters without control characters and a preset avatar.')
+        name = name.strip()
+        async with self.creation_lock:
+            credential = self._credential(principal)
+            creation = policy(self._read_config())
+            if not credential.get('create_profiles', False) or not creation:
+                raise ServiceFailure('forbidden', 'Profile creation is not enabled for this credential.')
+            row, replayed = self.owned_profiles.reserve(principal.identifier, request_id, name, avatar,
+                                                       creation['api_url'], credential.get('max_created_profiles', 1))
+            if not row['profile_id']:
+                # The existing REST API deduplicates by UUID. Unlike generic game
+                # mutations this is safe to retry after an uncertain POST/restart.
+                try:
+                    result = self._public_profile(await self.runtime.create_profile(creation['api_url'], name, avatar, row['upstream_id']))
+                except Exception as error:
+                    if isinstance(error, ServiceFailure):
+                        raise
+                    raise ServiceFailure('profile_creation_pending', 'Creation is unconfirmed. Retry create_profile with the same request_id and details; do not allocate a new request ID.') from error
+                profile = result['id']
+                if profile in self.settings['profiles'] or any(r['profile_id'] == profile for r in self.owned_profiles.all()):
+                    raise ServiceFailure('profile_conflict', 'The registry returned an existing profile; no ownership was granted.')
+                self.owned_profiles.bind(principal.identifier, request_id, profile)
+                row['profile_id'] = profile
+            self._refresh_profiles()
+            self._credential(principal)
+            result = await self._profile_status(principal, row['profile_id'])
+            return dict(result, request_id=request_id, replayed=replayed,
+                        next_step={'provisioning': 'profile_status', 'ready': 'capabilities', 'error': 'contact_administrator'}[result['profile']['status']])
 
     def _new_handle(self, owner, profile, session, *, family=False, viewer=None):
         if len(self.handles) >= 1024:
@@ -363,10 +478,11 @@ class Service:
         self._scope(principal, profile_id, 'observe')
         if type(slot) is not int or slot not in range(1, 5):
             raise ServiceFailure('invalid_slot', 'Controller slot must be between 1 and 4.')
-        if slot not in credential.get('slots', [1]):
+        if slot not in self._slots(principal, profile_id, credential):
             raise ServiceFailure('forbidden', 'This credential does not permit that controller slot.')
         configured = self.profiles[profile_id].get('selkies_tokens', {})
-        if str(slot) not in configured and not (slot == 1 and self.profiles[profile_id].get('selkies_token')):
+        legacy_owned = slot == 1 and profile_id in self._owned(principal) and self.profiles[profile_id].get('allow_legacy_input') is True
+        if str(slot) not in configured and not (slot == 1 and self.profiles[profile_id].get('selkies_token')) and not legacy_owned:
             raise ServiceFailure('slot_unavailable', 'This controller slot has no configured runtime credential.')
         async with self.locks[profile_id]:
             await self._current(profile_id, expected_session_id)
@@ -386,7 +502,7 @@ class Service:
         if not lease or lease['owner'] != principal.identifier or lease['expires_at'] <= time.time():
             raise ServiceFailure('invalid_lease', 'The controller lease has expired or belongs to another actor.')
         credential = self._scope(principal, lease['profile_id'], 'control')
-        if lease['slot'] not in credential.get('slots', [1]):
+        if lease['slot'] not in self._slots(principal, lease['profile_id'], credential):
             raise ServiceFailure('forbidden', 'This controller slot is no longer authorized.')
         return lease
 
@@ -448,10 +564,17 @@ class Service:
         return await self._mutation(principal, 'stop', request_id, arguments, operation)
 
     def _family_profiles(self):
-        family = self._read_config().get('family_watch', {})
+        config = self._read_config()
+        family = config.get('family_watch', {})
         if not family.get('enabled', False):
             raise ServiceFailure('spectating_disabled', 'Family spectating is not enabled on this server.')
-        return [p for p in family.get('profiles', []) if p in self.profiles]
+        self._refresh_profiles()
+        allowed = list(dict.fromkeys(p for p in family.get('profiles', []) if p in self.profiles))
+        creation = policy(config)
+        if creation and creation.get('share_with_family', False):
+            allowed.extend(r['profile_id'] for r in self.owned_profiles.all()
+                           if r['profile_id'] and r['gateway'] == creation['api_url'] and r['profile_id'] not in allowed)
+        return allowed
 
     async def family_sessions(self):
         self._cleanup()

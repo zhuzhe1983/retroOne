@@ -35,6 +35,23 @@ class FakeRuntime:
         self.launch_started = asyncio.Event()
         self.launch_continue = None
         self.closed = False
+        self.created = {}
+        self.create_timeout = False
+
+    async def create_profile(self, gateway, name, avatar, request_id):
+        self.calls.append(('create_profile', gateway, name, avatar, request_id))
+        if request_id not in self.created:
+            profile = 'player' + str(10 + len(self.created))
+            self.created[request_id] = {'id': profile, 'name': name, 'avatar': avatar, 'status': 'provisioning', 'secret': 'private-creation-secret'}
+            self.sessions[profile] = None
+        if self.create_timeout:
+            from retroone_mcp.runtime import RuntimeFailure
+            raise RuntimeFailure('runtime_timeout', 'timeout')
+        return deepcopy(self.created[request_id])
+
+    async def list_profiles(self, gateway):
+        self.calls.append(('list_profiles', gateway))
+        return {'profiles': [deepcopy(p) for p in self.created.values()]}
 
     @staticmethod
     def session(profile, identifier, game="nes-fixture"):
@@ -110,6 +127,7 @@ class Rig:
         self.opened.remove(old)
         runtime = FakeRuntime()
         runtime.sessions = deepcopy(self.runtime.sessions)
+        runtime.created = deepcopy(self.runtime.created)
         self.runtime = runtime
         self.service = Service(self.config_path, self.state_path, runtime)
         self.opened.append(self.service)
@@ -532,3 +550,127 @@ async def test_controller_slot_scope_is_enforced_and_revoked(rig):
     next(c for c in rig.config['credentials'] if c['id'] == 'alice')['slots'] = []
     rig.write()
     await rejected('forbidden', rig.service.call(actor, 'act', action(observed, lease)))
+
+
+def enable_creation(rig, limit=2):
+    rig.config['profile_creation'] = {'enabled': True, 'api_url': 'http://private-gateway.invalid',
+                                      'allow_legacy_input': True, 'share_with_family': False}
+    rig.config['credentials'][1].update(create_profiles=True, max_created_profiles=limit,
+                                        created_profile_permissions=['observe', 'control', 'launch', 'stop'])
+    rig.write()
+
+
+@pytest.mark.anyio
+async def test_create_profile_has_explicit_grant_own_scope_and_no_automatic_game(rig):
+    actor = rig.principal()
+    assert 'create_profile' not in rig.service.tool_names(actor)
+    await rejected('forbidden', rig.service.call(actor, 'create_profile', {}))
+    enable_creation(rig)
+    result = await rig.service.call(actor, 'create_profile', {'name': 'Alice Agent', 'avatar': 'cat', 'request_id': 'new-player'})
+    profile = result['profile']['id']
+    assert result['profile']['status'] == 'provisioning'
+    assert result['owned'] and not result['replayed']
+    assert set(result['permissions']) == {'observe', 'control', 'launch', 'stop'}
+    assert not any(c[0] in {'launch', 'stop', 'perform'} for c in rig.runtime.calls)
+    assert 'private-' not in json.dumps(result)
+    assert rig.service._scope(actor, profile, 'control')
+    await rejected('forbidden', rig.service.call(rig.principal('bob'), 'profile_status', {'profile_id': profile}))
+    await rejected('forbidden', rig.service.call(rig.principal('bob'), 'launch', {'profile_id': profile, 'game_id': 'nes-fixture', 'request_id': 'steal'}))
+    assert profile not in rig.service._family_profiles()
+    rig.config['profile_creation']['share_with_family'] = True
+    rig.write()
+    assert profile in rig.service._family_profiles()
+    list(rig.runtime.created.values())[0]['status'] = 'ready'
+    ready = await rig.service.call(actor, 'profile_status', {'profile_id': profile})
+    assert ready['profile']['status'] == 'ready'
+    assert (await rig.service.call(actor, 'sessions', {}))['sessions'][-1]['session'] is None
+
+
+@pytest.mark.anyio
+async def test_profile_retry_after_timeout_and_restart_does_not_allocate_twice(rig):
+    enable_creation(rig, limit=1)
+    args = {'name': 'Agent', 'request_id': 'durable-create'}
+    rig.runtime.create_timeout = True
+    await rejected('profile_creation_pending', rig.service.call(rig.principal(), 'create_profile', args))
+    assert len(rig.runtime.created) == 1
+    upstream_id = next(iter(rig.runtime.created))
+    await rig.restart()
+    response = await rig.service.call(rig.principal(), 'create_profile', args)
+    assert response['replayed'] and len(rig.runtime.created) == 1
+    assert next(iter(rig.runtime.created)) == upstream_id
+    await rejected('request_reused', rig.service.call(rig.principal(), 'create_profile', dict(args, name='Changed')))
+    await rejected('profile_quota', rig.service.call(rig.principal(), 'create_profile', dict(args, request_id='another')))
+    await rig.restart()
+    assert response['profile']['id'] in rig.service._owned(rig.principal())
+    again = await rig.service.call(rig.principal(), 'create_profile', args)
+    assert again['profile']['id'] == response['profile']['id']
+    assert not any(c[0] == 'create_profile' for c in rig.runtime.calls)
+
+
+@pytest.mark.anyio
+async def test_concurrent_creations_enforce_quota_and_idempotency(rig):
+    enable_creation(rig, limit=1)
+    actor = rig.principal()
+    args = {'name': 'Agent', 'request_id': 'concurrent'}
+    results = await asyncio.gather(*(rig.service.call(actor, 'create_profile', args) for _ in range(4)))
+    assert len({r['profile']['id'] for r in results}) == 1
+    assert len([c for c in rig.runtime.calls if c[0] == 'create_profile']) == 1
+    await rejected('profile_quota', rig.service.call(actor, 'create_profile', dict(args, request_id='over-quota')))
+
+
+@pytest.mark.anyio
+async def test_owned_profile_permissions_revocation_and_single_slot(rig):
+    enable_creation(rig)
+    actor = rig.principal()
+    result = await rig.service.call(actor, 'create_profile', {'name': 'Agent', 'request_id': 'owned'})
+    profile = result['profile']['id']
+    rig.runtime.sessions[profile] = rig.runtime.session(profile, 'own-session')
+    rig.config['credentials'][1]['slots'] = [1, 2]
+    rig.write()
+    args = {'profile_id': profile, 'expected_session_id': 'own-session'}
+    await rejected('forbidden', rig.service.call(actor, 'claim_control', dict(args, slot=2)))
+    lease = await rig.service.call(actor, 'claim_control', args)
+    rig.config['credentials'][1]['created_profile_permissions'] = ['observe']
+    rig.write()
+    await rejected('forbidden', rig.service.call(actor, 'stop', dict(args, request_id='must-not-stop')))
+    await rejected('forbidden', rig.service.call(actor, 'act', {'lease_id': lease['lease_id'], 'expected_session_id': 'own-session',
+                                                             'action_id': 'bad', 'observation_id': 'bad'}))
+    rig.config['credentials'][1]['create_profiles'] = False
+    rig.write()
+    assert 'create_profile' not in rig.service.tool_names(actor)
+    assert profile in rig.service._allowed(actor, 'observe')
+    rig.config['profile_creation']['api_url'] = 'http://another-deployment.invalid'
+    rig.write()
+    assert profile not in rig.service._owned(actor)
+    await rejected('forbidden', rig.service.call(actor, 'profile_status', {'profile_id': profile}))
+
+
+@pytest.mark.anyio
+async def test_creation_never_claims_existing_family_profile(rig):
+    enable_creation(rig)
+    async def wrong(*args):
+        return {'id': 'player1', 'name': 'Family', 'avatar': 'cat', 'status': 'ready'}
+    rig.runtime.create_profile = wrong
+    await rejected('profile_conflict', rig.service.call(rig.principal(), 'create_profile', {'name': 'Agent', 'request_id': 'collision'}))
+    assert not rig.service._owned(rig.principal())
+    assert rig.runtime.sessions['player1']['id'] == 'session-player1'
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize('arguments', [
+    {'name': ' '}, {'name': 'x' * 21}, {'name': 'bad\nname'}, {'name': 'Agent', 'avatar': 'unknown'},
+    {'name': 'Agent', 'request_id': '../escape'},
+])
+async def test_creation_rejects_invalid_fields_without_backend_calls(rig, arguments):
+    enable_creation(rig)
+    await rejected('invalid_argument', rig.service.call(rig.principal(), 'create_profile', {'request_id': 'new', **arguments}))
+    assert not rig.runtime.calls
+
+
+@pytest.mark.anyio
+async def test_unconfigured_legacy_input_does_not_grant_dynamic_control(rig):
+    enable_creation(rig)
+    rig.config['profile_creation']['allow_legacy_input'] = False
+    rig.write()
+    result = await rig.service.call(rig.principal(), 'create_profile', {'name': 'Agent', 'request_id': 'read-only'})
+    assert result['permissions'] == ['observe']

@@ -26,7 +26,7 @@ SHA = re.compile(r'^[a-f0-9]{64}$')
 
 
 def publish_report(report: dict, destination: Path) -> dict:
-    """Reduce a private, full audit into the runtime's metadata index."""
+    """Publish audit evidence, preserving only explicitly untargeted platforms."""
     if report.get('schema_version') != 1 or report.get('read_only') is not True:
         raise ValueError('Unsupported audit report')
     games = {}
@@ -54,6 +54,13 @@ def publish_report(report: dict, destination: Path) -> dict:
     result = {'schema_version': 1, 'generated_at': report.get('generated_at'), 'games': games, 'groups': groups,
               'known_sources': [g['relative_rom_path'] for g in report['games'] if g.get('relative_rom_path')],
               'summary': report.get('summary', {}), 'hash_policy': report.get('hash_policy'), 'completed': report.get('completed')}
+    # An explicit platform filter is a partition update, not a whole-library
+    # replacement. Reported IDs are always authoritative for ordinary evidence,
+    # even if the filter and the record's platform disagree. A budget-limited
+    # unfiltered report remains a replacement; absence alone is not a partition.
+    selected = report.get('selected_platforms')
+    selected = set(selected) if (isinstance(selected, list) and selected and
+                                all(isinstance(value, str) and value for value in selected)) else None
     # The general audit cannot decode Switch containers. Retain separately
     # verified full-NCA proofs across a later general scan, only while the new
     # source manifest and launch context still agree. Reader rechecks disk stats.
@@ -64,11 +71,19 @@ def publish_report(report: dict, destination: Path) -> dict:
         if old.get('schema_version') != 1:
             raise ValueError('Unsupported previous index')
         latest = {game['id']: game for game in report['games']}
-        retained = set()
+        retained, untouched = set(), set()
         for identifier, entry in old.get('games', {}).items():
-            if not isinstance(entry, dict) or entry.get('fingerprint', {}).get('scope') != 'switch_nca_set':
+            if not isinstance(entry, dict):
                 continue
             new = latest.get(identifier)
+            if (selected is not None and new is None and isinstance(entry.get('platform'), str)
+                    and entry['platform'] not in selected):
+                games[identifier] = entry
+                retained.add(identifier)
+                untouched.add(identifier)
+                continue
+            if entry.get('fingerprint', {}).get('scope') != 'switch_nca_set':
+                continue
             if new is not None:
                 sources = [{key: source.get(key) for key in ('relative_path', 'size', 'mtime_ns', 'ctime_ns', 'ino')}
                            for source in new.get('source_manifest', [])]
@@ -77,8 +92,12 @@ def publish_report(report: dict, destination: Path) -> dict:
                     continue
             games[identifier] = entry
             retained.add(identifier)
-        groups.extend(group for group in old.get('groups', []) if group.get('scope') == 'switch_nca_set'
-                      and set(group.get('game_ids', [])).issubset(retained))
+        new_group_ids = {group['id'] for group in groups}
+        groups.extend(group for group in old.get('groups', [])
+                      if group.get('id') not in new_group_ids and group.get('game_ids')
+                      and (set(group['game_ids']).issubset(untouched)
+                           or (group.get('scope') == 'switch_nca_set'
+                               and set(group['game_ids']).issubset(retained))))
         result['known_sources'] = sorted(set(result['known_sources']) | {
             source['relative_path'] for identifier in retained for source in games[identifier].get('sources', [])})
     except (OSError, ValueError, TypeError, KeyError):

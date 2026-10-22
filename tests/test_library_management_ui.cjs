@@ -23,7 +23,7 @@ test('management distinguishes paused work, failed work and completed checks', (
 test('partial progress reports only known measured values without invented percentages', () => {
   assert.equal(ui.managementProgressText(null), '');
   assert.equal(ui.managementProgressText({phase:'hashing'}), '计算内容指纹');
-  assert.equal(ui.managementProgressText({games_discovered:20,games_total:100,bytes_hashed:1048576}), '已识别 20 / 100 项 · 已核验 1 MB');
+  assert.equal(ui.managementProgressText({games_discovered:20,games_total:100,bytes_hashed:1048576}), '已识别 20 / 100 项 · 已读取 1 MB');
   assert.equal(ui.managementProgressText({games_total:100}), '');
   assert.equal(ui.managementProgressText({games_discovered:NaN,bytes_hashed:Infinity}), '');
 });

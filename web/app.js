@@ -328,6 +328,7 @@
       state.familySessions = new Map(); state.familySessionsAvailable = false;
     } finally {
       state.familySessionsLoading = false; renderFamilyPresence();
+      if ($('profile-dialog').open && !$('profile-grid').hidden) renderProfileCards();
     }
   }
   async function watchFamily() {
@@ -531,7 +532,7 @@
     const parts = [];
     if (Object.hasOwn(labels, progress.phase)) parts.push(labels[progress.phase]);
     if (Number.isFinite(progress.games_discovered)) parts.push(t("已识别 {value1}{value2} 项", {value1: number(progress.games_discovered), value2: Number.isFinite(progress.games_total) ? ` / ${number(progress.games_total)}` : ''}));
-    if (Number.isFinite(progress.bytes_hashed)) parts.push(t("已核验 {value1}", {value1: formatSize(progress.bytes_hashed)}));
+    if (Number.isFinite(progress.bytes_hashed)) parts.push(t("已读取 {value1}", {value1: formatSize(progress.bytes_hashed)}));
     return parts.join(' · ');
   }
   function renderLibraryManagement() {
@@ -742,16 +743,53 @@
     return element?.matches('[data-profile-action]') ? element.dataset.profileAction : null;
   }
   function focusProfileAction(key) {
-    [...$('profile-grid').querySelectorAll('[data-profile-action]')].find((button) => button.dataset.profileAction === key)?.focus({preventScroll: true});
+    const action = [...$('profile-grid').querySelectorAll('[data-profile-action]')].find((button) => button.dataset.profileAction === key);
+    action?.focus({preventScroll: true});
+    return Boolean(action);
+  }
+  function profileCardActivity(profile) {
+    const status = profileStatus(profile), presence = profile.presence;
+    if (status === 'provisioning') return {kind: 'preparing', label: t('正在准备'), detail: t('准备好后就能进入游戏馆')};
+    if (status === 'error') return {kind: 'error', label: t('需要重试'), detail: t('专属空间暂时无法启动')};
+    if (!profile.configured) return {kind: 'new', label: t('设置昵称与头像'), detail: ''};
+    const session = state.familySessions.get(profile.id);
+    if (session) return {kind: 'playing', label: t('云端游戏进行中'), detail: session.game_title || session.title || t('云端游戏')};
+    if (state.presenceStale) return {kind: 'unknown', label: t('动态暂不可用'), detail: ''};
+    if (presence?.online && presence.activity !== 'library' && presence.game_title) return {kind: 'playing', label: t('正在游戏'), detail: presence.game_title};
+    if (presence?.online) return {kind: 'online', label: t('在线 · 正在挑游戏'), detail: ''};
+    return {kind: 'idle', label: presence ? t('暂时离开') : t('随时开始'), detail: ''};
+  }
+  function profileCardMarkup(profile) {
+    const status = profileStatus(profile), id = escapeHTML(profile.id), activity = profileCardActivity(profile);
+    const current = profile.id === state.profile?.id;
+    const last = !state.profile && profile.id === remembered('retroone:last-profile') && profile.configured && status === 'ready';
+    const badge = current ? t('当前玩家') : last ? t('上次使用') : '';
+    const enter = status === 'ready' ? profile.configured ? t('进入游戏馆') : t('设置昵称与头像') : activity.label;
+    const editLabel = t('编辑 {value1} 的昵称与头像', {value1: profile.name});
+    return `<button class="profile-card" data-profile-id="${id}" data-profile-action="select:${id}" data-status="${escapeHTML(status)}" data-activity="${activity.kind}" aria-current="${current}" aria-disabled="${status !== 'ready'}" aria-label="${escapeHTML([profile.name, badge, activity.label, activity.detail, enter].filter(Boolean).join(' · '))}">${avatarHTML(profile.avatar)}<span class="profile-card-copy"><span class="profile-name-row"><strong>${escapeHTML(profile.name)}</strong>${badge ? `<span class="profile-card-badge">${escapeHTML(badge)}</span>` : ''}</span><span class="profile-card-activity" data-kind="${activity.kind}">${status === 'provisioning' ? '<span class="profile-busy" aria-hidden="true"></span>' : '<i aria-hidden="true"></i>'}<span>${escapeHTML(activity.label)}</span></span>${activity.detail ? `<span class="profile-game-title" title="${escapeHTML(activity.detail)}">${escapeHTML(activity.detail)}</span>` : ''}</span>${!profile.configured && status === 'ready' ? icon('arrow', 'profile-enter-icon') : ''}</button>${profile.configured ? `<button class="profile-edit" data-edit-profile="${id}" data-profile-action="edit:${id}" aria-label="${escapeHTML(editLabel)}" title="${escapeHTML(editLabel)}"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5 4 4M4 20l4-1L20 7a2.8 2.8 0 0 0-4-4L4 15v5Z"/></svg></button>` : ''}${status === 'error' ? `<div class="profile-recovery"><details class="profile-error-details"><summary data-profile-action="reason:${id}">${escapeHTML(t('查看原因'))}</summary><p class="profile-error">${escapeHTML(profile.error || profile.message || t('专属空间暂时无法启动，请重试。'))}</p></details><button class="profile-retry" data-retry-profile="${id}" data-profile-action="retry:${id}" ${state.profileRetrying.has(profile.id) ? 'disabled' : ''}>${icon('refresh')}${escapeHTML(state.profileRetrying.has(profile.id) ? t('正在重试…') : t('重新准备'))}</button></div>` : ''}`;
   }
   function renderProfileCards() {
-    const focused = profileFocusKey();
-    $('profile-grid').innerHTML = state.profiles.map((profile) => {
-      const status = profileStatus(profile), id = escapeHTML(profile.id);
-      const label = status === 'provisioning' ? t("正在准备专属空间…") : status === 'error' ? t("准备失败") : profile.configured ? profile.id === state.profile?.id ? t("当前玩家") : t("进入游戏馆") : t("设置昵称与头像");
-      return `<div class="profile-card-wrap"><button class="profile-card" data-profile-id="${id}" data-profile-action="select:${id}" data-status="${escapeHTML(status)}" aria-current="${profile.id === state.profile?.id}" aria-disabled="${status !== 'ready'}">${avatarHTML(profile.avatar)}<strong>${escapeHTML(profile.name)}</strong><small>${status === 'provisioning' ? '<span class="profile-busy" aria-hidden="true"></span>' : ''}${escapeHTML(label)}</small>${profile.presence && status === 'ready' ? `<span class="profile-presence" data-online="${profile.presence.online && !state.presenceStale}">${escapeHTML(presenceLabel(profile))}</span>` : ''}</button>${status === 'error' ? `<p class="profile-error">${escapeHTML(profile.error || profile.message || t("专属空间暂时无法启动，请重试。"))}</p><button class="profile-retry" data-retry-profile="${id}" data-profile-action="retry:${id}" ${state.profileRetrying.has(profile.id) ? 'disabled' : ''}>${escapeHTML(state.profileRetrying.has(profile.id) ? t("正在重试…") : t("重新准备"))}</button>` : ''}${profile.configured ? `<button class="profile-edit" data-edit-profile="${id}" data-profile-action="edit:${id}">${escapeHTML(t("编辑昵称与头像"))}</button>` : ''}</div>`;
-    }).join('') + `<div class="profile-card-wrap"><button class="profile-card profile-add" data-add-profile data-profile-action="add" aria-disabled="${state.profileCapacity?.remaining === 0}"><span class="profile-avatar profile-add-icon" aria-hidden="true">＋</span><strong>${escapeHTML(t("添加家庭成员"))}</strong><small>${escapeHTML(state.profileCapacity?.remaining === 0 ? t("已达到成员数量上限") : t("独立收藏与存档"))}</small></button></div>`;
-    if (focused) focusProfileAction(focused);
+    const focused = profileFocusKey(), grid = $('profile-grid'), scrollTop = $('profile-dialog').scrollTop;
+    const entries = state.profiles.map(profile => ({key: profile.id, markup: profileCardMarkup(profile), className: 'profile-card-wrap'}));
+    entries.push({key: '__add', className: 'profile-card-wrap profile-add-wrap', markup: `<button class="profile-add" data-add-profile data-profile-action="add" aria-disabled="${state.profileCapacity?.remaining === 0}"><span class="profile-add-symbol" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span><span><strong>${escapeHTML(t('添加家庭成员'))}</strong><small>${escapeHTML(state.profileCapacity?.remaining === 0 ? t('已达到成员数量上限') : t('为新的冒险留一个位置'))}</small></span>${icon('arrow', 'profile-add-arrow')}</button>`});
+    const existing = new Map([...grid.children].map(element => [element.dataset.profileKey, element]));
+    entries.forEach((entry, index) => {
+      const element = existing.get(entry.key) || document.createElement('div');
+      element.className = entry.className; element.dataset.profileKey = entry.key;
+      if (element._profileMarkup !== entry.markup) {
+        const expanded = element.querySelector('.profile-error-details')?.open;
+        element.innerHTML = entry.markup; element._profileMarkup = entry.markup;
+        if (expanded && element.querySelector('.profile-error-details')) element.querySelector('.profile-error-details').open = true;
+      }
+      if (grid.children[index] !== element) grid.insertBefore(element, grid.children[index] || null);
+      existing.delete(entry.key);
+    });
+    for (const element of existing.values()) element.remove();
+    if (focused && profileFocusKey() !== focused && !focusProfileAction(focused)) {
+      const profileId = focused.slice(focused.indexOf(':') + 1);
+      if (!focusProfileAction(`select:${profileId}`)) grid.querySelector('[data-profile-id]')?.focus({preventScroll: true});
+    }
+    $('profile-dialog').scrollTop = scrollTop;
   }
   function profileMessage(message = '', error = false) {
     statusText('profile-message', message);
@@ -764,6 +802,7 @@
     state.profileEditing = null; state.pendingProfile = null; state.profileCreateRequestId = null;
     $('profile-title').textContent = t("今天，谁来玩？");
     $('profile-description').textContent = t("各自收藏，各自存档。选好玩家，接着上次的冒险。");
+    $('profile-dialog').dataset.view = 'choose';
     $('profile-grid').hidden = false; $('profile-editor').hidden = true; $('profile-confirm').hidden = true;
     $('close-profiles').hidden = !state.profile;
     profileMessage(); renderProfileCards();
@@ -803,6 +842,7 @@
     } catch (error) {
       if (epoch !== state.profileRegistryEpoch) return;
       state.presenceStale = true; renderFamilyPresence();
+      if (!$('profile-grid').hidden) renderProfileCards();
       if (!silent || !$('profile-grid').hidden) {
         profileMessage(silent ? t("状态更新失败：{value1}", {value1: errorMessage(error)}) : errorMessage(error), true);
         $('profile-message').dataset.connectionError = 'true'; $('retry-profiles').hidden = false;
@@ -826,6 +866,7 @@
     if (creating && state.profileCapacity?.remaining === 0) { profileMessage(t("家庭成员已达到 {value1} 位上限，暂时无法继续添加。", {value1: state.profileCapacity.limit}), true); return; }
     profile ||= {name: '', avatar: 'pixel', configured: false};
     state.profileEditing = profile; state.profileEditEnter = enterAfterSave; state.profileAvatar = profile.avatar || 'pixel'; state.profileCreateRequestId = null;
+    $('profile-dialog').dataset.view = 'edit';
     $('profile-grid').hidden = true; $('profile-confirm').hidden = true; $('profile-editor').hidden = false;
     $('retry-profiles').hidden = true;
     $('profile-title').textContent = creating ? t("添加家庭成员") : profile.configured ? t("这是你的玩家档案。") : t("先认识一下你。");
@@ -874,6 +915,7 @@
     if (state.profile?.id === profile.id) { closeProfiles(); loadInterfaceSettings(); return; }
     if (state.playMode === 'browser') {
       state.pendingProfile = profile;
+      $('profile-dialog').dataset.view = 'confirm';
       $('profile-grid').hidden = true; $('profile-editor').hidden = true; $('profile-confirm').hidden = false;
       $('profile-title').textContent = t("先保存，再换玩家。");
       $('profile-description').textContent = t("准备切换到 {value1} 的游戏馆。", {value1: profile.name});
@@ -949,7 +991,7 @@
     if (!$('profile-confirm').hidden) buttons = [...$('profile-confirm').querySelectorAll('button:not(:disabled)')];
     else if (!$('profile-editor').hidden) buttons = [$('profile-name'), ...$('profile-editor').querySelectorAll('button:not(:disabled)')];
     else {
-      const actions = [...languages, ...$('profile-grid').querySelectorAll('[data-profile-action]:not(:disabled)')];
+      const actions = [...languages, ...$('profile-grid').querySelectorAll('[data-profile-action]:not(:disabled), .profile-error-details summary'), $('close-profiles'), $('retry-profiles')].filter(button => !button.hidden && button.getClientRects().length);
       const active = document.activeElement, horizontal = direction === 'left' || direction === 'right';
       if (actions.length) {
         if (!actions.includes(active)) { actions[0].focus(); return; }

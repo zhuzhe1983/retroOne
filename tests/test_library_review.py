@@ -5,6 +5,8 @@ from pathlib import Path
 import tempfile
 import unittest
 
+import pytest
+
 from retroone.catalog import Catalog
 from retroone.library_management import LibraryManager
 from retroone.library_review import ReviewIndex, filename_tags, publish_report
@@ -176,6 +178,94 @@ class SwitchReviewCase(unittest.TestCase):
             result = publish_report(report, path)
             self.assertEqual(result['groups'], [])
             self.assertNotIn('a' * 24, result['games'])
+
+
+def partition_fixture(root):
+    entries, groups, reports = {}, [], []
+    for platform, digit in [('nes', 'a'), ('gba', 'b')]:
+        members = []
+        for index in ('1', '2'):
+            identifier = digit * 23 + index
+            primary = root / platform / (index + '.zip')
+            primary.parent.mkdir(exist_ok=True)
+            primary.write_bytes(b'synthetic independent cartridge')
+            info = primary.stat()
+            source = dict(relative_path=primary.relative_to(root).as_posix(),
+                          **{key: getattr(info, 'st_' + key) for key in ('size', 'mtime_ns', 'ctime_ns', 'ino')})
+            entries[identifier] = dict(platform=platform, native_core=platform + '-core', browser_core=platform,
+                engine_hint=None, primary=source['relative_path'], sources=[source],
+                fingerprint=dict(scope='single_cartridge_payload', sha256=digit * 64, complete=True),
+                verification=dict(status='fingerprinted', checked_at='previous'))
+            reports.append(dict(id=identifier, platform=platform, native_core=platform + '-core',
+                browser_core=platform, relative_rom_path=source['relative_path'], source_manifest=[source],
+                content=dict(status='verified', sha256=digit * 64, kind='single_cartridge_payload')))
+            members.append(identifier)
+        groups.append(dict(id=digit * 24, scope='single_cartridge_payload', auto_merge_safe=True, game_ids=members))
+    return dict(schema_version=1, games=entries, groups=groups,
+                known_sources=[entry['primary'] for entry in entries.values()]), reports
+
+
+def test_platform_report_retains_untargeted_evidence_and_runtime_rechecks_sources(tmp_path):
+    previous, records = partition_fixture(tmp_path)
+    destination = tmp_path / 'review.json'
+    destination.write_text(json.dumps(previous))
+    report = dict(schema_version=1, read_only=True, selected_platforms=['gba'],
+                  games=[game for game in records if game['platform'] == 'gba'],
+                  duplicates=dict(content_exact=[previous['groups'][1]]))
+    result = publish_report(report, destination)
+    assert set(result['games']) == set(previous['games'])
+    assert result['games']['a' * 23 + '1'] == previous['games']['a' * 23 + '1']
+    assert len(result['groups']) == 2
+    assert set(result['known_sources']) == set(previous['known_sources'])
+    review = ReviewIndex(tmp_path, destination)
+    assert all(row[1] for row in review.rows())
+    # Retention is not a new verification: current source stats still invalidate it.
+    (tmp_path / 'nes/2.zip').write_bytes(b'new regional revision')
+    assert review.changed_groups() == {'a' * 24}
+
+
+@pytest.mark.parametrize('outcome', ['unverified', 'error', 'changed_core', 'changed_source'])
+def test_reported_id_overrides_previous_even_outside_declared_partition(tmp_path, outcome):
+    previous, records = partition_fixture(tmp_path)
+    destination = tmp_path / 'review.json'
+    destination.write_text(json.dumps(previous))
+    current = records[0]
+    if outcome == 'unverified':
+        current['content'] = dict(status='unverified', reason='read_budget_reached')
+    elif outcome == 'error':
+        current['content'] = dict(status='error')
+        current['errors'] = [dict(code='missing_source', message='Source unavailable')]
+    elif outcome == 'changed_core':
+        current['native_core'] = 'different-core'
+    else:
+        current['source_manifest'] = [dict(current['source_manifest'][0], mtime_ns=123)]
+    report = dict(schema_version=1, read_only=True, selected_platforms=['gba'], games=[current])
+    result = publish_report(report, destination)
+    identifier = current['id']
+    assert result['groups'] == []
+    assert 'a' * 23 + '2' in result['games']
+    assert not any(entry['platform'] == 'gba' for entry in result['games'].values())
+    if outcome == 'unverified':
+        assert identifier not in result['games']
+    elif outcome == 'error':
+        assert result['games'][identifier]['verification']['status'] == 'dependency_error'
+        assert 'fingerprint' not in result['games'][identifier]
+    elif outcome == 'changed_core':
+        assert result['games'][identifier]['native_core'] == 'different-core'
+    else:
+        assert result['games'][identifier]['sources'][0]['mtime_ns'] == 123
+
+
+@pytest.mark.parametrize('selected', [None, [], 'gba'])
+def test_unfiltered_or_nonexplicit_report_keeps_full_replacement_semantics(tmp_path, selected):
+    previous, records = partition_fixture(tmp_path)
+    destination = tmp_path / 'review.json'
+    destination.write_text(json.dumps(previous))
+    report = dict(schema_version=1, read_only=True, selected_platforms=selected,
+                  completed=False, games=[records[2]])
+    result = publish_report(report, destination)
+    assert list(result['games']) == [records[2]['id']]
+    assert result['groups'] == []
 
 
 if __name__ == '__main__':

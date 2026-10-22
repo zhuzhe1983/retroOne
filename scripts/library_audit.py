@@ -11,6 +11,9 @@ the manifest retains catalog order and large entries remain eligible on resume.
 --max-read-gib is a hard limit unless --finish-unit is explicit. That batch mode
 admits whole uncached files/ZIP trees and permits the first oversized unit to
 finish, so a fixed budget cannot repeatedly restart the same large file.
+Candidate-only audits sample large opaque single-file size groups first. A
+sample mismatch rules out original-file equality; a match still requires full
+SHA256. Samples are separately cached, metered, and never complete fingerprints.
 
 Examples:
   python3 scripts/library_audit.py --catalog catalog.json --rom-root /volume2/rom/one \
@@ -24,6 +27,7 @@ an EXE alone is insufficient. No source files, archives or saves are modified.
 from __future__ import annotations
 
 import argparse
+from bisect import bisect_left
 from collections import defaultdict
 from contextlib import contextmanager
 import csv
@@ -44,6 +48,8 @@ import zipfile
 
 VERSION = 1
 CHUNK = 1024 * 1024
+RAW_SAMPLE_MIN_BYTES = 16 * 1024**2
+RAW_SAMPLE_BYTES = 64 * 1024
 ZIP_SUFFIXES = {'.zip', '.dosz'}
 OPAQUE_ARCHIVES = {'.7z', '.rar', '.gz', '.nsz', '.xcz'}
 PC_PLATFORMS = {'windows', 'dos', 'teknoparrot', 'openbor', 'scummvm'}
@@ -126,6 +132,9 @@ class Progress:
         self.next_read = self.started
         self.state = dict(phase='discover', games_discovered=0, games_total=0,
                           bytes_hashed=0, bytes_from_cache=0, files_hashed=0,
+                          bytes_sampled=0, sample_bytes_from_cache=0, sample_cache_hits=0,
+                          files_sampled=0, raw_sample_excluded_games=0,
+                          raw_sample_saved_bytes=0,
                           cache_hits=0, zip_members_hashed=0, current=None,
                           read_budget_bytes=max_read_bytes,
                           budget_policy='finish_unit' if finish_unit else 'hard',
@@ -134,7 +143,7 @@ class Progress:
 
     @contextmanager
     def unit(self, size):
-        """Admit an entire uncached file/ZIP tree before reading it in soft mode.
+        """Admit an uncached file/ZIP tree/sample before reading in soft mode.
 
         A first unit larger than the batch budget may finish. After any actual
         bytes have been read, a unit that cannot fit is deferred without starting.
@@ -162,7 +171,7 @@ class Progress:
             self.callback(dict(self.state, elapsed_seconds=round(now - self.started, 3)))
             self.last_emit = now
 
-    def read(self, stream, maximum=CHUNK):
+    def read(self, stream, maximum=CHUNK, *, sample=False):
         if self.budget:
             ceiling = self.unit_ceiling if self.unit_ceiling is not None else self.budget
             remaining = ceiling - self.state['bytes_hashed']
@@ -175,6 +184,8 @@ class Progress:
                 time.sleep(delay)
         chunk = stream.read(maximum)
         self.state['bytes_hashed'] += len(chunk)
+        if sample:
+            self.state['bytes_sampled'] += len(chunk)
         if self.budget:
             self.state['budget_overrun_bytes'] = max(0, self.state['bytes_hashed'] - self.budget)
         if self.rate:
@@ -184,7 +195,7 @@ class Progress:
 
 
 class Cache:
-    """One writer per cache. Only complete successful hashes are checkpointed."""
+    """One writer; complete full hashes and bounded samples use distinct keys."""
     def __init__(self, path):
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -256,6 +267,41 @@ def hash_file(path, info, cache, progress):
     return value
 
 
+def sample_file(path, info, cache, progress):
+    """A mismatch can reject byte equality; a match can never establish it."""
+    size = info['size']
+    ranges = [(0, RAW_SAMPLE_BYTES), ((size - RAW_SAMPLE_BYTES) // 2, RAW_SAMPLE_BYTES),
+              (size - RAW_SAMPLE_BYTES, RAW_SAMPLE_BYTES)]
+    kind = 'raw-sample-v1:' + signature(ranges)
+    unchanged(path, info)
+    found = cache.get(path, info, kind)
+    if found:
+        progress.state['sample_bytes_from_cache'] += sum(length for _, length in ranges)
+        progress.state['sample_cache_hits'] += 1
+        return found
+    digest = hashlib.sha256()
+    with progress.unit(sum(length for _, length in ranges)), path.open('rb') as source:
+        fd = os.fstat(source.fileno())
+        if (fd.st_ino, fd.st_dev, fd.st_size, fd.st_mtime_ns, fd.st_ctime_ns) != tuple(info[k] for k in ('ino', 'dev', 'size', 'mtime_ns', 'ctime_ns')):
+            raise AuditIssue('source_changed', 'Source changed before sampling', error=True)
+        for offset, length in ranges:
+            source.seek(offset)
+            digest.update(struct.pack('<QQ', offset, length))
+            remaining = length
+            while remaining:
+                data = progress.read(source, min(CHUNK, remaining), sample=True)
+                if not data:
+                    raise AuditIssue('truncated_file', 'Source ended during sampling', error=True)
+                digest.update(data)
+                remaining -= len(data)
+    unchanged(path, info)
+    value = dict(algorithm='sha256-fixed-ranges-v1', ranges=ranges, sample_sha256=digest.hexdigest(),
+                 sampled_bytes=sum(length for _, length in ranges), whole_file_verified=False)
+    cache.put(path, info, kind, value)
+    progress.state['files_sampled'] += 1
+    return value
+
+
 def zip_directory_bounds(path, max_members, max_directory):
     """Bound ZipFile's central-directory allocation, including ZIP64 archives."""
     with path.open('rb') as source:
@@ -317,13 +363,23 @@ def member_name(name):
 def inspect_zip(path, limits):
     zip_directory_bounds(path, limits['max_zip_members'], limits['max_zip_directory'])
     members, directories, names, total = [], set(), set(), 0
+    resolved_names, resolved_files, resolved_directories = set(), set(), set()
     with zipfile.ZipFile(path) as archive:
         for item in archive.infolist():
             name = member_name(item.orig_filename)
+            # Python 3.13 applies valid Unicode Path extra fields to filename,
+            # while orig_filename remains the central-directory encoded name.
+            # Both forms must be safe and unambiguous; neither is guessed.
+            resolved = member_name(item.filename)
             folded = name.casefold()
-            if folded in names:
+            if folded in names or resolved.casefold() in resolved_names:
                 raise AuditIssue('ambiguous_zip_names', 'ZIP has duplicate or case-colliding paths')
             names.add(folded)
+            resolved_names.add(resolved.casefold())
+            if item.orig_filename.endswith('/') != item.filename.endswith('/'):
+                raise AuditIssue('ambiguous_zip_names', 'ZIP Unicode path changes the entry type')
+            resolved_directories.update(str(parent).casefold() for parent in PurePosixPath(resolved).parents if str(parent) != '.')
+            (resolved_directories if item.is_dir() else resolved_files).add(resolved.casefold())
             mode = item.external_attr >> 16
             if stat.S_IFMT(mode) not in (0, stat.S_IFREG, stat.S_IFDIR):
                 raise AuditIssue('zip_special_file', 'ZIP contains a link or special file', error=True)
@@ -344,7 +400,7 @@ def inspect_zip(path, limits):
             members.append({'path': name, 'size': item.file_size, 'crc32': item.CRC,
                             'executable': mode & 0o111})
     file_names = {m['path'].casefold() for m in members}
-    if any(directory.casefold() in file_names for directory in directories):
+    if any(directory.casefold() in file_names for directory in directories) or resolved_files & resolved_directories:
         raise AuditIssue('ambiguous_zip_names', 'ZIP contains file/directory path collisions')
     if not members:
         raise AuditIssue('empty_zip', 'ZIP has no content files', error=True)
@@ -362,8 +418,15 @@ def hash_zip(path, info, inventory, cache, progress):
         return found
     members = []
     with progress.unit(inventory['size']), zipfile.ZipFile(path) as archive:
+        entries = [entry for entry in archive.infolist() if not entry.is_dir()]
+        by_name = {member_name(entry.orig_filename): entry for entry in entries}
+        if len(by_name) != len(entries) or set(by_name) != {item['path'] for item in inventory['members']}:
+            raise AuditIssue('zip_inventory_changed', 'ZIP member inventory changed before hashing', error=True)
         for item in inventory['members']:
-            with archive.open(item['path']) as source:
+            entry = by_name[item['path']]
+            if (entry.file_size, entry.CRC, (entry.external_attr >> 16) & 0o111) != (item['size'], item['crc32'], item['executable']):
+                raise AuditIssue('zip_inventory_changed', 'ZIP member metadata changed before hashing', error=True)
+            with archive.open(entry) as source:
                 digest = hash_stream(source, item['size'], progress)
             members.append(dict(item, sha256=digest))
             progress.state['zip_members_hashed'] += 1
@@ -402,6 +465,8 @@ class Auditor:
                            max_zip_directory=64 * 1024**2, max_zip_bytes=128 * 1024**3,
                            max_zip_member_bytes=64 * 1024**3, max_zip_ratio=10000)
         self.limits.update(limits)
+        self.catalog_sources = set()
+        self.directory_cache = {}
 
     def path(self, value):
         if not isinstance(value, str) or not value or '\\' in value or '\x00' in value:
@@ -464,6 +529,27 @@ class Auditor:
             self.progress.tick()
         return sorted(files), sorted(dirs)
 
+    def has_sidecars(self, primary):
+        """Check unowned adjacent resources without rescanning each collection."""
+        stem, parent = primary.stem.casefold(), primary.parent
+        if primary not in self.catalog_sources:
+            # Direct discover() calls may not have the run's catalog inventory.
+            # Keep the explicit primary exclusion, including case collisions.
+            return any(path != primary and path not in self.catalog_sources and
+                       (path.name.casefold() == stem or path.name.casefold().startswith(stem + '.'))
+                       for path in parent.iterdir())
+        info = parent.stat()
+        stamp = (info.st_mtime_ns, info.st_ctime_ns, info.st_dev, info.st_ino)
+        cached = self.directory_cache.get(parent)
+        if cached is None or cached[0] != stamp:
+            names = frozenset(path.name.casefold() for path in parent.iterdir()
+                              if path not in self.catalog_sources)
+            cached = (stamp, names, sorted(names))
+            self.directory_cache[parent] = cached
+        prefix = stem + '.'
+        position = bisect_left(cached[2], prefix)
+        return stem in cached[1] or (position < len(cached[2]) and cached[2][position].startswith(prefix))
+
     def discover(self, game):
         result = {key: game.get(key) for key in ('id', 'title', 'platform', 'native_core', 'browser_core', 'engine_hint')}
         result.update(relative_rom_path=None, source_manifest=[], errors=[], unverified=[],
@@ -498,9 +584,7 @@ class Auditor:
                 files, directories, labels, launch_labels = [primary], [], ['@source'], ['@source']
                 kind = 'single_file'
                 # Adjacent same-stem patches/config/data must never be dropped.
-                siblings = [p for p in primary.parent.iterdir() if p != primary and p not in self.catalog_sources and
-                            (p.name.casefold().startswith(primary.stem.casefold() + '.') or p.name.casefold() == primary.stem.casefold())]
-                if siblings:
+                if self.has_sidecars(primary):
                     raise AuditIssue('adjacent_resources', 'Same-stem sidecars exist; supply the complete resource_root')
             source = []
             for path, label in zip(files, labels):
@@ -634,6 +718,49 @@ class Auditor:
         self.progress.tick()
         return total
 
+    def sample_raw_group(self, group, targets):
+        """Prune uncached singleton samples only after the entire group succeeds."""
+        buckets = defaultdict(list)
+        failed = False
+        for plan in group:
+            result = plan['result']
+            self.progress.state['current'] = result['id']
+            item = result['source_manifest'][0]
+            info = {key: item[key] for key in ('size', 'mtime_ns', 'dev', 'ino', 'ctime_ns', 'executable')}
+            try:
+                evidence = sample_file(plan['paths'][0], info, self.cache, self.progress)
+                result['raw_sample'] = dict(evidence, status='sampled', comparison='full_hash_required')
+                buckets[evidence['sample_sha256']].append(plan)
+            except BudgetReached as error:
+                self.issue(result, error, 'raw_sample')
+                result['raw_sample'] = dict(status='unverified', reason=error.code, whole_file_verified=False)
+                return False
+            except (AuditIssue, OSError, ValueError) as error:
+                self.issue(result, error, 'raw_sample')
+                result['raw_sample'] = dict(status='error', whole_file_verified=False)
+                result['raw'] = dict(status='error', reason='sample_source_error')
+                plan['sample_failed'] = True
+                failed = True
+        if failed:
+            return True  # Other valid sources may still receive full hashes.
+        for bucket in buckets.values():
+            if len(bucket) != 1:
+                continue
+            plan = bucket[0]
+            result = plan['result']
+            item = result['source_manifest'][0]
+            info = {key: item[key] for key in ('size', 'mtime_ns', 'dev', 'ino', 'ctime_ns', 'executable')}
+            # Previously complete hashes remain useful evidence, even when a
+            # new candidate can be ruled out without reading its whole file.
+            if self.cache.contains(plan['paths'][0], info, 'raw-sha256'):
+                continue
+            targets['raw'].discard(result['id'])
+            result['raw'] = dict(status='not_hashed', reason='distinct_raw_sample')
+            result['raw_sample']['comparison'] = 'distinct_within_size_candidates'
+            self.progress.state['raw_sample_excluded_games'] += 1
+            self.progress.state['raw_sample_saved_bytes'] += info['size']
+        return True
+
     def run(self, records, platforms=None):
         selected = [g for g in records if not platforms or g.get('platform') in platforms]
         ids = [g.get('id') for g in selected]
@@ -642,6 +769,8 @@ class Auditor:
         if any(not isinstance(g.get('platform'), str) or not g['platform'] for g in selected):
             raise ValueError('Each game needs a platform')
         self.catalog_sources = set()
+        # Catalog ownership may change even when directory stat identity does not.
+        self.directory_cache = {}
         for game in selected:
             try: self.catalog_sources.add(self.path(game.get('rom_path')))
             except (AuditIssue, OSError, ValueError, TypeError): pass
@@ -658,18 +787,42 @@ class Auditor:
                 if kind + '_key' in plan: candidates[kind][plan[kind + '_key']].append(plan)
         targets = {kind: {p['result']['id'] for group in groups.values() if self.hash_all or len(group) > 1 for p in group}
                    for kind, groups in candidates.items()}
+        sample_groups = {}
+        if not self.hash_all:
+            for key, group in candidates['raw'].items():
+                # A mixed size group must not lose a potentially identical raw
+                # peer that has a decoded content path (ZIP/cartridge/directory).
+                if len(group) > 1 and all(p['kind'] == 'single_file' and 'content_key' not in p
+                        and p['paths'][0].suffix.lower() not in ZIP_SUFFIXES
+                        and any(note['code'] == 'opaque_content' for note in p['result']['unverified'])
+                        and p['result']['source_manifest'][0]['size'] >= RAW_SAMPLE_MIN_BYTES
+                        for p in group):
+                    sample_groups[key] = group
         self.progress.state.update(phase='hash', candidate_games=len(targets['raw'] | targets['content']),
                                    hash_order='smallest_estimated_uncached_bytes_first')
         # Stable sort preserves catalog order for equal costs. Only execution is
         # reordered: final manifests and per-game scopes keep their original order.
         hash_plans = sorted(plans, key=lambda plan: self.estimated_read_bytes(plan, targets))
         stopped = False
+        sampled_groups = set()
         for plan in hash_plans:
             result = plan['result']; self.progress.state['current'] = result['id']
             for kind in ('raw', 'content'):
                 if kind + '_key' not in plan: continue
+                key = plan[kind + '_key']
+                if kind == 'raw' and not stopped and key in sample_groups and key not in sampled_groups:
+                    item = result['source_manifest'][0]
+                    info = {key: item[key] for key in ('size', 'mtime_ns', 'dev', 'ino', 'ctime_ns', 'executable')}
+                    # Preserve zero-cost full cache hits and small-plan priority.
+                    if not self.cache.contains(plan['paths'][0], info, 'raw-sha256'):
+                        sampled_groups.add(key)
+                        stopped = not self.sample_raw_group(sample_groups[key], targets)
+                        self.progress.state['current'] = result['id']
+                if plan.get('sample_failed'):
+                    continue
                 if result['id'] not in targets[kind]:
-                    result[kind] = {'status': 'not_hashed', 'reason': 'unique_size_or_layout'}
+                    if result[kind].get('reason') != 'distinct_raw_sample':
+                        result[kind] = {'status': 'not_hashed', 'reason': 'unique_size_or_layout'}
                     continue
                 if stopped:
                     result[kind] = {'status': 'unverified', 'reason': 'read_budget_reached'}
@@ -679,14 +832,16 @@ class Auditor:
                 except BudgetReached as error:
                     stopped = True; self.issue(result, error, kind)
                     result[kind] = {'status': 'unverified', 'reason': error.code}
-                except (AuditIssue, OSError, ValueError, zipfile.BadZipFile, RuntimeError, NotImplementedError) as error:
+                except (AuditIssue, OSError, ValueError, KeyError, zipfile.BadZipFile, RuntimeError, NotImplementedError) as error:
                     self.issue(result, error, kind)
                     result[kind] = {'status': 'error' if result['errors'] else 'unverified'}
             self.progress.tick()
         # Re-stat complete closures before grouping, including additions/removals.
+        changed = set()
         for plan in plans:
             result = plan['result']
-            if not any(result[k]['status'] == 'verified' for k in ('raw', 'content')): continue
+            if not (any(result[k]['status'] == 'verified' for k in ('raw', 'content'))
+                    or result.get('raw_sample', {}).get('status') == 'sampled'): continue
             try:
                 for path, item in zip(plan['paths'], result['source_manifest']):
                     self.path(str(path))
@@ -696,9 +851,23 @@ class Auditor:
                     if files != plan['paths'] or directories != plan['directories']:
                         raise AuditIssue('source_changed', 'Resource directory contents changed during audit', error=True)
             except (AuditIssue, OSError) as error:
+                changed.add(result['id'])
                 self.issue(result, error, 'final_identity')
                 result['raw'] = result['content'] = {'status': 'error', 'reason': 'source_changed'}
+                if 'raw_sample' in result:
+                    result['raw_sample']['status'] = 'stale'
+        for key in sampled_groups:
+            group = sample_groups[key]
+            if any(plan['result']['id'] in changed for plan in group):
+                for plan in group:
+                    result = plan['result']
+                    if result['raw'].get('reason') == 'distinct_raw_sample':
+                        result['raw'] = dict(status='unverified', reason='sample_comparison_source_changed')
+                        result['raw_sample']['comparison'] = 'source_changed_in_candidate_group'
         games = [p['result'] for p in plans]
+        excluded = [game for game in games if game['raw'].get('reason') == 'distinct_raw_sample']
+        self.progress.state['raw_sample_excluded_games'] = len(excluded)
+        self.progress.state['raw_sample_saved_bytes'] = sum(game['source_manifest'][0]['size'] for game in excluded)
         duplicates = {kind + '_exact': self.groups(games, kind) for kind in ('raw', 'content')}
         self.progress.state.update(phase='budget_reached' if stopped else 'complete', current=None)
         self.progress.tick(True)
@@ -706,20 +875,26 @@ class Auditor:
                 'read_only': True, 'deletion_authorized': False, 'catalog_entries': len(records),
                 'selected_platforms': sorted(platforms) if platforms else None,
                 'hash_policy': 'all_eligible' if self.hash_all else 'same_platform_size_layout_candidates',
+                'raw_sampling': dict(enabled=not self.hash_all, minimum_file_bytes=RAW_SAMPLE_MIN_BYTES,
+                    range_bytes=RAW_SAMPLE_BYTES, ranges='head, middle, tail',
+                    scope='opaque_single_file_size_candidates_only', sample_match_is_proof=False),
                 'hash_order': 'smallest_estimated_uncached_bytes_first',
                 'read_budget': {'limit_bytes': self.progress.budget,
                     'policy': 'finish_unit' if self.progress.finish_unit else 'hard',
                     'actual_hash_bytes': self.progress.state['bytes_hashed'],
+                    'actual_sample_bytes': self.progress.state['bytes_sampled'],
+                    'actual_full_hash_input_bytes': self.progress.state['bytes_hashed'] - self.progress.state['bytes_sampled'],
                     'overrun_bytes': self.progress.state['budget_overrun_bytes'],
-                    'unit': 'one raw source file or all expanded ZIP members',
+                    'unit': 'one raw source file, expanded ZIP tree, or fixed-range sample',
                     'includes_metadata_reads': False,
                     'explanation': ('Batch limit; a first oversized uncached unit may finish, '
                                     'then the next non-fitting unit is deferred before any reads')
-                                   if self.progress.finish_unit else 'Hard limit on raw and expanded hash input bytes'},
+                                   if self.progress.finish_unit else 'Hard limit on raw, expanded and sample hash input bytes'},
                 'completed': not stopped, 'all_content_verified': all(g['content']['status'] == 'verified' for g in games),
                 'summary': dict(games=len(games), raw_verified=sum(g['raw']['status'] == 'verified' for g in games),
                                 content_verified=sum(g['content']['status'] == 'verified' for g in games),
                                 games_with_errors=sum(bool(g['errors']) for g in games),
+                                raw_sample_excluded_games=self.progress.state['raw_sample_excluded_games'],
                                 duplicate_groups={kind: len(groups) for kind, groups in duplicates.items()}),
                 'progress': dict(self.progress.state), 'games': games, 'duplicates': duplicates}
 

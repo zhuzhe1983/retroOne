@@ -29,6 +29,7 @@ x-environment: &environment
   SELKIES_ENABLE_RESIZE: "false|locked"
   RETROONE_ARTWORK_ROOT: /artwork
   RETROONE_LIBRARY_DATA_ROOT: /library-data
+  RETROONE_SCREENSHOT_DNS: "${RETROONE_SCREENSHOT_DNS:-system}"
 
 services:
   retroone:
@@ -94,6 +95,7 @@ services:
       RETROONE_SUPPLEMENTARY_GIDS: "${RETROONE_SUPPLEMENTARY_GIDS:-101}"
       RETROONE_RUNTIME_IMAGE: "${RETROONE_IMAGE:-retroone:local}"
       RETROONE_GPU_BACKEND: "${RETROONE_GPU_BACKEND:-intel}"
+      RETROONE_SCREENSHOT_DNS: "${RETROONE_SCREENSHOT_DNS:-system}"
       RETROONE_HOST_PROFILES_ROOT: "${RETROONE_HOST_PROFILES_ROOT:-/volume1/docker/retroOne/profiles}"
       RETROONE_HOST_ARTWORK_ROOT: "${RETROONE_ARTWORK_PATH:-/volume1/docker/retroOne/data/retroone/artwork}"
       RETROONE_HOST_ROM_ROOT: "${RETROONE_ROM_PATH:-/volume2/rom/one}"

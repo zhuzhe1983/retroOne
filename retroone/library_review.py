@@ -1,6 +1,6 @@
 """Private audit evidence, separate from game identity and player saves.
 
-Only complete, standalone cartridge matches can collapse list entries. All
+Only complete cartridge matches or fully hashed Switch NCA sets can collapse list entries. All
 original IDs remain addressable. Evidence is invalidated when source stats
 change; importing a report is never evidence that an emulator was playable.
 """
@@ -54,6 +54,35 @@ def publish_report(report: dict, destination: Path) -> dict:
     result = {'schema_version': 1, 'generated_at': report.get('generated_at'), 'games': games, 'groups': groups,
               'known_sources': [g['relative_rom_path'] for g in report['games'] if g.get('relative_rom_path')],
               'summary': report.get('summary', {}), 'hash_policy': report.get('hash_policy'), 'completed': report.get('completed')}
+    # The general audit cannot decode Switch containers. Retain separately
+    # verified full-NCA proofs across a later general scan, only while the new
+    # source manifest and launch context still agree. Reader rechecks disk stats.
+    try:
+        if destination.stat().st_size > 64 * 1024 * 1024:
+            raise ValueError('Previous index exceeds limit')
+        old = json.loads(destination.read_text())
+        if old.get('schema_version') != 1:
+            raise ValueError('Unsupported previous index')
+        latest = {game['id']: game for game in report['games']}
+        retained = set()
+        for identifier, entry in old.get('games', {}).items():
+            if not isinstance(entry, dict) or entry.get('fingerprint', {}).get('scope') != 'switch_nca_set':
+                continue
+            new = latest.get(identifier)
+            if new is not None:
+                sources = [{key: source.get(key) for key in ('relative_path', 'size', 'mtime_ns', 'ctime_ns', 'ino')}
+                           for source in new.get('source_manifest', [])]
+                if (new.get('errors') or sources != entry.get('sources') or any(new.get(key) != entry.get(key)
+                        for key in ('platform', 'native_core', 'browser_core', 'engine_hint'))):
+                    continue
+            games[identifier] = entry
+            retained.add(identifier)
+        groups.extend(group for group in old.get('groups', []) if group.get('scope') == 'switch_nca_set'
+                      and set(group.get('game_ids', [])).issubset(retained))
+        result['known_sources'] = sorted(set(result['known_sources']) | {
+            source['relative_path'] for identifier in retained for source in games[identifier].get('sources', [])})
+    except (OSError, ValueError, TypeError, KeyError):
+        pass
     destination.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile('w', dir=destination.parent, encoding='utf-8', delete=False) as handle:
         temporary = Path(handle.name)
@@ -69,13 +98,13 @@ def publish_report(report: dict, destination: Path) -> dict:
 def filename_tags(name: str) -> list[dict]:
     tags = []
     patterns = {
-        'region': r'\b(USA|Japan|Europe|World|Asia|Korea|China|Taiwan|JPN|EUR|US|JP)\b|[美日欧港台韩]版',
-        'translation': r'\b(translation|translated|english patch)\b|汉化|漢化|简体|繁体|中文|^T[+-]',
+        'region': r'\b(USA|Japan|Europe|World|Asia|Korea|China|Taiwan|JPN|EUR|US|JP|EU|CN|CHN)\b|[美日欧中港台韩]版',
+        'translation': r'\b(translation|translated|english patch|CHS|CHT)\b|汉化|漢化|简体|繁体|中文|^T[+-]',
         'revision': r'\b(rev(?:ision)?[ ._-]*[\w.]+|v\d+(?:\.\d+)+)\b|修订',
-        'variant': r'\b(hack|beta|proto(?:type)?|demo|unl|pirate)\b|修改|测试|盗版',
+        'variant': r'\b(hack|mod|patched|beta|proto(?:type)?|demo|unl|pirate)\b|修改|测试|盗版|魔改',
     }
-    for match in re.finditer(r'\(([^()]*)\)|\[([^\[\]]*)\]', name):
-        value = match.group(1) or match.group(2)
+    for match in re.finditer(r'\(([^()]*)\)|\[([^\[\]]*)\]|（([^（）]*)）|【([^【】]*)】', name):
+        value = next(value for value in match.groups() if value is not None)
         for kind, pattern in patterns.items():
             if re.search(pattern, value, re.I):
                 tags.append(dict(kind=kind, label=value[:100], raw=match.group(0)[:120], source='filename'))
@@ -110,16 +139,21 @@ class ReviewIndex:
                 groups = {}
                 for group in data.get('groups', []):
                     members = group.get('game_ids', [])
+                    scope = group.get('scope')
                     # Publisher and reader both enforce the restricted proof scope.
-                    if (group.get('auto_merge_safe') is True and group.get('scope') == 'single_cartridge_payload'
+                    if (group.get('auto_merge_safe') is True and scope in ('single_cartridge_payload', 'switch_nca_set')
                             and ID.fullmatch(str(group.get('id', ''))) and len(members) > 1
                             and len(set(members)) == len(members) and all(m in entries for m in members)):
                         records = [entries[m] for m in members]
                         contexts = {(r.get('platform'), r.get('native_core'), r.get('browser_core'), r.get('engine_hint')) for r in records}
                         fingerprints = {r.get('fingerprint', {}).get('sha256') for r in records}
                         if len(contexts) == 1 and len(fingerprints) == 1 and SHA.fullmatch(str(next(iter(fingerprints)))) and all(
-                            r.get('fingerprint', {}).get('complete') is True and r.get('fingerprint', {}).get('scope') == 'single_cartridge_payload'
-                            and len(r.get('sources', [])) == 1 for r in records):
+                            r.get('fingerprint', {}).get('complete') is True and r.get('fingerprint', {}).get('scope') == scope
+                            and len(r.get('sources', [])) == 1
+                            and (scope != 'switch_nca_set' or (r.get('platform') == 'switch'
+                                 and str(r['sources'][0].get('relative_path', '')).lower().endswith(('.nsp', '.xci'))
+                                 and r.get('fingerprint', {}).get('algorithm') == 'sha256_full_nca_set_v1'))
+                            for r in records):
                             groups[group['id']] = members
                 self.entries, self.groups = entries, groups
                 self.known_sources = set(data.get('known_sources', [])) | {entry.get('primary') or (entry.get('sources') or [{}])[0].get('relative_path') for entry in entries.values()}
@@ -171,7 +205,7 @@ class ReviewIndex:
                 info = path.stat()
                 if not path.is_file() or any(getattr(info, 'st_' + key) != source[key] for key in ('size', 'mtime_ns', 'ctime_ns', 'ino')):
                     return False
-                if entry.get('fingerprint', {}).get('scope') == 'single_cartridge_payload' and self._sidecars(path):
+                if entry.get('fingerprint', {}).get('scope') in ('single_cartridge_payload', 'switch_nca_set') and self._sidecars(path):
                     return False
             except (OSError, KeyError, TypeError, ValueError):
                 return False
@@ -233,4 +267,9 @@ class ReviewIndex:
         review['verification'].update(status=actual, label=LABELS[actual])
         if current and entry.get('fingerprint'):
             review['fingerprint'] = entry['fingerprint']
+        if current:
+            for tag in entry.get('variant_tags', [])[:24]:
+                if (isinstance(tag, dict) and tag.get('kind') in ('region', 'translation', 'revision', 'variant', 'package')
+                        and isinstance(tag.get('label'), str) and tag.get('source') == 'package_manifest'):
+                    review['variant_tags'].append({'kind': tag['kind'], 'label': tag['label'][:150], 'source': 'package_manifest'})
         return review

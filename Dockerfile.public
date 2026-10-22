@@ -45,6 +45,7 @@ COPY container/wine-game /usr/local/bin/retroone-wine
 RUN mkdir -p /opt/retroone/libretro /opt/retroone/vendor/emulatorjs/data /opt/retroone/system
 COPY retroone/ /opt/retroone/retroone/
 COPY scripts/library_audit.py /opt/retroone/scripts/library_audit.py
+COPY scripts/audit_switch_packages.py scripts/enrich_store_metadata.py /opt/retroone/scripts/
 COPY web/ /opt/retroone/web/
 COPY container/runtime-lock.json /opt/retroone/runtime-lock.json
 COPY container/nginx.conf /opt/retroone/nginx.template.conf

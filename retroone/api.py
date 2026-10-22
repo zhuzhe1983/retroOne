@@ -21,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
 from .artwork import ArtworkCache
+from .screenshot_cache import ScreenshotCache
 from .catalog import ARCHIVES, BROWSER_LIMIT, Catalog, contained_path, inspect_archive, platform_definitions, public_game
 from .profiles import PROFILE_ID, ProfileError, ProfileRegistry
 from .presence import PresenceStore
@@ -28,6 +29,7 @@ from .network import INSTRUCTIONS, VERIFIED_GAMES, NetworkError, NetworkStore, W
 from .settings import DisplaySettings, DisplaySettingsError, StreamResolution, display_view
 from .game_metadata import GameMetadataError
 from .interface_settings import InterfaceLocale, InterfaceSettings, InterfaceSettingsError
+from .library_settings import LibrarySettings, LibrarySettingsError, LibrarySort, SortDirection
 from .i18n import emulator_locale, player_messages, resolve_locale, text as translated_text
 from .pwa import register_pwa
 
@@ -74,6 +76,13 @@ class DisplayBody(BaseModel):
 class InterfaceBody(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     locale: InterfaceLocale
+
+
+class LibrarySettingsBody(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    pinned_platforms: list[str] = Field(max_length=128)
+    sort: LibrarySort
+    direction: SortDirection
 
 
 class InviteBody(BaseModel):
@@ -147,7 +156,7 @@ class MissingRunner:
         return None
 
 
-def create_app(rom_root: Path | None = None, config_root: Path | None = None, *, runner=None, browser_data: Path | None = None, auto_scan: bool = True, profile_id: str | None = None, base_path: str | None = None) -> FastAPI:
+def create_app(rom_root: Path | None = None, config_root: Path | None = None, *, runner=None, browser_data: Path | None = None, auto_scan: bool | None = None, profile_id: str | None = None, base_path: str | None = None) -> FastAPI:
     rom_root = Path(rom_root or os.getenv('ROM_ROOT', '/roms')).resolve()
     config_root = Path(config_root or os.getenv('CONFIG_ROOT', '/config/retroone')).resolve()
     browser_data = Path(browser_data or os.getenv('EMULATORJS_DATA', str(ROOT / 'vendor/emulatorjs/data'))).resolve()
@@ -162,6 +171,7 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
     network_store = NetworkStore(config_root)
     display_settings = DisplaySettings(config_root)
     interface_settings = InterfaceSettings(config_root)
+    library_settings = LibrarySettings(config_root)
     worker_gateway = WorkerGateway(os.getenv('RETROONE_COORDINATOR_URL', 'http://retroone:3000'))
 
     def url(path: str) -> str:
@@ -181,6 +191,7 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
         return translated_text(request_locale(request, tolerate_settings_error=True), key)
 
     catalog = Catalog(rom_root, config_root)
+    screenshot_cache = ScreenshotCache(catalog.library_data_root / 'metadata/screenshots')
     from .library_management import LibraryManager
     library_manager = LibraryManager(catalog)
     from .game_config import GameConfigError
@@ -267,6 +278,10 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
 
     def public_view(game: dict) -> dict:
         view = public_game(game)
+        if game.get('details', {}).get('screenshots'):
+            view['details'] = dict(game['details'], screenshots=[
+                url(f"/api/games/{game['id']}/screenshots/{index}") + '?v=' + hashlib.sha256(source.encode('utf-8')).hexdigest()[:16]
+                for index, source in enumerate(game['details']['screenshots'])])
         if not view.get('cover_url') and artwork.supports(game):
             view['cover_url'] = f"/api/games/{game['id']}/media/cover"
             view['cover_source'] = 'local-exact-name-reuse' if artwork.local(game) else 'libretro-exact-name-fallback'
@@ -349,7 +364,13 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
 
     @asynccontextmanager
     async def lifespan(app):
-        if auto_scan:
+        startup_scan = auto_scan
+        if startup_scan is None:
+            policy = os.getenv('RETROONE_SCAN_ON_STARTUP', 'auto').strip().lower()
+            if policy not in {'auto', '1', 'true', 'always', '0', 'false', 'never'}:
+                raise ValueError('RETROONE_SCAN_ON_STARTUP must be auto, 1 or 0')
+            startup_scan = policy in {'1', 'true', 'always'} or (policy == 'auto' and not catalog.has_games())
+        if startup_scan:
             catalog.begin_scan()
         yield
         # The service only owns this Runner instance and its child process.
@@ -358,6 +379,7 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
 
     app = FastAPI(title='RetroOne', version='0.1.0', lifespan=lifespan)
     app.state.catalog = catalog
+    app.state.screenshot_cache = screenshot_cache
     app.state.runner = runner
     app.state.profile_id = profile_id
     app.state.profile_registry = profile_registry
@@ -366,6 +388,7 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
     app.state.worker_gateway = worker_gateway
     app.state.display_settings = display_settings
     app.state.interface_settings = interface_settings
+    app.state.library_settings = library_settings
 
     @app.exception_handler(ProfileError)
     async def profile_error(request: Request, error: ProfileError):
@@ -386,6 +409,10 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
         locale = resolve_locale('auto', request.headers.get('accept-language', ''))
         return JSONResponse({'detail': translated_text(locale, error.code)}, status_code=error.status_code)
 
+    @app.exception_handler(LibrarySettingsError)
+    async def library_settings_error(request: Request, error: LibrarySettingsError):
+        return JSONResponse({'detail': str(error)}, status_code=error.status_code)
+
     @app.middleware('http')
     async def origin_and_headers(request: Request, call_next):
         if request.method not in {'GET', 'HEAD', 'OPTIONS'}:
@@ -395,9 +422,9 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
         response = await call_next(request)
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['Referrer-Policy'] = 'same-origin'
-        if request.url.path in {'/', '/index.html', '/app.js', '/styles.css', '/i18n.js', '/i18n-en.js'}:
+        if request.url.path in {'/', '/index.html', '/app.js', '/styles.css', '/i18n.js', '/i18n-en.js', '/library-ui.js'}:
             response.headers['Cache-Control'] = 'no-cache, max-age=0, must-revalidate'
-        if request.url.path in {'/api/settings/interface', '/api/settings/display'}:
+        if request.url.path in {'/api/settings/interface', '/api/settings/display', '/api/settings/library'}:
             response.headers['Cache-Control'] = 'no-store'
         if not request.url.path.startswith('/stream/'):
             response.headers['Cross-Origin-Opener-Policy'] = 'same-origin'
@@ -598,21 +625,39 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
         settings = interface_settings.update(body.model_dump())
         return {'settings': settings, 'supported_locales': ['zh-CN', 'en']}
 
+    @app.get('/api/settings/library')
+    def get_library_settings():
+        return library_settings.view()
+
+    @app.put('/api/settings/library')
+    def update_library_settings(body: LibrarySettingsBody):
+        library_settings.update(body.model_dump())
+        return library_settings.view()
+
     @app.get('/api/platforms')
     def platforms():
         refresh_modes()
         return {'platforms': catalog.platforms()}
 
     @app.get('/api/games')
-    def games(q: str = Query('', max_length=200), platform: str = Query('', max_length=60), mode: str = Query('', pattern='^(browser|stream|unavailable)?$'), favorite: bool = False, recent: bool = False, review_filter: str = Query('', pattern='^(all|needs_attention|pending|observed)?$'), offset: int = Query(0, ge=0), limit: int = Query(60, ge=1, le=200)):
+    def games(q: str = Query('', max_length=200), platform: str = Query('', max_length=60), mode: str = Query('', pattern='^(browser|stream|unavailable)?$'), favorite: bool = False, recent: bool = False, review_filter: str = Query('', pattern='^(all|needs_attention|pending|observed)?$'), offset: int = Query(0, ge=0), limit: int = Query(60, ge=1, le=200), sort: LibrarySort = 'default', direction: SortDirection | None = None):
         refresh_modes()
-        result = catalog.list(q=q.strip(), platform=platform, mode=mode, favorite=favorite, recent=recent, review_filter=review_filter, offset=offset, limit=limit)
+        result = catalog.list(q=q.strip(), platform=platform, mode=mode, favorite=favorite, recent=recent, review_filter=review_filter, offset=offset, limit=limit, sort=sort, direction=direction)
         result['games'] = [public_view(game) for game in result['games']]
         return result
 
     @app.get('/api/games/{game_id}')
     def game_detail(game_id: str):
         return public_view(game_or_404(game_id))
+
+    @app.get('/api/games/{game_id}/neighbors')
+    def game_neighbors(game_id: str, q: str = Query('', max_length=200), platform: str = Query('', max_length=60),
+                       mode: str = Query('', pattern='^(browser|stream|unavailable)?$'), favorite: bool = False,
+                       recent: bool = False, review_filter: str = Query('', pattern='^(all|needs_attention|pending|observed)?$'),
+                       sort: LibrarySort = 'default', direction: SortDirection | None = None):
+        game_or_404(game_id)
+        return catalog.neighbors(game_id, q=q.strip(), platform=platform, mode=mode, favorite=favorite,
+                                 recent=recent, review_filter=review_filter, sort=sort, direction=direction)
 
     @app.post('/api/games/{game_id}/favorite')
     def favorite(game_id: str, body: FavoriteBody):
@@ -753,6 +798,20 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
             raise HTTPException(404, '文件不存在')
         return FileResponse(prepared, media_type='application/octet-stream', headers={'Cache-Control': 'private, max-age=3600'})
 
+    @app.get('/api/games/{game_id}/screenshots/{index}')
+    def screenshot(game_id: str, index: int, v: str | None = Query(None, pattern='^[a-f0-9]{16}$')):
+        game = game_or_404(game_id)
+        screenshots = game.get('details', {}).get('screenshots', [])
+        if not 0 <= index < len(screenshots):
+            raise HTTPException(404, '游戏截图不存在')
+        if v and v != hashlib.sha256(screenshots[index].encode('utf-8')).hexdigest()[:16]:
+            raise HTTPException(404, '游戏截图资料已更新，请刷新页面')
+        cached = screenshot_cache.get(screenshots[index])
+        if not cached:
+            raise HTTPException(404, '游戏截图暂时无法读取')
+        path, media_type = cached
+        return FileResponse(path, media_type=media_type, headers={'Cache-Control': 'private, max-age=86400'})
+
     @app.get('/api/games/{game_id}/media/{kind}')
     def media(game_id: str, kind: str):
         if kind not in {'cover', 'logo', 'video'}:
@@ -869,7 +928,7 @@ document.getElementById('save-upload').addEventListener('change',async(e)=>{{con
         @app.get('/index.html', response_class=HTMLResponse)
         def versioned_index():
             document = (web_root / 'index.html').read_text('utf-8')
-            for filename in ('app.js', 'styles.css', 'i18n.js', 'i18n-en.js', 'mobile-player.js', 'mobile-player.css', 'pwa-install.js'):
+            for filename in ('app.js', 'styles.css', 'i18n.js', 'i18n-en.js', 'library-ui.js', 'mobile-player.js', 'mobile-player.css', 'pwa-install.js'):
                 path = web_root / filename
                 if path.is_file():
                     version = hashlib.sha256(path.read_bytes()).hexdigest()[:16]

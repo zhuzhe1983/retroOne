@@ -54,6 +54,7 @@ class ProvisionerTests(unittest.TestCase):
             'RETROONE_HOST_ARTWORK_ROOT': '/fixed/artwork',
             'RETROONE_HOST_LIBRARY_DATA_ROOT': '/fixed/library-data',
             'RETROONE_DOCKER_NETWORK': 'family-network',
+            'RETROONE_SCREENSHOT_DNS': 'system',
         })
         self.env.start()
         self.addCleanup(self.env.stop)
@@ -94,6 +95,19 @@ class ProvisionerTests(unittest.TestCase):
         self.assertEqual(spec['HostConfig']['Binds'], ['/fixed/roms:/roms:ro', '/fixed/profiles/player3:/config:rw', '/fixed/artwork:/artwork:rw', '/fixed/library-data:/library-data:rw'])
         self.assertNotIn('PortBindings', spec['HostConfig'])
         self.assertFalse(any('docker.sock' in mount for mount in spec['HostConfig']['Binds']))
+        self.assertIn('RETROONE_SCREENSHOT_DNS=system', spec['Env'])
+
+    def test_operator_screenshot_dns_is_inherited_by_new_players(self):
+        with patch.dict(os.environ, {'RETROONE_SCREENSHOT_DNS': 'cloudflare'}):
+            worker = Provisioner(self.docker)
+        worker.image_id = 'sha256:approved'
+        worker.ensure_runtime('player4')
+        spec = next(row[2] for row in self.docker.calls if '/create?' in row[1])
+        self.assertIn('RETROONE_SCREENSHOT_DNS=cloudflare', spec['Env'])
+        self.assertNotIn('HTTP_PROXY', dict(value.split('=', 1) for value in spec['Env']))
+        with patch.dict(os.environ, {'RETROONE_SCREENSHOT_DNS': 'http://192.168.199.1'}):
+            with self.assertRaises(ValueError):
+                Provisioner(self.docker)
 
     def test_unowned_container_and_symlink_never_started(self):
         self.docker.containers['retroone-player3'] = {'Config': {'Labels': {}}, 'State': {'Running': False}}
@@ -107,7 +121,7 @@ class ProvisionerTests(unittest.TestCase):
     def test_request_cannot_choose_commands_paths_images_or_existing_players(self):
         path, request = self.request()
         validate_request(request, path.name)
-        for changes in ({'image': 'attacker/image'}, {'command': ['sh']}, {'profile_id': '../other'}, {'profile_id': 'player1'}, {'profile_id': 'player03'}, {'version': True}):
+        for changes in ({'image': 'attacker/image'}, {'command': ['sh']}, {'profile_id': '../other'}, {'profile_id': 'player1'}, {'profile_id': 'player03'}, {'version': True}, {'RETROONE_SCREENSHOT_DNS': 'google'}):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 validate_request(dict(request, **changes), path.name)
         with self.assertRaises(ValueError):

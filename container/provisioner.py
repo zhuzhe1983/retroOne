@@ -103,6 +103,9 @@ class Provisioner:
         self.network = os.environ.get("RETROONE_DOCKER_NETWORK", "retroone_default")
         self.image = os.environ.get("RETROONE_RUNTIME_IMAGE", "retroone:local")
         self.gateway = os.environ.get("RETROONE_GATEWAY_URL", "http://retroone:3000").rstrip("/")
+        self.screenshot_dns = os.environ.get("RETROONE_SCREENSHOT_DNS", "system").strip().lower()
+        if self.screenshot_dns not in {"system", "cloudflare", "google"}:
+            raise ValueError("RETROONE_SCREENSHOT_DNS must be system, cloudflare or google")
         self.docker = docker or Docker()
         self.stopping = threading.Event()
         self.image_id = None
@@ -134,6 +137,7 @@ class Provisioner:
             "SELKIES_MANUAL_RESOLUTION": "false|locked", "SELKIES_ENABLE_RESIZE": "false|locked",
             "RETROONE_ARTWORK_ROOT": "/artwork",
             "RETROONE_LIBRARY_DATA_ROOT": "/library-data",
+            "RETROONE_SCREENSHOT_DNS": self.screenshot_dns,
             "RETROONE_PROFILE_ID": profile, "RETROONE_BASE_PATH": "/p/" + profile,
             "SUBFOLDER": "/p/" + profile + "/stream/", "RETROONE_GATEWAY": "false",
         }

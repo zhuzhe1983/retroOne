@@ -14,7 +14,13 @@ Built on EmulatorJS, RetroArch, and Selkies, RetroOne uses Docker for deployment
 
 Library management keeps metadata, ROM-linked launch configurations, and personal saves separate. Resumable content audits identify exact cartridge duplicates while preserving variants and original save identities; audit results distinguish file checks from actual emulator observations.
 
+Restarts reuse an existing library index; only an empty index is scanned automatically. After adding or moving games, run a scan from **Manage library**. Background scans keep enriched details and manual edits visible while updating file and launch information. Administrators can set `RETROONE_SCAN_ON_STARTUP=1` to force a startup scan, `0` to disable it, or leave the default `auto` behavior.
+
 The interface supports **English**, **简体中文**, and **Browser default**. Open your own avatar → Player settings, or use the language selector on the player selection screen. Each player’s preference is saved on the server; switching languages keeps the current game running. Game titles, descriptions, and save identities retain their original values.
+
+Use **All platforms** to search for a console, pin favorites, and change their order. Pins and sorting preferences belong to the current player. New browsing preferences start with **Public popularity**; the available reference currently includes sourced historical Nintendo sales, not live player activity. Games without a public metric follow by name. You can also sort by name, release date, first library addition, your launch count, or last played, and reverse the direction.
+
+Open a game card for a dedicated detail page with available facts, screenshots, source links, and launch controls. Use **Page Up / Page Down**, **[ / ]**, or the controller’s shoulder buttons to browse the previous or next game in the current filtered list; **Esc** returns to the library. Metadata coverage varies: unknown dates, missing artwork, and unverified compatibility stay explicit. Personal counts track new launches from this upgrade onward; resuming an existing cloud session does not increment them. See [metadata enrichment](docs/metadata-enrichment.md) for source matching and limitations.
 
 On phones, touch controls adapt to the game platform, with landscape side controls and a portrait layout below the picture. The play menu offers fullscreen, aspect-preserving or horizontal-stretch presentation, and button size/opacity settings. Install the PWA from a supported HTTPS browser for a standalone window. Games still require a connection; the offline page does not cache ROMs or saves. See [mobile play](docs/mobile-play.md) for setup and limitations.
 
@@ -36,7 +42,8 @@ On phones, touch controls adapt to the game platform, with landscape side contro
 
 ## 可以用它做什么
 
-- **浏览自己的收藏**：按平台查找游戏，搜索名称，查看最近游玩和个人收藏；缺少封面时使用应用自带的文字卡片。
+- **更容易找到想玩的游戏**：置顶常用平台，搜索全部平台；按公开热度、名称、发行日期、加入时间或自己的游玩记录排序。每位玩家各自保存偏好。
+- **打开完整游戏详情**：查看已有的介绍、官方截图、发行信息和资料来源，快速切换前后游戏；没有可靠资料时明确保留空缺。
 - **一个入口，两种运行方式**：轻量游戏在浏览器运行；大型镜像留在服务器，通过串流游玩。
 - **全家各有进度**：自选昵称和头像，独立收藏、最近记录、设置与存档；首页“＋”可添加成员。
 - **看看谁在玩**：顶栏显示在线家人的头像与活动；开启观战服务后，可点开家人活动，再点独立的“观看”按钮，只读观看当前云游戏。本人的状态入口可以继续、结束游戏或打开用户设置。
@@ -144,6 +151,8 @@ docker compose ps
 
 进入网页、选择玩家，打开 **“管理游戏库”** 并扫描目录。扫描在后台进行，完成后列表自动更新；大目录需要更多时间。管理入口也可分批核验内容、查看进度并继续未完成的指纹任务。也可以调用当前玩家的 `POST /p/playerN/api/scan`。
 
+服务重启时会复用已有索引，只有首次使用的空库才自动扫描；新增或移动游戏后，请手动扫描。后台扫描会保留已刮削的详情、截图和人工编辑，同时更新文件与启动信息。部署环境变量 `RETROONE_SCAN_ON_STARTUP` 默认是 `auto`；设为 `1` 可强制启动时扫描，设为 `0` 可关闭启动扫描。大型游戏库不建议让所有玩家实例同时强制扫描。
+
 选择游戏后查看详情中的运行方式和原因。先试一款熟悉的游戏，验证输入、保存和恢复，再继续扩充收藏。移动或重命名已入库文件可能改变游戏 ID，进而影响收藏、最近记录及按游戏 ID 保存的数据关联；已有进度请先备份。
 
 已有 Pegasus 收藏可以保留 `metadata.pegasus.txt` 和媒体目录。自己的封面可按 `media/<ROM文件名去掉扩展名>/boxFront.png` 放在收藏目录内，或在元数据中明确引用；没有图片时仍能正常浏览。独立封面缓存不应随项目代码或公开镜像发布；文档中经确认的界面截图单独记录来源。
@@ -166,6 +175,16 @@ docker compose ps
 顶栏直接显示谁在线、正在玩什么。在线状态来自浏览器连接，后台保留着云游戏并不等于这位家人还在线。点击自己的头像和状态，可以继续云游戏、结束云游戏、调整用户设置或切换玩家。界面语言和画面设置集中在这里。
 
 每个玩家最多保留一个云端会话。**关闭播放窗口或网页会保留云游戏；结束游戏需要再次确认。** 如果当前已有游戏运行，切换前会提示游戏名称与未保存风险。选择另一个家庭成员不会替对方结束游戏。
+
+### 平台、排序与游戏详情
+
+点平台栏的 **全部平台**，可以搜索主机名称、点图钉置顶常玩的平台，再用 ↑ / ↓ 调整置顶顺序。首页优先显示置顶与最近玩过的平台；平台按钮用不同的主机轮廓和名称帮助辨认。置顶与排序跟随当前玩家，在其他设备登录同一玩家也会沿用。
+
+游戏列表旁的排序菜单支持 **大众热度、游戏名称、发行日期、加入时间、我的游玩次数、最近游玩时间**，也可切回原来的 **默认顺序**；旁边的按钮切换升降序。未保存过偏好的玩家先按公开热度浏览，缺少热度资料的游戏按名称放在后面。当前公开参考主要是有来源和统计日期的 Nintendo 历史销量，**不等于实时热度**，也不把家人的游玩次数当成大众数据。切到“最近游玩”仍优先显示最近启动的游戏。
+
+点击游戏卡片进入独立详情页。已收集到的简介、截图、发行商、日期、类型、人数与来源会在这里展示；文件、版本和运行检查放在可展开的区域。用 **Page Up / Page Down**、**[ / ]** 或手柄肩键，在当前筛选与排序结果里查看上一个／下一个游戏；按 **Esc** 返回列表。切换详情不会启动或结束正在运行的游戏。
+
+旧库没有记录的加入时间不会补造；游玩次数从启用新计数后开始累计，继续已有云游戏会话不会再加一次。官方资料中的地区、语言和人数描述的是原版商品，不能证明某个 ROM 的汉化情况或模拟器联机能力。资料来源、补全方法与边界见 [游戏资料补全说明](docs/metadata-enrichment.md)。
 
 ### 键盘与手柄
 

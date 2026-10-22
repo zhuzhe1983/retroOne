@@ -3,6 +3,7 @@
   'use strict';
 
   const I18n = window.RetroI18n;
+  const Library = window.RetroLibrary;
   const clientRevision = new URL(document.currentScript?.src || location.href).searchParams.get('v');
   // Only our explicit status messages are replayed; catalog metadata is never scanned.
   const messageRecipes = new Map(), statusMessages = new Map();
@@ -33,6 +34,9 @@
   function validReviewFilter(value) { return Object.hasOwn(reviewFilters, value) ? value : ''; }
   const initial = new URLSearchParams(location.search);
   const state = {
+    librarySettings: Library.settings(), libraryFresh: false, librarySaving: false, librarySettingsRequest: 0,
+    sort: Library.sorts.includes(initial.get('sort')) ? initial.get('sort') : initial.get('recent') === 'true' ? 'last_played' : 'popularity', direction: initial.get('direction') === 'asc' ? 'asc' : 'desc',
+    detailOpen: initial.get('view') === 'detail', detailNeighbors: null, detailPaging: false, listScroll: 0, listSelection: null,
     interfaceRequest: 0, interfaceSaving: false, emptyState: null, migrationData: null,
     games: [], platforms: [], total: 0, platform: initial.get('platform') || '',
     query: initial.get('q') || '', mode: ['browser', 'stream', 'unavailable'].includes(initial.get('mode')) ? initial.get('mode') : '',
@@ -110,7 +114,8 @@
     const expanded = ['evidence', 'copies'].filter((name) => $('review-' + name) && !$('review-' + name).hidden);
     const video = $('detail-video');
     I18n.setLocale(locale); syncLanguagePickers();
-    renderFilters(); renderPlatforms();
+    renderFilters(); renderPlatforms(); renderLibrarySort();
+    if ($('platform-dialog').open) renderPlatformChooser();
     // Keep in-flight catalog state and error states rather than converting them to empty results.
     if (!state.loading) {
       if (state.games.length) renderGames();
@@ -193,7 +198,10 @@
       const values = ['auto', 'zh-CN', 'en'];
       active.value = values[(values.indexOf(active.value) + 1) % values.length];
       active.dispatchEvent(new Event('change', {bubbles: true}));
-    } else if (active.matches('button')) active.click();
+    } else if (active.matches('select')) {
+      active.selectedIndex = (active.selectedIndex + 1) % active.options.length;
+      active.dispatchEvent(new Event('change', {bubbles: true}));
+    } else if (active.matches('button, a, summary')) active.click();
   }
 
   async function api(path, options = {}) {
@@ -394,7 +402,7 @@
   }
   function saveProfileView() {
     if (!state.profile) return;
-    const view = {platform: state.platform, query: state.query, mode: state.mode, reviewFilter: state.reviewFilter, favorites: state.favorites, recent: state.recent, initialGame: state.selected?.id || null};
+    const view = {platform: state.platform, query: state.query, mode: state.mode, reviewFilter: state.reviewFilter, favorites: state.favorites, recent: state.recent, initialGame: state.selected?.id || null, sort: state.sort, direction: state.direction};
     try { sessionStorage.setItem(`retroone:view:${state.profile.id}`, JSON.stringify(view)); } catch {}
   }
   function readProfileView(id) {
@@ -899,7 +907,9 @@
     leavePresence();
     saveProfileView(); clearTimeout(searchTimer);
     for (const controller of state.profileRequests) controller.abort();
-    state.profileRequests.clear(); state.profileEpoch++; state.interfaceRequest++; state.interfaceSaving = false; state.request++; state.detailRequest++;
+    state.profileRequests.clear(); state.librarySettingsRequest++; state.librarySaving = false; state.libraryFresh = false; state.librarySettings = Library.settings();
+    $('platform-dialog').close();
+    state.profileEpoch++; state.interfaceRequest++; state.interfaceSaving = false; state.request++; state.detailRequest++;
     closeLibraryManagement({restoreFocus: false}); state.managementData = null; state.managementBusy = false;
     state.displayReadController?.abort(); state.displayReadController = null;
     state.displayRequest++; state.displayData = null; state.displayDraft = null; state.displayLoading = false; state.displaySaving = false; state.displayFresh = false;
@@ -907,10 +917,11 @@
     if (state.playMode) closePlayer({refresh: false, presence: false});
     state.profile = profile;
     I18n.setLocale(remembered('retroone:interface-locale') || 'zh-CN'); syncLanguagePickers();
-    const defaults = {platform: '', query: '', mode: '', reviewFilter: '', favorites: false, recent: false, initialGame: null};
-    const linkedView = first && initial.size && (!initial.has('player') || initial.get('player') === profile.id) ? {platform: initial.get('platform') || '', query: initial.get('q') || '', mode: ['browser', 'stream', 'unavailable'].includes(initial.get('mode')) ? initial.get('mode') : '', reviewFilter: validReviewFilter(initial.get('review_filter')), favorites: initial.get('favorite') === 'true', recent: initial.get('recent') === 'true', initialGame: initial.get('game')} : null;
+    const defaults = {platform: '', query: '', mode: '', reviewFilter: '', favorites: false, recent: false, initialGame: null, detailOpen: false, sort: 'popularity', direction: 'desc'};
+    const linkedView = first && initial.size && (!initial.has('player') || initial.get('player') === profile.id) ? {platform: initial.get('platform') || '', query: initial.get('q') || '', mode: ['browser', 'stream', 'unavailable'].includes(initial.get('mode')) ? initial.get('mode') : '', reviewFilter: validReviewFilter(initial.get('review_filter')), favorites: initial.get('favorite') === 'true', recent: initial.get('recent') === 'true', initialGame: initial.get('game'), detailOpen: initial.get('view') === 'detail', sort: Library.sorts.includes(initial.get('sort')) ? initial.get('sort') : initial.get('recent') === 'true' ? 'last_played' : 'popularity', direction: initial.get('direction') === 'asc' ? 'asc' : 'desc'} : null;
     Object.assign(state, defaults, linkedView || readProfileView(profile.id), {games: [], platforms: [], total: 0, selected: null, session: null, health: null, emptyState: null, migrationData: null, loading: false, scanPending: false, wasScanning: false, healthRefreshing: false, launching: false, pendingProfile: null, networkCapabilities: null, networkInvites: [], networkRoom: null, networkLoading: false, networkBusy: false, networkVersion: 0, networkCreate: null, networkSeen: new Set(), activeNetworkRoomId: null});
     state.reviewFilter = validReviewFilter(state.reviewFilter);
+    state.detailNeighbors = null; state.detailPaging = false; state.listScroll = 0; state.listSelection = null; renderDetailPage();
     state.favoritePending.clear();
     $('stop-session').disabled = false; $('stop-play').disabled = false;
     $('scan-button').disabled = false; $('scan-button').innerHTML = `${icon('library')}<span>${escapeHTML(t("管理游戏库"))}</span>`;
@@ -922,13 +933,13 @@
     heartbeatPresence();
     refreshNetwork();
     const epoch = state.profileEpoch;
-    Promise.allSettled([loadInterfaceSettings(), loadPlatforms(), loadGames(), refreshHealth(), refreshSession(), refreshMigration()]).then(() => {
+    Promise.allSettled([loadInterfaceSettings(), loadPlatforms(), loadLibrarySettings({preserveSort: state.recent || Boolean(linkedView && initial.has('sort'))}).then(() => { if (epoch === state.profileEpoch) return loadGames(); }), refreshHealth(), refreshSession(), refreshMigration()]).then(() => {
       if (epoch === state.profileEpoch && !document.querySelector('dialog[open]') && [document.body, $('profile-button')].includes(document.activeElement)) {
         // Focusing a card selects it. Keep an explicit link or restored selection,
         // including games whose card is beyond the first catalog page.
         const selectedCard = [...$('game-grid').querySelectorAll('.game-select')].find((button) => button.dataset.select === String(state.selected?.id));
-        const detailFocus = state.selected ? ($('launch-game')?.disabled ? $('profile-button') : $('launch-game')) : null;
-        (selectedCard || detailFocus || $('game-grid').querySelector('.game-select'))?.focus({preventScroll: true});
+        const detailFocus = state.selected && state.detailOpen ? ($('launch-game')?.disabled ? $('profile-button') : $('launch-game')) : null;
+        (state.detailOpen ? $('detail-back') : selectedCard || detailFocus || $('game-grid').querySelector('.game-select'))?.focus({preventScroll: true});
       }
     });
   }
@@ -985,7 +996,7 @@
     toastTimer = setTimeout(() => { $('toast').hidden = true; }, error ? 6500 : 3500);
   }
 
-  function updateURL() {
+  function updateURL(push = false) {
     const params = new URLSearchParams();
     if (state.profile) params.set('player', state.profile.id);
     if (state.platform) params.set('platform', state.platform);
@@ -994,9 +1005,12 @@
     if (state.reviewFilter) params.set('review_filter', state.reviewFilter);
     if (state.favorites) params.set('favorite', 'true');
     if (state.recent) params.set('recent', 'true');
+    if (state.sort !== 'default') params.set('sort', state.sort);
+    params.set('direction', state.direction);
+    if (state.detailOpen) params.set('view', 'detail');
     const gameId = state.playGameId || state.initialGame || state.selected?.id;
     if (gameId) params.set('game', gameId);
-    history.replaceState(null, '', `${location.pathname}${params.size ? '?' + params.toString() : ''}`);
+    history[push ? 'pushState' : 'replaceState']({...history.state, retroDetail: state.detailOpen, detailFromLibrary: state.detailOpen && (push || Boolean(history.state?.detailFromLibrary)), listScroll: state.listScroll, listSelection: state.listSelection}, '', `${location.pathname}${params.size ? '?' + params.toString() : ''}`);
   }
 
   function renderFilters() {
@@ -1023,15 +1037,90 @@
     count.textContent = state.loading ? t("正在查找…") : t("{value1} 款", {value1: number(state.total)});
     $('library-title').append(count);
     $('section-eyebrow').textContent = state.favorites ? 'YOUR FAVORITES' : state.recent ? 'RECENTLY PLAYED' : 'THE COLLECTION';
-    document.title = `${state.favorites ? t("我的收藏") : state.recent ? t("最近游玩") : (platform && platformName(platform.id, platform.name)) || t("私人游戏馆")} · RetroOne`;
+    document.title = state.detailOpen && state.selected ? `${state.selected.title} · RetroOne` : `${state.favorites ? t("我的收藏") : state.recent ? t("最近游玩") : (platform && platformName(platform.id, platform.name)) || t("私人游戏馆")} · RetroOne`;
   }
 
+  const librarySortLabels = localizedLabels({default: '默认顺序', popularity: '大众热度', release_date: '发行日期', added_at: '加入时间', play_count: '我的游玩次数', last_played: '最近游玩时间', name: '游戏名称'});
+  function renderLibrarySort() {
+    $('library-sort').innerHTML = Library.sorts.map(id => `<option value="${id}">${escapeHTML(librarySortLabels[id])}</option>`).join('');
+    $('library-sort').value = state.sort;
+    $('library-sort').disabled = state.librarySaving;
+    $('sort-direction').disabled = state.librarySaving || state.sort === 'default';
+    $('sort-direction').textContent = state.direction === 'asc' ? t('升序 ↑') : t('降序 ↓');
+    $('sort-direction').setAttribute('aria-label', t('排序方向：{value1}', {value1: state.direction === 'asc' ? t('升序') : t('降序')}));
+    $('sort-note').textContent = state.sort === 'popularity' ? t('按有出处的公开热度排序；没有热度资料的游戏按名称排在后面。') : state.sort === 'play_count' ? t('记录这个玩家的启动次数；尚未开始记录的历史次数无法补算。') : state.sort === 'added_at' ? t('按首次入库时间排序；早期未记录日期的游戏排在后面。') : state.sort === 'release_date' ? t('缺少发行日期的游戏排在后面。') : '';
+  }
+  async function loadLibrarySettings({preserveSort = false} = {}) {
+    const epoch = state.profileEpoch, request = ++state.librarySettingsRequest;
+    try {
+      const result = await api('/api/settings/library', {timeoutMs: 6000});
+      if (epoch !== state.profileEpoch || request !== state.librarySettingsRequest) return;
+      if (!result.settings || !Array.isArray(result.settings.pinned_platforms)) throw interfaceError('游戏库偏好返回不完整。');
+      state.librarySettings = Library.settings(result.settings); state.libraryFresh = true;
+      if (!preserveSort) { state.sort = state.librarySettings.sort; state.direction = state.librarySettings.direction; }
+    } catch (error) {
+      if (epoch !== state.profileEpoch || request !== state.librarySettingsRequest || error.name === 'AbortError') return;
+      state.libraryFresh = false; notify(t('未能读取游戏库偏好：{message}', {message: errorMessage(error)}), true);
+    }
+    renderLibrarySort(); renderPlatforms();
+    if ($('platform-dialog').open) renderPlatformChooser();
+  }
+  async function saveLibrarySettings(changes) {
+    if (!state.profile || state.librarySaving) return false;
+    const enteredEpoch = state.profileEpoch;
+    if (!state.libraryFresh) {
+      await loadLibrarySettings({preserveSort: true});
+      if (enteredEpoch !== state.profileEpoch || !state.libraryFresh) return false;
+    }
+    const epoch = state.profileEpoch, request = ++state.librarySettingsRequest, previous = state.librarySettings;
+    const settings = Library.settings({...previous, ...changes});
+    state.librarySaving = true; renderLibrarySort(); if ($('platform-dialog').open) renderPlatformChooser();
+    try {
+      const result = await api('/api/settings/library', {method: 'PUT', body: JSON.stringify(settings), timeoutMs: 6000});
+      if (epoch !== state.profileEpoch || request !== state.librarySettingsRequest) return false;
+      if (!result.settings) throw interfaceError('游戏库偏好返回不完整。');
+      state.librarySettings = Library.settings(result.settings);
+      if (Object.hasOwn(changes, 'sort')) state.sort = state.librarySettings.sort;
+      if (Object.hasOwn(changes, 'direction')) state.direction = state.librarySettings.direction;
+      return true;
+    } catch (error) {
+      if (epoch === state.profileEpoch && request === state.librarySettingsRequest) notify(t('未能保存游戏库偏好：{message}', {message: errorMessage(error)}), true);
+      return false;
+    } finally {
+      if (epoch === state.profileEpoch && request === state.librarySettingsRequest) {
+        state.librarySaving = false; renderLibrarySort(); renderPlatforms();
+        if ($('platform-dialog').open) renderPlatformChooser();
+      }
+    }
+  }
+  async function changeLibrarySort(sort, direction) {
+    if (await saveLibrarySettings({sort, direction})) setFilter({sort: state.sort, direction: state.direction});
+  }
+  function visiblePlatforms() { return Library.platforms(state.platforms, state.librarySettings.pinned_platforms, state.platform); }
   function renderPlatforms() {
     const total = state.platforms.reduce((sum, platform) => sum + (Number(platform.count) || 0), 0);
-    const items = [{id: '', name: t("全部游戏"), count: total}, ...state.platforms];
-    $('platform-nav').innerHTML = items.map((platform) => `<button class="platform-button ${state.platform === platform.id ? 'is-active' : ''}" data-platform="${escapeHTML(platform.id)}" aria-pressed="${state.platform === platform.id}" title="${escapeHTML(t("{value1} · {value2} 款", {value1: platformName(platform.id, platform.name), value2: number(platform.count)}))}">${icon(platform.id ? platformIcon(platform.id) : 'library', 'platform-icon')}<span>${escapeHTML(platformName(platform.id, platform.name))}</span><small>${number(platform.count)}</small></button>`).join('');
-    $('stat-games').textContent = number(total);
-    $('stat-platforms').textContent = number(state.platforms.length);
+    const items = [{id: '', name: t('全部游戏'), count: total}, ...visiblePlatforms()];
+    $('platform-nav').innerHTML = items.map(platform => `<button class="platform-button ${state.platform === platform.id ? 'is-active' : ''}" data-platform="${escapeHTML(platform.id)}" aria-pressed="${state.platform === platform.id}" title="${escapeHTML(t('{value1} · {value2} 款', {value1: platformName(platform.id, platform.name), value2: number(platform.count)}))}">${platform.id ? Library.platformArt(platform.id) : icon('library', 'platform-art')}<span>${escapeHTML(platformName(platform.id, platform.name))}</span><small>${state.librarySettings.pinned_platforms.includes(platform.id) ? escapeHTML(t('已置顶')) + ' · ' : ''}${number(platform.count)}</small></button>`).join('');
+    $('stat-games').textContent = number(total); $('stat-platforms').textContent = number(state.platforms.length);
+  }
+  function renderPlatformChooser() {
+    const pins = state.librarySettings.pinned_platforms, query = $('platform-search').value.trim().toLocaleLowerCase();
+    const pinned = pins.map(id => state.platforms.find(item => item.id === id)).filter(Boolean);
+    $('pinned-platforms').innerHTML = pinned.length ? `<h3>${escapeHTML(t('置顶顺序'))}</h3><ol>${pinned.map((item, index) => `<li><span>${Library.platformArt(item.id)}${escapeHTML(platformName(item.id, item.name))}</span><button class="icon-button" data-pin-move="${escapeHTML(item.id)}" data-delta="-1" aria-label="${escapeHTML(t('将 {value1} 前移', {value1: platformName(item.id, item.name)}))}" ${index === 0 || state.librarySaving ? 'disabled' : ''}>↑</button><button class="icon-button" data-pin-move="${escapeHTML(item.id)}" data-delta="1" aria-label="${escapeHTML(t('将 {value1} 后移', {value1: platformName(item.id, item.name)}))}" ${index === pinned.length - 1 || state.librarySaving ? 'disabled' : ''}>↓</button><button class="text-button" data-pin="${escapeHTML(item.id)}" ${state.librarySaving ? 'disabled' : ''}>${escapeHTML(t('取消置顶'))}</button></li>`).join('')}</ol>` : `<p class="platform-empty-pins">${escapeHTML(t('把常玩的平台置顶，首页也会显示最近玩过的平台。'))}</p>`;
+    const matches = state.platforms.filter(item => [item.id, item.name, platformName(item.id, item.name)].join(' ').toLocaleLowerCase().includes(query));
+    $('platform-choices').innerHTML = matches.length ? matches.map(item => `<div class="platform-choice ${pins.includes(item.id) ? 'is-pinned' : ''}"><button data-choose-platform="${escapeHTML(item.id)}" class="platform-choice-main">${Library.platformArt(item.id)}<span><strong>${escapeHTML(platformName(item.id, item.name))}</strong><small>${escapeHTML(t('{value1} 款', {value1: number(item.count)}))}</small></span></button><button class="icon-button" data-pin="${escapeHTML(item.id)}" aria-pressed="${pins.includes(item.id)}" aria-label="${escapeHTML((pins.includes(item.id) ? t('取消置顶') : t('置顶平台')) + ' ' + platformName(item.id, item.name))}" ${state.librarySaving ? 'disabled' : ''}>${icon('pin')}</button></div>`).join('') : `<p>${escapeHTML(t('没有找到这个平台。'))}</p>`;
+    $('platform-save-note').textContent = state.librarySaving ? t('正在保存…') : !state.libraryFresh ? t('偏好暂未读取成功，操作时会重试。') : t('已与当前玩家同步');
+  }
+  function openPlatforms() { renderPlatformChooser(); $('platform-dialog').showModal(); syncModalBody(); $('platform-search').focus(); }
+  function closePlatforms() { $('platform-dialog').close(); syncModalBody(); $('choose-platforms').focus({preventScroll: true}); }
+  async function changePlatformPin(id, delta = 0) {
+    if (state.librarySaving) return;
+    const pins = [...state.librarySettings.pinned_platforms], index = pins.indexOf(id);
+    if (delta && index >= 0) { const next = Math.max(0, Math.min(pins.length - 1, index + delta)); [pins[index], pins[next]] = [pins[next], pins[index]]; }
+    else if (index >= 0) pins.splice(index, 1); else pins.push(id);
+    const focused = document.activeElement, attr = delta ? 'data-pin-move' : 'data-pin';
+    await saveLibrarySettings({pinned_platforms: pins});
+    if (!focused?.isConnected && $('platform-dialog').open) [...$('platform-dialog').querySelectorAll(`[${attr}]`)].find(button => button.getAttribute(attr) === id && (!delta || button.dataset.delta === String(delta)) && !button.disabled)?.focus({preventScroll: true});
   }
 
   function fallbackCover(game) {
@@ -1040,7 +1129,7 @@
 
   function cover(game, detail = false) {
     const url = localURL(game.cover_url);
-    return url ? `<img src="${escapeHTML(url)}" alt="${escapeHTML(detail ? t('《{title}》游戏封面', {title: game.title}) : '')}" loading="${detail ? 'eager' : 'lazy'}" decoding="async" data-cover-id="${escapeHTML(game.id)}">` : fallbackCover(game);
+    return url ? `<span class="cover-image">${fallbackCover(game)}<img src="${escapeHTML(url)}" alt="${escapeHTML(detail ? t('《{title}》游戏封面', {title: game.title}) : '')}" loading="${detail ? 'eager' : 'lazy'}" decoding="async" data-cover-id="${escapeHTML(game.id)}"></span>` : fallbackCover(game);
   }
 
   function reviewStatus(game) {
@@ -1111,7 +1200,11 @@
 
   function bindImageErrors(root) {
     root.querySelectorAll('img[data-cover-id]').forEach((img) => {
+      const loaded = () => { if (img.parentElement?.classList.contains('cover-image')) img.parentElement.dataset.loaded = 'true'; };
+      img.addEventListener('load', loaded, {once: true});
+      if (img.complete && img.naturalWidth) loaded();
       img.addEventListener('error', () => {
+        if (img.parentElement?.classList.contains('cover-image')) { img.remove(); return; }
         const game = state.games.find((item) => String(item.id) === img.dataset.coverId) || state.selected;
         if (!game) { img.remove(); return; }
         const fallback = document.createElement('span');
@@ -1153,16 +1246,44 @@
     $('empty-action').textContent = kind === 'error' ? t("重新加载") : filtered ? t("清除筛选") : state.favorites || state.recent ? t("浏览游戏库") : t("更新游戏库");
   }
 
+  function detailFacts(game) {
+    const data = game.details || {}, facts = [];
+    const list = value => Array.isArray(value) ? value.filter(item => typeof item === 'string').join(' / ') : typeof value === 'string' || typeof value === 'number' ? String(value) : '';
+    const add = (label, value) => { if (value !== undefined && value !== null && String(value).trim()) facts.push(`<div><dt>${escapeHTML(label)}</dt><dd>${escapeHTML(value)}</dd></div>`); };
+    add(t('发行日期'), data.release_date); add(t('发行商'), list(data.publisher)); add(t('开发商'), list(data.developer));
+    add(t('类型'), list(data.genres)); add(t('玩家人数'), list(data.players)); add(t('语言'), list(data.languages));
+    const added = game.added_at || game.first_added_at;
+    if (Number.isFinite(added) && added > 0) add(t('加入游戏库'), I18n.date(new Date(added * 1000), {dateStyle: 'medium'}));
+    if (Number.isSafeInteger(game.play_count)) add(t('已记录游玩次数'), t('{value1} 次', {value1: number(game.play_count)}));
+    add(t('运行方式'), modeLabels[game.mode] || modeLabels.unavailable); add(t('游戏大小'), formatSize(game.unpacked_size ?? game.size));
+    if (game.collection) add(t('来自收藏'), game.collection);
+    if (duplicateCount(game)) add(t('相同内容副本'), t('{value1} 份（含当前）', {value1: number(duplicateCount(game))}));
+    return facts.join('');
+  }
+  function detailPopularity(game) {
+    const metric = game.details?.popularity;
+    const url = Library.secureURL(metric?.url);
+    if (!metric || !url || typeof metric.source !== 'string' || !Number.isFinite(metric.score)) return '';
+    const unit = {million_copies: t('百万份'), sales_rank: t('销售排名'), copies: t('份'), rating: t('评分')}[metric.unit] || (typeof metric.unit === 'string' ? metric.unit : '');
+    const value = Number.isFinite(metric.value) ? `${number(metric.value)} ${unit}`.trim() : '';
+    return `<p class="detail-popularity">${icon('info')}<span>${escapeHTML(t('公开热度参考'))}${value ? ` · <strong>${escapeHTML(value)}</strong>` : ''} · <a href="${escapeHTML(url)}" target="_blank" rel="noopener noreferrer">${escapeHTML(metric.source)}</a>${typeof metric.as_of === 'string' ? ` · ${escapeHTML(metric.as_of)}` : ''}</span></p>`;
+  }
   function renderDetail(game) {
+    if (!state.detailOpen) { $('game-detail').replaceChildren(); renderDetailPage(); return; }
     if (!game) {
-      $('game-detail').innerHTML = `<div class="detail-placeholder">${icon('controller', 'detail-placeholder-icon')}<p>${escapeHTML(t("把回忆握在手里"))}</p><span>${escapeHTML(t("选择一款游戏，查看详情。"))}</span></div>`;
-      return;
+      $('game-detail').innerHTML = `<div class="detail-placeholder">${icon('controller', 'detail-placeholder-icon')}<p>${escapeHTML(t('选择一款游戏，查看详情。'))}</p><span>${escapeHTML(state.loading ? t('正在载入…') : t('这款游戏暂时无法读取，请返回游戏库重试。'))}</span></div>`;
+      renderDetailPage(); return;
     }
     const mode = modeLabels[game.mode] ? game.mode : 'unavailable';
-    const videoURL = localURL(game.video_url);
-    const size = game.unpacked_size ?? game.size;
-    $('game-detail').innerHTML = `<div class="detail-eyebrow"><p class="eyebrow">IN YOUR COLLECTION</p><span>${escapeHTML(game.favorite ? t("已收藏") : t("游戏详情"))}</span></div><div class="detail-cover">${cover(game, true)}</div><p class="detail-platform">${escapeHTML(platformName(game.platform, game.platform_name))}</p><h2 class="detail-title">${escapeHTML(game.title)}</h2>${variantTags(game)}<div class="detail-actions"><button class="button detail-launch" id="launch-game" ${mode === 'unavailable' ? 'disabled' : ''}>${icon(mode === 'unavailable' ? 'info' : 'play')}${escapeHTML(mode === 'unavailable' ? t("等待配置") : mode === 'stream' ? t("开始云端游戏") : t("开始游戏"))}</button><button class="icon-button detail-favorite ${game.favorite ? 'is-favorite' : ''}" id="detail-favorite" aria-label="${escapeHTML(game.favorite ? t("取消收藏") : t("收藏"))} ${escapeHTML(game.title)}" aria-pressed="${Boolean(game.favorite)}" ${state.favoritePending.has(game.id) ? 'disabled' : ''}>${icon('star')}</button></div><p class="detail-note">${escapeHTML(mode === 'browser' ? t("在当前设备运行 · 进度可在模拟器中保存") : mode === 'stream' ? t("服务器运行 · 游戏镜像无需下载到本机") : t("保留在游戏库中，补齐环境后即可尝试启动"))}</p>${game.description ? `<p class="detail-description">${escapeHTML(game.description)}</p>` : ''}${videoURL ? `<button class="button button-secondary video-toggle" id="preview-video">${icon('play')}${escapeHTML(t("观看游戏预览"))}</button><video class="detail-video" id="detail-video" src="${escapeHTML(videoURL)}" controls preload="none" playsinline hidden></video>` : ''}<dl class="detail-facts"><div><dt>${escapeHTML(t("运行方式"))}</dt><dd>${escapeHTML(modeLabels[mode])}</dd></div><div><dt>${escapeHTML(t("游戏大小"))}</dt><dd>${formatSize(size)}</dd></div>${game.collection ? `<div><dt>${escapeHTML(t("来自收藏"))}</dt><dd>${escapeHTML(game.collection)}</dd></div>` : ''}${duplicateCount(game) ? `<div><dt>${escapeHTML(t("相同内容副本"))}</dt><dd>${escapeHTML(t("{value1} 份（含当前）", {value1: number(duplicateCount(game))}))}</dd></div>` : ''}</dl>${launchConfigDetails(game)}${reviewDetails(game)}${game.reason ? `<p class="detail-reason">${icon('info')}${escapeHTML(diagnostic(game.reason))}</p>` : ''}`;
+    const videoURL = localURL(game.video_url), data = game.details || {};
+    const screenshots = (Array.isArray(data.screenshots) ? data.screenshots : []).map(Library.imageURL).filter(Boolean).slice(0, 12);
+    const official = Library.secureURL(data.official_url);
+    const sources = (Array.isArray(data.sources) ? data.sources : []).filter(source => source && typeof source.name === 'string' && Library.secureURL(source.url));
+    const description = typeof data.description === 'string' && data.description || game.description;
+    $('game-detail').innerHTML = `<div class="detail-hero"><div class="detail-cover">${cover(game, true)}</div><div class="detail-introduction"><div class="detail-eyebrow"><p class="eyebrow">IN YOUR COLLECTION</p><span>${escapeHTML(game.favorite ? t('已收藏') : t('游戏详情'))}</span></div><p class="detail-platform">${Library.platformArt(game.platform)}${escapeHTML(platformName(game.platform, game.platform_name))}</p><h1 class="detail-title">${escapeHTML(game.title)}</h1>${variantTags(game)}${detailPopularity(game)}<div class="detail-actions"><button class="button detail-launch" id="launch-game" ${mode === 'unavailable' ? 'disabled' : ''}>${icon(mode === 'unavailable' ? 'info' : 'play')}${escapeHTML(mode === 'unavailable' ? t('等待配置') : mode === 'stream' ? t('开始云端游戏') : t('开始游戏'))}</button><button class="icon-button detail-favorite ${game.favorite ? 'is-favorite' : ''}" id="detail-favorite" aria-label="${escapeHTML(game.favorite ? t('取消收藏') : t('收藏'))} ${escapeHTML(game.title)}" aria-pressed="${Boolean(game.favorite)}" ${state.favoritePending.has(game.id) ? 'disabled' : ''}>${icon('star')}</button></div><p class="detail-note">${escapeHTML(mode === 'browser' ? t('在当前设备运行 · 进度可在模拟器中保存') : mode === 'stream' ? t('服务器运行 · 游戏镜像无需下载到本机') : t('保留在游戏库中，补齐环境后即可尝试启动'))}</p>${game.reason ? `<p class="detail-reason">${icon('info')}${escapeHTML(diagnostic(game.reason))}</p>` : ''}${official ? `<a class="button button-secondary official-link" href="${escapeHTML(official)}" target="_blank" rel="noopener noreferrer">${escapeHTML(t('访问官方页面'))}${icon('arrow')}</a>` : ''}</div></div><div class="detail-body"><section class="detail-about"><h2>${escapeHTML(t('关于这款游戏'))}</h2>${description ? `<p class="detail-description">${escapeHTML(description)}</p>` : `<p class="detail-missing">${escapeHTML(t('暂时没有可靠的游戏介绍，后续补充资料后会显示在这里。'))}</p>`}${videoURL ? `<button class="button button-secondary video-toggle" id="preview-video">${icon('play')}${escapeHTML(t('观看游戏预览'))}</button><video class="detail-video" id="detail-video" src="${escapeHTML(videoURL)}" controls preload="none" playsinline hidden></video>` : ''}${screenshots.length ? `<h2>${escapeHTML(t('游戏画面'))}</h2><div class="detail-screenshots">${screenshots.map((url, index) => `<a href="${escapeHTML(url)}" target="_blank" rel="noopener noreferrer" aria-label="${escapeHTML(t('查看游戏画面 {value1}', {value1: index + 1}))}"><img src="${escapeHTML(url)}" alt="${escapeHTML(t('《{value1}》游戏画面 {value2}', {value1: game.title, value2: index + 1}))}" loading="lazy" decoding="async" crossorigin="anonymous" referrerpolicy="no-referrer"></a>`).join('')}</div>` : ''}${sources.length ? `<p class="detail-sources">${escapeHTML(t('资料来源'))} · ${sources.map(source => `<a href="${escapeHTML(Library.secureURL(source.url))}" target="_blank" rel="noopener noreferrer">${escapeHTML(source.name)}</a>`).join(' · ')}</p>` : ''}</section><section class="detail-information"><h2>${escapeHTML(t('游戏资料'))}</h2><dl class="detail-facts">${detailFacts(game)}</dl></section></div><details class="detail-technical"><summary>${escapeHTML(t('版本、文件与运行检查'))}</summary>${launchConfigDetails(game)}${reviewDetails(game)}</details>`;
+    renderDetailPage();
     bindImageErrors($('game-detail'));
+    $('game-detail').querySelectorAll('.detail-screenshots img').forEach(img => img.addEventListener('error', () => { const label = document.createElement('span'); label.className = 'screenshot-unavailable'; label.textContent = t('暂时无法载入这张画面'); img.replaceWith(label); }, {once: true}));
     updateLaunchButton();
     $('launch-game').addEventListener('click', () => launchGame(game));
     $('detail-favorite').addEventListener('click', () => toggleFavorite(game.id));
@@ -1182,6 +1303,87 @@
     });
   }
 
+  function renderDetailPage() {
+    $('detail-page').hidden = !state.detailOpen;
+    $('library').hidden = state.detailOpen;
+    document.querySelector('.console-bar').hidden = state.detailOpen;
+    document.body.classList.toggle('has-game-detail', state.detailOpen);
+    if (state.detailOpen && state.selected) document.title = `${state.selected.title} · RetroOne`;
+    const neighbors = state.detailNeighbors;
+    $('detail-previous').disabled = state.detailPaging || !neighbors?.previous_id;
+    $('detail-next').disabled = state.detailPaging || !neighbors?.next_id;
+    $('detail-position').textContent = neighbors && Number.isInteger(neighbors.index) ? t('当前列表 · {value1} / {value2}', {value1: number(neighbors.index + 1), value2: number(neighbors.total)}) : state.detailOpen ? t('按当前筛选顺序浏览') : '';
+  }
+  function detailQuery() {
+    const params = new URLSearchParams({direction: state.direction});
+    for (const [key, value] of Object.entries({platform: state.platform, q: state.query, mode: state.mode, review_filter: state.reviewFilter})) if (value) params.set(key, value);
+    if (state.favorites) params.set('favorite', 'true'); if (state.recent) params.set('recent', 'true');
+    if (state.sort !== 'default') params.set('sort', state.sort);
+    return params;
+  }
+  async function refreshDetailNeighbors() {
+    const id = state.selected?.id, epoch = state.profileEpoch, query = detailQuery().toString();
+    state.detailNeighbors = null; renderDetailPage();
+    if (!id || !state.detailOpen) return;
+    try {
+      const result = await api(`/api/games/${encodeURIComponent(id)}/neighbors?${query}`, {timeoutMs: 10000});
+      if (epoch !== state.profileEpoch || state.selected?.id !== id || !state.detailOpen || query !== detailQuery().toString()) return;
+      state.detailNeighbors = result; renderDetailPage();
+    } catch (error) {
+      if (epoch === state.profileEpoch && state.selected?.id === id && state.detailOpen && error.name !== 'AbortError') {
+        $('detail-position').textContent = t('暂时无法读取相邻游戏，请重新打开详情重试。');
+      }
+    }
+  }
+  async function openGameDetail(id, {push = true} = {}) {
+    if (!state.profile) return;
+    if (!state.detailOpen) {
+      state.listScroll = window.scrollY; state.listSelection = state.selected?.id || id;
+      updateURL(); state.detailOpen = true;
+      state.selected = state.games.find(game => game.id === id) || state.selected;
+      updateURL(push);
+    }
+    state.detailNeighbors = null; renderDetailPage();
+    let game = state.games.find(item => item.id === id);
+    if (!game) {
+      const epoch = state.profileEpoch, request = ++state.detailRequest;
+      try { game = await api(`/api/games/${encodeURIComponent(id)}`); }
+      catch (error) { if (epoch === state.profileEpoch && error.name !== 'AbortError') notify(errorMessage(error), true); return; }
+      if (epoch !== state.profileEpoch || request !== state.detailRequest || !state.detailOpen) return;
+      state.selected = game; renderDetail(game); updateURL();
+    } else await selectGame(id, {refresh: true});
+    if (!state.detailOpen) return;
+    refreshDetailNeighbors(); window.scrollTo({top: 0, behavior: 'instant'}); $('detail-back').focus({preventScroll: true});
+  }
+  function restoreLibraryPosition() {
+    requestAnimationFrame(() => {
+      const id = state.listSelection || history.state?.listSelection || state.selected?.id;
+      const button = [...$('game-grid').querySelectorAll('[data-select]')].find(item => item.dataset.select === id);
+      button?.focus({preventScroll: true});
+      window.scrollTo({top: state.listScroll || history.state?.listScroll || 0, behavior: 'instant'});
+    });
+  }
+  function closeGameDetail() {
+    if (!state.detailOpen) return;
+    state.detailOpen = false; state.detailNeighbors = null; state.detailRequest++;
+    $('detail-video')?.pause();
+    if (history.state?.detailFromLibrary) { history.back(); return; }
+    renderDetailPage(); renderFilters(); updateURL(); restoreLibraryPosition();
+  }
+  async function stepGameDetail(delta) {
+    const id = delta < 0 ? state.detailNeighbors?.previous_id : state.detailNeighbors?.next_id;
+    if (!id || state.detailPaging) return;
+    const epoch = state.profileEpoch;
+    state.detailPaging = true; renderDetailPage();
+    try { await openGameDetail(id, {push: false}); }
+    finally { if (epoch === state.profileEpoch) { state.detailPaging = false; renderDetailPage(); } }
+  }
+  function focusDetailNeighbor(direction) {
+    const controls = [...$('detail-page').querySelectorAll('button, a, summary')].filter(element => !element.disabled && element.getClientRects().length);
+    const index = controls.indexOf(document.activeElement), step = direction === 'left' || direction === 'up' ? -1 : 1;
+    controls[(index + step + controls.length) % controls.length]?.focus();
+  }
+
   async function selectGame(id, options = {}) {
     const game = state.games.find((item) => String(item.id) === String(id));
     if (!game) return;
@@ -1194,8 +1396,7 @@
     });
     if (changed || options.refresh) renderDetail(game);
     updateURL();
-    if (options.scroll && matchMedia('(max-width: 650px)').matches) $('game-detail').scrollIntoView({behavior: 'smooth', block: 'start'});
-    if (options.focus) $('launch-game')?.focus({preventScroll: !options.scroll});
+    if (options.focus && state.detailOpen) $('detail-back').focus({preventScroll: true});
     if (options.refresh) {
       const request = ++state.detailRequest;
       try {
@@ -1213,7 +1414,7 @@
 
   async function loadGames(append = false, {preserveSelection = false} = {}) {
     if (append && state.loading) return;
-    const keepSelection = preserveSelection || Boolean(state.playMode);
+    const keepSelection = preserveSelection || Boolean(state.playMode) || state.detailOpen;
     state.controller?.abort();
     const controller = new AbortController(); state.controller = controller;
     const request = ++state.request; state.loading = true;
@@ -1228,6 +1429,8 @@
     if (state.reviewFilter) params.set('review_filter', state.reviewFilter);
     if (state.favorites) params.set('favorite', 'true');
     if (state.recent) params.set('recent', 'true');
+    if (state.sort !== 'default') params.set('sort', state.sort);
+    params.set('direction', state.direction);
     try {
       const result = await api(`/api/games?${params}`, {signal: controller.signal});
       if (request !== state.request) return;
@@ -1244,9 +1447,10 @@
       }
       if (request !== state.request) return;
       state.initialGame = null;
-      state.selected = selection || (keepSelection ? state.selected : null) || state.games[0] || null;
+      state.selected = requestedGameId && state.detailOpen ? selection || null : selection || (keepSelection ? state.selected : null) || state.games[0] || null;
       renderGames(append, start);
       if (!append) renderDetail(state.selected);
+      if (state.detailOpen && state.selected) refreshDetailNeighbors();
       updateURL();
     } catch (error) {
       if (error.name === 'AbortError' || request !== state.request) return;
@@ -1265,6 +1469,11 @@
   function setFilter(changes) {
     if (!state.profile) return;
     clearTimeout(searchTimer);
+    if (Object.hasOwn(changes, 'recent') && changes.recent !== state.recent && !Object.hasOwn(changes, 'sort')) {
+      changes.sort = changes.recent ? 'last_played' : state.librarySettings.sort;
+      changes.direction = changes.recent ? 'desc' : state.librarySettings.direction;
+    }
+    state.detailOpen = false; state.detailNeighbors = null; renderDetailPage();
     Object.assign(state, changes); state.reviewFilter = validReviewFilter(state.reviewFilter); updateURL(); renderFilters(); renderPlatforms(); loadGames();
   }
 
@@ -1583,8 +1792,9 @@
 
   function focusNeighbor(direction) {
     const active = document.activeElement;
-    if (active?.closest('.filter-bar')) {
-      const buttons = [...document.querySelectorAll('.filter-bar button')].filter((button) => !button.disabled && button.getClientRects().length);
+    if (state.detailOpen) { focusDetailNeighbor(direction); return; }
+    if (active?.closest('.filter-bar, .library-sort-row')) {
+      const buttons = [...document.querySelectorAll('.filter-bar button, .library-sort-row button, .library-sort-row select')].filter((button) => !button.disabled && button.getClientRects().length);
       const index = buttons.indexOf(active);
       if (direction === 'up') $('platform-nav').querySelector('.is-active')?.focus();
       else if (direction === 'down') ($('game-grid').querySelector('.game-select') || $('empty-action'))?.focus();
@@ -1630,7 +1840,7 @@
   }
 
   function cyclePlatform(delta) {
-    const ids = ['', ...state.platforms.map((platform) => platform.id)];
+    const ids = ['', ...visiblePlatforms().map(platform => platform.id)];
     const index = ids.indexOf(state.platform);
     const id = ids[(index + delta + ids.length) % ids.length];
     setFilter({platform: id});
@@ -1709,13 +1919,24 @@
           else if (directional) focusModalAction($('network-dialog'), key);
           else if (key === 'accept') document.activeElement?.click();
         }
+        else if ($('platform-dialog').open) {
+          if (key === 'back') closePlatforms();
+          else if (directional) focusModalAction($('platform-dialog'), key);
+          else if (key === 'accept') document.activeElement?.click();
+        }
+        else if (state.detailOpen && !state.playMode) {
+          if (key === 'back') closeGameDetail();
+          else if (key === 'prev' || key === 'next') stepGameDetail(key === 'prev' ? -1 : 1);
+          else if (directional) focusDetailNeighbor(key);
+          else if (key === 'accept') document.activeElement?.click();
+        }
         else if (window.RetroMobilePlayer?.isMenuOpen()) window.RetroMobilePlayer.navigate(key);
         else if (key === 'profiles') showProfiles();
         else if (directional) focusNeighbor(key);
         else if (key === 'accept') {
           const active = document.activeElement;
-          if (active?.matches('.game-select') && state.selected?.id === active.dataset.select) { $('launch-game')?.focus(); $('game-detail').scrollIntoView({block: 'nearest', behavior: 'smooth'}); }
-          else if (active?.matches('button, [data-language-picker]') && !active.disabled) activateFocused();
+          if (active?.matches('.game-select')) openGameDetail(active.dataset.select);
+          else if (active?.matches('button, select') && !active.disabled) activateFocused();
           else $('game-grid').querySelector('.game-select')?.focus();
         } else if (key === 'back') $('game-grid').querySelector('.is-selected .game-select')?.focus();
         else if (key === 'prev') cyclePlatform(-1);
@@ -1832,6 +2053,21 @@
   });
   $('profile-back-to-game').addEventListener('click', closeProfiles);
   $('profile-confirm-switch').addEventListener('click', () => { if (state.pendingProfile) applyProfile(state.pendingProfile); });
+  $('choose-platforms').addEventListener('click', openPlatforms);
+  $('close-platforms').addEventListener('click', closePlatforms);
+  $('platform-dialog').addEventListener('cancel', event => { event.preventDefault(); closePlatforms(); });
+  $('platform-search').addEventListener('input', renderPlatformChooser);
+  $('platform-dialog').addEventListener('click', event => {
+    const choose = event.target.closest('[data-choose-platform]'), pin = event.target.closest('[data-pin]'), move = event.target.closest('[data-pin-move]');
+    if (choose) { closePlatforms(); setFilter({platform: choose.dataset.choosePlatform}); }
+    else if (pin) changePlatformPin(pin.dataset.pin);
+    else if (move) changePlatformPin(move.dataset.pinMove, Number(move.dataset.delta));
+  });
+  $('library-sort').addEventListener('change', event => changeLibrarySort(event.target.value, event.target.value === 'name' ? 'asc' : 'desc'));
+  $('sort-direction').addEventListener('click', () => changeLibrarySort(state.sort, state.direction === 'asc' ? 'desc' : 'asc'));
+  $('detail-back').addEventListener('click', closeGameDetail);
+  $('detail-previous').addEventListener('click', () => stepGameDetail(-1));
+  $('detail-next').addEventListener('click', () => stepGameDetail(1));
   $('recent-filter').addEventListener('click', () => setFilter({recent: !state.recent, favorites: false}));
   $('review-filter').addEventListener('click', () => {
     const filters = Object.keys(reviewFilters);
@@ -1855,7 +2091,7 @@
     const favorite = event.target.closest('[data-favorite]');
     if (favorite) { toggleFavorite(favorite.dataset.favorite); return; }
     const button = event.target.closest('[data-select]');
-    if (button) selectGame(button.dataset.select, {scroll: true, refresh: true, focus: event.detail === 0});
+    if (button) openGameDetail(button.dataset.select);
   });
   $('game-grid').addEventListener('focusin', (event) => {
     const button = event.target.closest('[data-select]');
@@ -1943,6 +2179,15 @@
       return;
     }
 
+    if ($('platform-dialog').open) {
+      if (event.key === 'Escape') { event.preventDefault(); closePlatforms(); }
+      else if (!typing) { const direction = {ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down', KeyA: 'left', KeyD: 'right', KeyW: 'up', KeyS: 'down'}[event.code]; if (direction) { event.preventDefault(); focusModalAction($('platform-dialog'), direction); } }
+      return;
+    }
+    if (state.detailOpen && !typing) {
+      if (event.key === 'Escape') { event.preventDefault(); closeGameDetail(); return; }
+      if (['[', ']', 'PageUp', 'PageDown'].includes(event.key)) { event.preventDefault(); stepGameDetail(['[', 'PageUp'].includes(event.key) ? -1 : 1); return; }
+    }
     if (event.key === '/' && !typing) { event.preventDefault(); $('search').focus(); return; }
     if (event.key === 'Escape' && typing) { event.target.blur(); return; }
     if (typing) return;
@@ -1958,9 +2203,15 @@
   document.addEventListener('visibilitychange', () => { if (!document.hidden) { if (state.profile) { refreshHealth(); refreshSession(); refreshMigration(); heartbeatPresence(); } loadProfiles({silent: true}); startGamepads(); } else leavePresence(state.profile, true); });
   window.addEventListener('online', () => { if (!state.profile) { loadProfiles(); return; } heartbeatPresence(); refreshHealth(); refreshSession(); if (!state.games.length) loadGames(); });
   window.addEventListener('offline', () => { state.connectionStatus = 'error'; $('health-detail').textContent = t("网络已断开"); notify(t("网络已断开"), true); state.presenceStale = true; renderFamilyPresence(); });
-  window.addEventListener('popstate', () => {
-    const params = new URLSearchParams(location.search);
-    setFilter({platform: params.get('platform') || '', query: params.get('q') || '', mode: params.get('mode') || '', reviewFilter: validReviewFilter(params.get('review_filter')), favorites: params.get('favorite') === 'true', recent: params.get('recent') === 'true'});
+  window.addEventListener('popstate', async () => {
+    const params = new URLSearchParams(location.search), detail = params.get('view') === 'detail';
+    const changes = {platform: params.get('platform') || '', query: params.get('q') || '', mode: params.get('mode') || '', reviewFilter: validReviewFilter(params.get('review_filter')), favorites: params.get('favorite') === 'true', recent: params.get('recent') === 'true', sort: Library.sorts.includes(params.get('sort')) ? params.get('sort') : params.get('recent') === 'true' ? 'last_played' : 'popularity', direction: params.get('direction') === 'asc' ? 'asc' : 'desc'};
+    const changed = Object.keys(changes).some(key => state[key] !== changes[key]);
+    Object.assign(state, changes, {detailOpen: detail, initialGame: params.get('game'), detailNeighbors: null});
+    renderDetailPage(); renderFilters(); renderPlatforms(); renderLibrarySort();
+    if (changed || detail && state.selected?.id !== params.get('game')) await loadGames(false, {preserveSelection: true});
+    else { state.initialGame = null; if (detail) { renderDetail(state.selected); refreshDetailNeighbors(); } }
+    if (!detail) restoreLibraryPosition();
   });
   function updateClock() { const now = new Date(); $('clock').textContent = I18n.date(now, {hour: '2-digit', minute: '2-digit', hour12: false}); $('clock').dateTime = now.toISOString(); }
   updateClock(); setInterval(updateClock, 30000);

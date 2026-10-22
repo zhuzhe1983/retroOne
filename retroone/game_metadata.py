@@ -21,6 +21,9 @@ from pathlib import Path
 import re
 import sqlite3
 import stat
+import time
+
+from .game_details import validate_details
 
 
 SCHEMA_VERSION = 1
@@ -156,6 +159,15 @@ class GameMetadataStore:
                 raise GameMetadataError('metadata_schema_error', '共享游戏资料版本不支持；原数据库已保留', 503)
             self._revision(db)
             db.execute('SELECT game_id,generated,overrides,revision FROM game_metadata LIMIT 0')
+            # Optional additive extension: v1 workers can keep reading/writing
+            # their original tables without losing these richer shared facts.
+            db.execute('CREATE TABLE IF NOT EXISTS game_details (game_id TEXT PRIMARY KEY, details TEXT NOT NULL, first_added_at REAL)')
+            columns = {row['name']: row for row in db.execute('PRAGMA table_info(game_details)')}
+            if (set(columns) != {'game_id', 'details', 'first_added_at'} or
+                    columns['game_id']['type'].upper() != 'TEXT' or columns['game_id']['pk'] != 1 or
+                    columns['details']['type'].upper() != 'TEXT' or columns['details']['notnull'] != 1 or
+                    columns['first_added_at']['type'].upper() != 'REAL'):
+                raise GameMetadataError('metadata_schema_error', '游戏详情扩展表版本不支持；原数据库已保留', 503)
 
     @staticmethod
     def _revision(db):
@@ -219,10 +231,22 @@ class GameMetadataStore:
         except (ValueError, TypeError, KeyError, GameMetadataError) as error:
             raise GameMetadataError('metadata_corrupt', '游戏资料记录损坏；原数据库已保留', 503) from error
 
+    @staticmethod
+    def _facts(row):
+        try:
+            details = validate_details(json.loads(row['details']))
+            added = row['first_added_at']
+            if added is not None and (type(added) not in (int, float) or not 0 < added < 1e12):
+                raise ValueError('invalid first added date')
+            return {'details': details, 'first_added_at': added}
+        except (TypeError, ValueError, KeyError) as error:
+            raise GameMetadataError('metadata_corrupt', '游戏详情记录损坏；原数据库已保留', 503) from error
+
     def _effective(self, row):
         generated, overrides = self._decode(row)
         return {'id': row['game_id'], **generated, **overrides,
-                'media': {kind: str(self.rom_root / reference) for kind, reference in generated['media'].items()}}
+                'media': {kind: str(self.rom_root / reference) for kind, reference in generated['media'].items()},
+                **(self._facts(row) if 'details' in row.keys() else {})}
 
     def _summary(self, row):
         generated, overrides = self._decode(row)
@@ -243,6 +267,7 @@ class GameMetadataStore:
         with self._connect(write=True) as db:
             previous = self._revision(db)
             changed = False
+            added_at = time.time()
             for game in games:
                 if not isinstance(game, dict):
                     raise GameMetadataError('invalid_metadata', '游戏资料必须是对象', 422)
@@ -257,6 +282,7 @@ class GameMetadataStore:
                     continue
                 if row is None:
                     db.execute('INSERT INTO game_metadata VALUES (?,?,?,?)', (identifier, generated, '{}', previous + 1))
+                    db.execute("INSERT OR IGNORE INTO game_details VALUES (?,'{}',?)", (identifier, None if only_missing else added_at))
                 else:
                     db.execute('UPDATE game_metadata SET generated=?,revision=? WHERE game_id=?', (generated, previous + 1, identifier))
                 changed = True
@@ -279,7 +305,7 @@ class GameMetadataStore:
         with self._connect() as db:
             current = self._revision(db)
             since = 0 if revision <= 0 or revision > current else revision
-            rows = db.execute('SELECT * FROM game_metadata WHERE revision>? ORDER BY game_id', (since,))
+            rows = db.execute("SELECT m.*,coalesce(d.details,'{}') details,d.first_added_at FROM game_metadata m LEFT JOIN game_details d USING(game_id) WHERE m.revision>? ORDER BY game_id", (since,))
             return current, [self._effective(row) for row in rows]
 
     def apply(self, game):
@@ -287,11 +313,23 @@ class GameMetadataStore:
         identifier = _identifier(game.get('id'))
         result = copy.deepcopy(game)
         with self._connect() as db:
-            row = db.execute('SELECT * FROM game_metadata WHERE game_id=?', (identifier,)).fetchone()
+            row = db.execute("SELECT m.*,coalesce(d.details,'{}') details,d.first_added_at FROM game_metadata m LEFT JOIN game_details d USING(game_id) WHERE game_id=?", (identifier,)).fetchone()
             if row is not None:
                 effective = self._effective(row)
-                result.update({key: effective[key] for key in (*TEXT_LIMITS, 'media')})
+                result.update({key: effective[key] for key in (*TEXT_LIMITS, 'media', 'details', 'first_added_at')})
         return result
+
+    def effective_many(self, game_ids):
+        """Read current display fields for a bounded scan batch in one snapshot."""
+        identifiers = sorted({_identifier(value) for value in game_ids})
+        if len(identifiers) > 500:
+            raise GameMetadataError('invalid_metadata', '单次资料读取不能超过 500 款游戏', 422)
+        if not identifiers:
+            return {}
+        with self._connect() as db:
+            placeholders = ','.join('?' for _ in identifiers)
+            rows = db.execute(f"SELECT m.*,coalesce(d.details,'{{}}') details,d.first_added_at FROM game_metadata m LEFT JOIN game_details d USING(game_id) WHERE m.game_id IN ({placeholders})", identifiers)
+            return {row['game_id']: self._effective(row) for row in rows}
 
     def summary(self, game_id):
         identifier = _identifier(game_id)
@@ -321,3 +359,35 @@ class GameMetadataStore:
                 db.execute('UPDATE metadata_state SET revision=? WHERE singleton=1', (revision,))
                 row = db.execute('SELECT * FROM game_metadata WHERE game_id=?', (identifier,)).fetchone()
             return self._summary(row)
+
+    def import_details_many(self, entries):
+        """Merge trusted scraper facts into shared metadata, without touching ROMs.
+
+        Fields omitted by a source retain their previous value. Explicit null
+        clears a field; unknown data must never be substituted with guesses.
+        A batch is atomic and revisioned so every profile refreshes its cache.
+        """
+        with self._connect(write=True) as db:
+            previous = self._revision(db)
+            changed = False
+            for entry in entries:
+                if type(entry) is not dict or set(entry) != {'id', 'details'}:
+                    raise GameMetadataError('invalid_metadata', '详情导入需要 id 和 details', 422)
+                identifier = _identifier(entry['id'])
+                if db.execute('SELECT 1 FROM game_metadata WHERE game_id=?', (identifier,)).fetchone() is None:
+                    raise GameMetadataError('metadata_not_found', '游戏资料尚未导入', 404)
+                db.execute("INSERT OR IGNORE INTO game_details VALUES (?,'{}',NULL)", (identifier,))
+                row = db.execute('SELECT * FROM game_details WHERE game_id=?', (identifier,)).fetchone()
+                old = self._facts(row)['details']
+                try:
+                    validate_details(entry['details'])
+                    merged = validate_details(dict(old, **entry['details']))
+                except (TypeError, ValueError, UnicodeError) as error:
+                    raise GameMetadataError('invalid_metadata_details', '游戏详情字段或来源无效', 422) from error
+                if old != merged:
+                    db.execute('UPDATE game_details SET details=? WHERE game_id=?', (_encoded(merged), identifier))
+                    db.execute('UPDATE game_metadata SET revision=? WHERE game_id=?', (previous + 1, identifier))
+                    changed = True
+            if changed:
+                db.execute('UPDATE metadata_state SET revision=? WHERE singleton=1', (previous + 1,))
+            return previous + int(changed)

@@ -7,6 +7,7 @@ import unittest
 
 from retroone.catalog import Catalog
 from retroone.library_management import LibraryManager
+from retroone.library_review import ReviewIndex, filename_tags, publish_report
 
 
 class ReviewCase(unittest.TestCase):
@@ -114,6 +115,67 @@ class ReviewCase(unittest.TestCase):
         self.assertFalse((self.roms / '.retroone').exists())
         self.assertTrue((self.catalog.library_data_root / 'metadata' / 'library-review.json').exists())
         self.assertFalse(manager.view()['capabilities']['observe'])
+
+
+class SwitchReviewCase(unittest.TestCase):
+    def test_full_nca_proof_is_restricted_and_invalidates_after_change(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            records = {}
+            for index in range(2):
+                path = root / (str(index) + '.nsp')
+                path.write_bytes(b'synthetic package')
+                info = path.stat()
+                records[str(index) * 24] = dict(platform='switch', native_core=None, browser_core=None,
+                    sources=[dict(relative_path=path.name, **{k: getattr(info, 'st_' + k) for k in ('size', 'mtime_ns', 'ctime_ns', 'ino')})],
+                    fingerprint=dict(sha256='a' * 64, scope='switch_nca_set', complete=True, algorithm='sha256_full_nca_set_v1'),
+                    variant_tags=[dict(kind='revision', label='本体 1.0.0', source='package_manifest')],
+                    verification=dict(status='fingerprinted'))
+            data = dict(schema_version=1, games=records, known_sources=['0.nsp', '1.nsp'], groups=[dict(
+                id='b' * 24, scope='switch_nca_set', auto_merge_safe=True, game_ids=list(records))])
+            index_path = root / 'index.json'
+            index_path.write_text(json.dumps(data))
+            review = ReviewIndex(root, index_path)
+            self.assertTrue(all(row[1] == 'b' * 24 for row in review.rows()))
+            first = records['0' * 24]
+            self.assertEqual(review.public(dict(rom_path='0.nsp'), first)['variant_tags'][0]['label'], '本体 1.0.0')
+            first['fingerprint'].pop('algorithm')
+            index_path.write_text(json.dumps(data))
+            self.assertTrue(all(row[1] is None for row in review.rows()))
+            first['fingerprint']['algorithm'] = 'sha256_full_nca_set_v1'
+            first['platform'] = 'nes'
+            records['1' * 24]['platform'] = 'nes'
+            index_path.write_text(json.dumps(data))
+            self.assertTrue(all(row[1] is None for row in review.rows()))
+            first['platform'] = records['1' * 24]['platform'] = 'switch'
+            index_path.write_text(json.dumps(data))
+            self.assertTrue(all(row[1] for row in review.rows()))
+            (root / '1.nsp').write_bytes(b'changed package')
+            self.assertEqual(review.changed_groups(), {'b' * 24})
+
+    def test_mod_labels_are_filename_evidence_not_verified_mod_claims(self):
+        tags = filename_tags('Example (USA) [MOD widescreen].nsp')
+        self.assertEqual([t['kind'] for t in tags], ['region', 'variant'])
+        self.assertTrue(all(t['source'] == 'filename' for t in tags))
+
+    def test_general_scan_preserves_switch_proof_but_not_changed_sources(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'review.json'
+            source = dict(relative_path='example.nsp', size=2048, mtime_ns=1, ctime_ns=2, ino=3)
+            entry = dict(platform='switch', native_core=None, browser_core=None, engine_hint=None,
+                         sources=[source], fingerprint=dict(scope='switch_nca_set', sha256='a' * 64, complete=True))
+            old = dict(schema_version=1, games={'a' * 24: entry, 'b' * 24: entry}, groups=[dict(
+                id='c' * 24, scope='switch_nca_set', auto_merge_safe=True, game_ids=['a' * 24, 'b' * 24])])
+            game = dict(id='a' * 24, platform='switch', relative_rom_path='example.nsp', source_manifest=[source])
+            report = dict(schema_version=1, read_only=True, games=[game])
+            path.write_text(json.dumps(old))
+            result = publish_report(report, path)
+            self.assertEqual(len(result['groups']), 1)
+            self.assertEqual(result['games']['a' * 24], entry)
+            game['source_manifest'] = [dict(source, mtime_ns=4)]
+            result = publish_report(report, path)
+            self.assertEqual(result['groups'], [])
+            self.assertNotIn('a' * 24, result['games'])
 
 
 if __name__ == '__main__':

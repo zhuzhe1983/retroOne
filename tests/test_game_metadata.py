@@ -132,7 +132,7 @@ def test_change_cursor_supports_full_incremental_no_change_and_backup_rewind(set
     store.import_many([game, second])
     before, rows = store.changes_since(-1)
     assert before == 1 and [row['id'] for row in rows] == [game['id'], second['id']]
-    assert all(set(row) == {'id', 'title', 'description', 'sort_by', 'media'} for row in rows)
+    assert all(set(row) == {'id', 'title', 'description', 'sort_by', 'media', 'details', 'first_added_at'} for row in rows)
     store.update_overrides(second['id'], {'description': '修改过'})
     current, changes = store.changes_since(before)
     assert current == 2 and len(changes) == 1 and changes[0]['id'] == second['id']

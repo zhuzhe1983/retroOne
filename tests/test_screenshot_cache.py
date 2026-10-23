@@ -3,6 +3,7 @@ import base64
 import hashlib
 import io
 import json
+import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import socket
@@ -120,6 +121,49 @@ def test_cache_budget_evicts_only_generated_images(tmp_path, monkeypatch):
     assert first.exists() and third.exists() and not second.exists()
     assert unrelated.read_text() == 'keep me'
     assert sum(path.stat().st_size for path in cache.root.glob('*.image')) <= cache.cache_limit
+
+
+@pytest.mark.parametrize('queued_hit', [False, True])
+def test_cache_recency_survives_coarse_default_timestamps_and_float_ties(tmp_path, monkeypatch, queued_hit):
+    import retroone.screenshot_cache as module
+    cache = ScreenshotCache(tmp_path)
+    cache.cache_limit = len(PNG) * 2
+    first = tmp_path / (hashlib.sha256(URL.encode()).hexdigest() + '.image')
+    second = tmp_path / (hashlib.sha256((URL + '?second=1').encode()).hexdigest() + '.image')
+    base = 1_700_000_000_000_000_000
+    for offset, path in enumerate((first, second), start=1):
+        path.write_bytes(PNG)
+        os.utime(path, ns=(base + offset, base + offset))
+    # These are genuinely different file times but indistinguishable floats.
+    assert first.stat().st_mtime == second.stat().st_mtime
+    assert first.stat().st_mtime_ns < second.stat().st_mtime_ns
+    actual_utime = os.utime
+    def coarse_default_utime(path, times=None, **kwargs):
+        # Linux's implicit current inode time can repeat within one clock tick.
+        # Explicit nanosecond timestamps must retain their requested precision.
+        if times is None and 'ns' not in kwargs:
+            kwargs['ns'] = (base + 2, base + 2)
+        return actual_utime(path, times, **kwargs)
+    monkeypatch.setattr(module.os, 'utime', coarse_default_utime)
+    ticks = iter((base + 3, base + 4))
+    monkeypatch.setattr(module.time, 'time_ns', lambda: next(ticks))
+    if queued_hit:
+        # Another request populated the cache between the fast lookup and the
+        # per-image lock. This second hit must refresh recency as well.
+        lookup, attempts = cache._cached, []
+        def after_queue(path):
+            attempts.append(path)
+            return None if len(attempts) == 1 else lookup(path)
+        monkeypatch.setattr(cache, '_cached', after_queue)
+    calls = []
+    def download(url): calls.append(url); return PNG
+    monkeypatch.setattr(cache, '_download', download)
+    assert cache.get(URL)[0] == first
+    third = cache.get(URL + '?third=1')[0]
+    assert first.exists() and third.exists() and not second.exists()
+    assert first.stat().st_mtime_ns == base + 3
+    assert third.stat().st_mtime_ns == base + 4
+    assert calls == [URL + '?third=1']
 
 
 class Response(io.BytesIO):

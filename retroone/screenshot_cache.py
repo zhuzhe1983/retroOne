@@ -223,7 +223,13 @@ class ScreenshotCache:
                     return None
                 prefix = handle.read(32)
                 handle.seek(-12, os.SEEK_END)
-                return path, _image_signature(prefix, handle.read(12), info.st_size)
+                kind = _image_signature(prefix, handle.read(12), info.st_size)
+                # Implicit inode timestamps can repeat within a kernel clock
+                # tick. Keep explicit nanoseconds for both fast and queued hits;
+                # use the validated descriptor rather than re-following a path.
+                accessed = time.time_ns()
+                os.utime(handle.fileno(), ns=(accessed, accessed))
+                return path, kind
         except (OSError, ValueError):
             return None
 
@@ -298,7 +304,7 @@ class ScreenshotCache:
                     continue
                 info = candidate.lstat()
                 if stat.S_ISREG(info.st_mode) and candidate != path:
-                    images.append((info.st_mtime, candidate, info.st_size))
+                    images.append((info.st_mtime_ns, candidate, info.st_size))
                     total += info.st_size
             for _, candidate, size in sorted(images):
                 if total + len(data) <= self.cache_limit:
@@ -313,6 +319,8 @@ class ScreenshotCache:
                 try:
                     handle.write(data)
                     handle.flush()
+                    published = time.time_ns()
+                    os.utime(handle.fileno(), ns=(published, published))
                     os.fsync(handle.fileno())
                     os.replace(temporary, path)
                 finally:
@@ -328,7 +336,6 @@ class ScreenshotCache:
             path = self.root / (key + '.image')
             cached = self._cached(path)
             if cached:
-                os.utime(path, None)
                 return cached
             # A previous fake-DNS failure must not suppress a corrected policy.
             failure_key = hashlib.sha256((url + '\npublic-address-v2:' + self.resolver.mode).encode()).hexdigest()

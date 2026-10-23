@@ -20,6 +20,7 @@ from .library_review import ReviewIndex
 from .game_config import GameConfigStore, GameConfigError
 from .game_metadata import GameMetadataStore
 from .library_settings import SORT_OPTIONS
+from .library_layout import LibraryLayout, LEGACY_SOURCES, canonical_manifest
 
 BROWSER_LIMIT = 20 * 1024 * 1024
 MAX_METADATA = 32 * 1024 * 1024
@@ -246,6 +247,7 @@ class Catalog:
         self.db_path = self.config_root / 'catalog.sqlite3'
         self._scan_lock = threading.Lock()
         self._scan_thread: threading.Thread | None = None
+        self._scan_layout = None
         self._runtime_key = None
         self.library_data_root = Path(os.getenv('RETROONE_LIBRARY_DATA_ROOT', str(self.config_root / 'library-data'))).resolve()
         self.game_configs = GameConfigStore(self.library_data_root / 'runtime', self.rom_root)
@@ -379,6 +381,7 @@ class Catalog:
         try:
             if not (self.rom_root / 'library').is_dir():
                 raise FileNotFoundError('one/library 尚未就绪；保留现有索引')
+            self._scan_layout = self._load_layout(remember=True)
             batch = []
             # Discovery may spend minutes on archive headers or network storage.
             # Hold no catalog transaction while waiting for the next game.
@@ -401,6 +404,7 @@ class Catalog:
             self.scan_status['last_error'] = str(error)[:500]
             self.scan_status['errors'] += 1
         finally:
+            self._scan_layout = None
             # Each committed batch already has effective shared display fields.
             # Pick up concurrent edits, including on an interrupted scan, without
             # waiting until this point to restore details or manual overrides.
@@ -435,29 +439,108 @@ class Catalog:
                     reason=excluded.reason,blocked_reason=excluded.blocked_reason,payload=excluded.payload,scan_id=excluded.scan_id''',
                     (game['id'], game['title'], game['platform'], game['collection'], game['mode'], int(game['browser_eligible']), game['reason'], game.get('blocked_reason'), json.dumps(game, ensure_ascii=False), scan_id))
 
+    def _load_layout(self, *, remember=False):
+        layout = LibraryLayout.load(self.rom_root)
+        with self.connect() as db:
+            required = db.execute("SELECT value FROM settings WHERE key='library_layout_required'").fetchone()
+            if required and required['value'] == '1' and not layout.declared:
+                raise ValueError('此玩家索引已启用固定身份布局，但布局文件缺失；保留现有索引')
+            saved = db.execute("SELECT value FROM settings WHERE key='library_layout_bindings'").fetchone()
+            bindings = layout.document['collections']
+            if saved:
+                try:
+                    previous = canonical_manifest({'schema_version': 1, 'collections': json.loads(saved['value'])})['collections']
+                except (ValueError, TypeError) as error:
+                    raise ValueError('玩家索引中的游戏库身份绑定无效；保留现有索引') from error
+                current = {entry['path']: entry['original_path'] for entry in bindings}
+                if (not layout.declared or any(current.get(entry['path']) != entry['original_path'] for entry in previous)):
+                    raise ValueError('游戏库原有身份绑定已被删除或更改；请通过目录迁移工具更新，保留现有索引')
+            if remember and layout.declared:
+                db.execute("INSERT OR REPLACE INTO settings VALUES('library_layout_required','1')")
+                db.execute("INSERT OR REPLACE INTO settings VALUES('library_layout_bindings',?)",
+                           (json.dumps(bindings, ensure_ascii=False, sort_keys=True, separators=(',', ':')),))
+        return layout
+
     def discover(self) -> Iterator[dict]:
         library = self.rom_root / 'library'
-        for platform_dir in sorted(library.iterdir()):
-            if not platform_dir.is_dir() or platform_dir.is_symlink():
-                continue
-            for source_dir in sorted(platform_dir.iterdir()):
-                if not source_dir.is_dir() or source_dir.is_symlink():
+        # Validate every declared binding before yielding anything: an invalid
+        # manifest must not partially import a collection under new identities.
+        layout = self._scan_layout or self._load_layout()
+        declared = {entry.path for entry in layout.collections}
+        emitted = {}
+        handled: set[Path] = set()
+        owned_dirs: set[Path] = set()
+        def games(platform, source, collection, *, recursive=True, excluded=(), archives_only=False):
+            for game in self._collection(platform, source, collection, layout=layout,
+                                         recursive=recursive, excluded=excluded,
+                                         handled=handled, owned_dirs=owned_dirs, archives_only=archives_only):
+                previous = emitted.get(game['id'])
+                if previous is not None:
+                    if previous != game['rom_path']:
+                        raise ValueError('不同物理路径产生相同游戏 ID；请检查游戏库布局')
                     continue
-                for collection_dir in sorted(source_dir.iterdir()):
-                    if not collection_dir.is_dir() or collection_dir.is_symlink():
-                        continue
-                    yield from self._collection(platform_dir.name, source_dir.name, collection_dir)
+                emitted[game['id']] = game['rom_path']
+                yield game
+        for binding in layout.collections:
+            yield from games(binding.platform, '', binding.path)
+        for platform_dir in sorted(library.iterdir()):
+            if (not platform_dir.is_dir() or platform_dir.is_symlink()
+                    or platform_dir.name.startswith('.') or platform_dir.name.lower() in AUXILIARY_DIRS):
+                continue
+            definition = platform_definitions().get(platform_dir.name, {})
+            directory_game = definition.get('kind') in {'windows', 'dos'} or platform_dir.name in {'teknoparrot', 'openbor'}
+            # Loose ROMs and platform-level metadata are supported without a
+            # source/collection wrapper. Bare PC EXEs need an explicit launcher;
+            # scanning each one would turn setup/utilities into separate games.
+            yield from games(platform_dir.name, '', platform_dir, recursive=False, excluded=declared,
+                             archives_only=directory_game)
+            for child in sorted(platform_dir.iterdir()):
+                if (not child.is_dir() or child.is_symlink() or child in declared
+                        or child.name.startswith('.') or child.name.lower() in AUXILIARY_DIRS):
+                    continue
+                # An unmarked PC folder remains the legacy arbitrary source
+                # layer. Guessing it is a new game would change historical IDs.
+                has_metadata = any(path.name.lower() == 'metadata.pegasus.txt' and path.is_file() for path in child.iterdir())
+                legacy_source = child.name in LEGACY_SOURCES or (directory_game and not has_metadata)
+                if legacy_source:
+                    source = '' if layout.declared else child.name
+                    # Self-contained archives support a new single collection
+                    # layer; ambiguous PC folders keep legacy boundaries and
+                    # need metadata to distinguish a game from its helper EXEs.
+                    yield from games(platform_dir.name, source, child, recursive=False, excluded=declared,
+                                     archives_only=directory_game)
+                    for collection in sorted(child.iterdir()):
+                        if (not collection.is_dir() or collection.is_symlink() or collection in declared
+                                or collection.name.startswith('.') or collection.name.lower() in AUXILIARY_DIRS):
+                            continue
+                        yield from games(platform_dir.name, source, collection, excluded=declared)
+                else:
+                    # A new PC metadata folder can be a single game, not a
+                    # collection. Read its explicit records without guessing
+                    # that data/ or another EXE is an additional title.
+                    yield from games(platform_dir.name, '', child, excluded=declared,
+                                     recursive=not directory_game, archives_only=directory_game)
 
-    def _collection(self, platform: str, source: str, collection: Path) -> Iterator[dict]:
+    def _collection(self, platform: str, source: str, collection: Path, *, layout=None,
+                    recursive=True, excluded=(), handled=None, owned_dirs=None, archives_only=False) -> Iterator[dict]:
         definition = platform_definitions().get(platform, {})
         extensions = {'.' + ext.lstrip('.').lower() for ext in definition.get('extensions', [])} or set(COMMON_EXTENSIONS)
         directory_game = definition.get('kind') in {'windows', 'dos'} or platform in {'teknoparrot', 'openbor'}
-        handled: set[Path] = set()
-        owned_dirs: set[Path] = set()
+        handled = set() if handled is None else handled
+        owned_dirs = set() if owned_dirs is None else owned_dirs
         candidates: list[Path] = []
+        def excluded_path(path):
+            return any(path.is_relative_to(root) for root in excluded)
+        def owned_path(path):
+            return any(path.is_relative_to(root) for root in owned_dirs)
         for directory, subdirs, files in os.walk(collection, followlinks=False):
             directory = Path(directory)
-            subdirs[:] = sorted(d for d in subdirs if d.lower() not in AUXILIARY_DIRS and not d.startswith('.') and not (directory / d).is_symlink())
+            if owned_path(directory):
+                subdirs[:] = []
+                continue
+            subdirs[:] = sorted(d for d in subdirs if recursive and d.lower() not in AUXILIARY_DIRS
+                                and not d.startswith('.') and not (directory / d).is_symlink()
+                                and not excluded_path(directory / d) and not owned_path(directory / d))
             metadata_name = next((name for name in files if name.lower() == 'metadata.pegasus.txt'), None)
             if metadata_name:
                 try:
@@ -468,15 +551,16 @@ class Catalog:
                 for record in records:
                     record['native_core'] = safe_core_hint(record.get('launch', info.get('launch', '')))
                     paths = []
+                    new_owned_dirs = set()
                     unsafe_reason = None
                     for ref in record.get('files', []):
                         try:
                             path = relative_reference(self.rom_root, directory, ref)
                             paths.append(path)
                             if path.is_dir():
-                                owned_dirs.add(path)
+                                new_owned_dirs.add(path)
                             elif directory_game and path.parent != directory:
-                                owned_dirs.add(directory / path.relative_to(directory).parts[0])
+                                new_owned_dirs.add(directory / path.relative_to(directory).parts[0])
                         except (OSError, ValueError):
                             unsafe_reason = '元数据引用文件缺失或路径不安全'
                             # Keep a safe missing reference visible as a blocked
@@ -493,9 +577,14 @@ class Catalog:
                     if not paths:
                         self._scan_warning('metadata_reference_missing_or_unsafe', directory / metadata_name, ' | '.join(record.get('files', [])))
                         continue
-                    game = self._build_game(platform, source, collection, paths, record, directory, unsafe_reason)
+                    # Directory ownership suppresses implicit helper discovery,
+                    # never another explicit game in the same metadata file.
+                    if excluded_path(paths[0]) or paths[0] in handled:
+                        continue
+                    game = self._build_game(platform, source, collection, paths, record, directory, unsafe_reason, layout=layout)
                     handled.update(Path(p) for p in game['files'])
                     handled.update(paths)
+                    owned_dirs.update(new_owned_dirs)
                     yield game
             # Directory based PC games own their support files. Never turn drivers,
             # redistributables or helper EXEs into hundreds of separate games.
@@ -503,26 +592,31 @@ class Catalog:
             if directory_game:
                 for name in subdirs:
                     path = directory / name
-                    game = self._build_game(platform, source, collection, [path], {}, directory, '目录游戏已保留；需要单独配置启动项及运行环境')
+                    game = self._build_game(platform, source, collection, [path], {}, directory, '目录游戏已保留；需要单独配置启动项及运行环境', layout=layout)
+                    owned_dirs.add(path)
+                    handled.update(Path(p) for p in game['files'])
+                    handled.add(path)
                     yield game
                 subdirs[:] = []
             for name in sorted(files):
                 path = directory / name
                 if path.is_symlink() or name.startswith('.'):
                     continue
-                if path.suffix.lower() in extensions and path not in handled:
+                if (path.suffix.lower() in extensions and path not in handled
+                        and (not archives_only or path.suffix.lower() in ARCHIVES)):
                     candidates.append(path)
         # Index playlists before CUE sheets and tracks, retaining whole disc sets.
         priority = {'.m3u': 0, '.m3u8': 0, '.cue': 1, '.gdi': 1}
         for path in sorted(candidates, key=lambda p: (priority.get(p.suffix.lower(), 2), str(p))):
             if path in handled:
                 continue
-            game = self._build_game(platform, source, collection, [path], {}, path.parent)
+            game = self._build_game(platform, source, collection, [path], {}, path.parent, layout=layout)
             handled.update(Path(p) for p in game['files'])
             handled.add(path)
             yield game
 
-    def _build_game(self, platform: str, source: str, collection: Path, paths: list[Path], metadata: dict, media_root: Path, blocked_reason: str | None = None) -> dict:
+    def _build_game(self, platform: str, source: str, collection: Path, paths: list[Path], metadata: dict, media_root: Path,
+                    blocked_reason: str | None = None, *, layout=None) -> dict:
         definitions = platform_definitions()
         definition = definitions.get(platform, {})
         if platform == 'switch' and any(path.suffix.lower() in {'.nsz', '.xcz'} for path in paths):
@@ -582,7 +676,7 @@ class Catalog:
             required = wine_layouts.get(paths[0].stem.casefold())
             if required and required <= siblings:
                 engine_hint = 'wine'
-        relative = paths[0].relative_to(self.rom_root).as_posix()
+        relative = layout.original_relative(paths[0]) if layout is not None else paths[0].relative_to(self.rom_root).as_posix()
         game_id = hashlib.sha256(relative.encode()).hexdigest()[:24]
         title = metadata.get('title') or paths[0].stem
         media: dict[str, str] = {}

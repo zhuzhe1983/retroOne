@@ -12,11 +12,16 @@ import os
 from pathlib import Path
 import re
 import sqlite3
+import sys
 import time
 import unicodedata
 
 IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp'}
 COVER_STEMS = {'boxfront', 'box_front', 'cover', 'poster', 'front', 'box'}
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from retroone.library_layout import LibraryLayout
+from retroone.artwork_match import artwork_collection, generic_artwork_name
 
 
 def normalized(value):
@@ -34,6 +39,14 @@ def cache_key(game):
 
 def audit(db_path, rom_root, caches):
     started = time.time()
+    rom_root = rom_root.resolve()
+    layout_error = None
+    try:
+        layout = LibraryLayout.load(rom_root)
+    except (OSError, ValueError) as error:
+        # A broken migration mapping must not turn into a guessed boundary.
+        layout = None
+        layout_error = str(error)
     db = sqlite3.connect('file:' + str(db_path) + '?mode=ro', uri=True, timeout=5)
     db.execute('PRAGMA query_only=ON')
     games = [json.loads(row[0]) for row in db.execute('SELECT payload FROM games')]
@@ -69,22 +82,27 @@ def audit(db_path, rom_root, caches):
             counter['cached_any_player' if cached_in else 'missing_every_player'] += 1
             if miss_in: counter['negative_cache_any_player'] += 1
         rom = host_path(game['rom_path'])
-        if rom:
-            relative = rom.relative_to(rom_root)
-            if len(relative.parts) >= 5:
-                collection = rom_root.joinpath(*relative.parts[:4])
+        collection = None
+        if rom and layout is not None:
+            try:
+                collection = artwork_collection(layout, rom, game)
+            except (OSError, ValueError) as error:
+                layout_error = str(error)
+            if collection is not None:
                 collections_roots[str(collection)] = platform
         record = {name: game.get(name) for name in ('id', 'title', 'platform', 'source', 'collection', 'rom_path')}
-        record.update(local_cover=cover, local_state=state, cache_key=key, cached_in=cached_in, miss_in=miss_in)
+        record.update(local_cover=cover, local_state=state, cache_key=key, cached_in=cached_in, miss_in=miss_in,
+                      collection_path='/roms/' + collection.relative_to(rom_root).as_posix() if collection else None)
         records.append(record)
 
     # Read only recognized media directories, not PC support/driver file trees.
     # Candidate matching is exact after Unicode/case normalization; never fuzzy.
     media = []
     image_keys = collections.defaultdict(list)
+    media_collections = {}
     for collection_name, platform in collections_roots.items():
         media_root = Path(collection_name) / 'media'
-        if not media_root.is_dir():
+        if media_root.is_symlink() or not media_root.is_dir():
             continue
         for directory, dirs, files in os.walk(str(media_root), followlinks=False):
             dirs[:] = [name for name in dirs if not name.startswith(('.', '@')) and not (Path(directory) / name).is_symlink()]
@@ -97,19 +115,28 @@ def audit(db_path, rom_root, caches):
                     continue
                 identifier = normalized(path.parent.name)
                 item = {'platform': platform, 'match_name': path.parent.name,
-                        'path': '/roms/' + path.relative_to(rom_root).as_posix()}
+                        'path': '/roms/' + path.relative_to(rom_root).as_posix(),
+                        'collection_path': '/roms/' + Path(collection_name).relative_to(rom_root).as_posix()}
                 media.append(item); image_keys[(platform, identifier)].append(item['path'])
+                media_collections[item['path']] = item['collection_path']
     for game in records:
         if game['local_state'] == 'local_valid':
             continue
         candidates = set()
         for name in [Path(game['rom_path']).stem, game['title']]:
-            candidates.update(image_keys.get((game['platform'], normalized(name)), []))
+            paths = image_keys.get((game['platform'], normalized(name)), [])
+            if generic_artwork_name(name):
+                paths = [path for path in paths if game['collection_path'] is not None
+                         and media_collections[path] == game['collection_path']]
+            candidates.update(paths)
         game['exact_local_candidates'] = sorted(candidates)
         if candidates: per_platform[game['platform']]['exact_local_reuse_candidates'] += 1
     return {'started_at': started, 'finished_at': time.time(), 'db': str(db_path), 'rom_root': str(rom_root),
             'total': len(records), 'platforms': dict(per_platform), 'cache_inventory': {name: dict(collections.Counter(Path(path).suffix for path in files)) for name, files in cache_files.items()},
-            'recognized_local_covers': len(media), 'games': records, 'local_media': media}
+            'recognized_local_covers': len(media), 'games': records, 'local_media': media,
+            'layout_error': layout_error,
+            'collections': [{'path': '/roms/' + Path(name).relative_to(rom_root).as_posix(), 'platform': platform}
+                            for name, platform in sorted(collections_roots.items())]}
 
 
 if __name__ == '__main__':

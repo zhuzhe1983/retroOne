@@ -110,11 +110,61 @@ docker compose logs --tail=100 retroone
 
 优先读取收藏内的媒体文件和 Pegasus 元数据，再使用可核验的同平台同作图片及 Libretro 图库。图片无法准确匹配时保留文字占位卡，不用无关游戏海报填补。共享缓存通过 `RETROONE_ARTWORK_PATH` 挂载到 `/artwork`。
 
+`audit_artwork.py` 读取布局中的集合边界，并在库存中记录 `collection_path`；`prepare_artwork.py` 按该边界优先复用本集合封面。数字编号等通用文件名只在同一明确集合内匹配，不能把另一套收藏的 `001` 当作同一款游戏。新旧布局均可使用，辅助脚本需与仓库内的 `retroone.library_layout` 一起部署。
+
 自动匹配或下载工具的预计匹配量不代表已经发布的图片数量。维护批量任务时保留来源、匹配依据和实际覆盖报告；这些私人收藏报告、封面文件与游戏媒体不提交到公开仓库。
 
 ## 整理已有收藏
 
-普通导入只需遵守 README 的目录布局，不需要运行迁移脚本。`scripts/migrate.py` 针对同时具有 `new`、`old`、`Pegasus G` 三个原始目录的收藏，不是任意目录的通用导入器。
+新导入使用 `one/library/<平台>/ROM` 或 `one/library/<平台>/<收藏>/`，无需增加来源层。旧收藏也可继续使用原目录，不必为了升级立刻搬动文件。
+
+已有收藏移除来源层时，按完整集合迁移，例如将 `library/fbneo/new/FBNEO ACT/` 移到 `library/fbneo/FBNEO ACT/`，保留集合内部的相对路径。布局文件 `one/.retroone/library-layout.json` 记录当前集合根与原集合根：
+
+```json
+{
+  "schema_version": 1,
+  "collections": [
+    {
+      "path": "library/fbneo/FBNEO ACT",
+      "original_path": "library/fbneo/new/FBNEO ACT"
+    }
+  ]
+}
+```
+
+扫描使用当前路径读取 ROM、媒体和关联文件，以映射后的原路径生成原游戏 ID；收藏、最近游玩和按 ID 关联的存档无需重新编号。应同时备份布局文件、各玩家 `/config`、共享 `library-data/` 和封面缓存。迁移前结束涉及的游戏，先核对计划与目标冲突，再搬迁并重新扫描、核对原 ID 与关联文件。布局缺失、配置冲突或无效时，不应继续手动改路径来绕过错误。文件夹内任意改名不在集合搬迁保护范围内。
+
+使用 `scripts/consolidate_library.py` 完成这类迁移。它只处理 `new`、`old`、`pegasus`、`import` 四种历史来源层，其他目录保留并列入报告；同名集合采用“（合集 2）”等中性后缀，不覆盖、合并或删除其中的游戏。集合内文件位置保持不变。若元数据、光盘描述文件等从集合外引用待移动文件，或跨集合引用不能安全保留，预检会拒绝迁移，需先明确解决这些关联。
+
+以下路径是维护进程中的挂载路径，`--profile-config-root` 指向每个玩家的 `retroone` 配置子目录，必须列全所有玩家。维护进程使用新版镜像和可写 ROM 挂载；平时游戏服务仍只读挂载 ROM。
+
+```sh
+# 默认只生成计划，不修改 ROM 或玩家数据
+python3 scripts/consolidate_library.py \
+  --rom-root /roms --library-data-root /library-data --artwork-root /artwork \
+  --profile-config-root /profile-configs/player1 \
+  --profile-config-root /profile-configs/player2 --output /maintenance/plan.json
+
+# 核对计划，停止全部玩家实例、MCP 和档案创建服务后，使用相同参数添加：
+# --apply --workers-stopped
+```
+
+工具会备份索引、启动配置、解压缓存标记和布局，再移动目录并更新实际引用；不重新分配游戏 ID，不清空工作目录或存档。备份及事务日志保存在 `library-data/private-migrations/<事务>/`，不要公开发布。它同时生成 `one/.retroone/library-layout.required` 的清单校验值，并在各玩家索引保存绑定快照。以后误删或改写旧绑定时，扫描会报错并保留索引，避免把老游戏误认成新游戏。
+
+成功后使用新版镜像启动服务，核对游戏数、原链接、收藏、历史和存档，再恢复使用。如需回退，先再次停止全部相关服务，使用相同挂载运行：
+
+```sh
+python3 scripts/consolidate_library.py \
+  --rollback /library-data/private-migrations/<事务> --workers-stopped
+```
+
+迁移失败会尝试自动回滚。手动回滚会检查迁移后是否产生新的用户数据或配置修改；发现变化时拒绝覆盖，应保留现场并单独处理。不要在回滚未完成时启动旧版本服务，也不要直接手改清单或校验文件。
+
+新导入的 DOS / Windows 裸目录，应通过 Pegasus 元数据声明入口或明确集合边界；未声明的 `main.exe`、`setup.exe` 不会自动拆成多个游戏。压缩包可直接放在平台或集合目录，仍需在启动配置里确认真正入口。
+
+### 历史三来源整理脚本
+
+`scripts/migrate.py` 保留用于历史收藏整理：它针对同时具有 `new`、`old`、`Pegasus G` 三个原始目录的收藏，输出旧的来源分层结构，**不是新布局迁移工具，也不是任意目录的通用导入器**。已经完成新布局迁移的库不应再次用它导入相同收藏。
 
 ```text
 rom/
@@ -147,7 +197,7 @@ python3 scripts/duplicate_report.py /srv/rom/one
 
 | 现象 | 先检查 |
 | --- | --- |
-| 列表为空 | 是否存在 `one/library/<平台>/<来源>/<收藏>/`；`RETROONE_ROM_PATH` 是否指向 `one`；运行用户是否可读；点击更新游戏库 |
+| 列表为空 | 是否存在 `one/library/<平台>/` 或其收藏子目录；布局映射是否有效；`RETROONE_ROM_PATH` 是否指向 `one`；运行用户是否可读；点击更新游戏库 |
 | 显示待配置 | 详情原因、所用镜像、实际安装核心、固件与完整关联文件；入库不代表运行环境已齐备 |
 | 手柄没有反应 | HTTPS 安全上下文、浏览器权限、手柄连接后按任意键唤醒，再检查模拟器内映射 |
 | 新增成员一直准备中 | provisioner 日志、Docker socket 组号、绝对挂载路径、网络名和实例健康状态 |
@@ -168,7 +218,7 @@ ROM_ROOT=/path/to/one CONFIG_ROOT="$PWD/data/dev" \
 .venv/bin/python -m pytest -q tests
 ```
 
-开发库同样需要正确的 `library/<平台>/<来源>/<收藏>/` 层级。macOS 可开发目录与网页；浏览器播放还需自己的 EmulatorJS 资源，云端需要 Linux 图形、音频和串流环境。API 与组件边界见 [ARCHITECTURE.md](../ARCHITECTURE.md)。
+开发库同样使用 `library/<平台>/` 或 `library/<平台>/<收藏>/`，旧来源分层也兼容。macOS 可开发目录与网页；浏览器播放还需自己的 EmulatorJS 资源，云端需要 Linux 图形、音频和串流环境。API 与组件边界见 [ARCHITECTURE.md](../ARCHITECTURE.md)。
 
 ## MCP 与观战检查
 

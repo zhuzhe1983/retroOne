@@ -28,7 +28,8 @@ from urllib.request import Request, urlopen
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from retroone.artwork import MAX_IMAGE_BYTES, REPOS, thumbnail_names
-from retroone.artwork_match import NameIndex, collection_path
+from retroone.artwork_match import NameIndex, artwork_collection, collection_path, generic_artwork_name
+from retroone.library_layout import LibraryLayout
 from retroone.profiles import atomic_json
 
 # Offline-only index expansion. The live fallback retains its original allowlist;
@@ -100,8 +101,43 @@ def load_index(platform, root, fetcher):
     return platform, result
 
 
+def inventory_collections(inventory):
+    """Prefer recorded boundaries; legacy inventories may resolve them on-host."""
+    boundaries = {entry.get('path') for entry in inventory.get('collections', [])
+                  if isinstance(entry, dict) and isinstance(entry.get('path'), str)}
+    records = inventory.get('games', []) + inventory.get('local_media', [])
+    boundaries.update(record['collection_path'] for record in records
+                      if isinstance(record.get('collection_path'), str))
+    if boundaries or inventory.get('layout_error'):
+        return boundaries
+    root = Path(inventory.get('rom_root') or '/nonexistent-retroone-artwork-root')
+    if not root.is_dir():
+        return set()
+    root = root.resolve()
+    try:
+        layout = LibraryLayout.load(root)
+        for record in records:
+            logical = record.get('rom_path') or record.get('path')
+            if not isinstance(logical, str):
+                continue
+            try:
+                relative = Path(logical).relative_to('/roms')
+            except ValueError:
+                continue
+            if '..' in relative.parts:
+                continue
+            collection = artwork_collection(layout, root / relative, record)
+            if collection is not None:
+                boundaries.add('/roms/' + collection.relative_to(root).as_posix())
+    except (OSError, ValueError):
+        # Unavailable/invalid layout is not evidence that generic titles match.
+        return set()
+    return boundaries
+
+
 def prepare(inventory, output, fetcher, workers):
     index_root = output / 'indexes'; index_root.mkdir(parents=True, exist_ok=True)
+    boundaries = inventory_collections(inventory)
     local_names = defaultdict(lambda: defaultdict(list))
     for media in inventory['local_media']:
         local_names[media['platform']][media['match_name']].append(media['path'])
@@ -120,7 +156,7 @@ def prepare(inventory, output, fetcher, workers):
         names = list(dict.fromkeys([Path(game['rom_path']).stem, game['title']]))
         local = local_indexes.get(platform)
         matched = None
-        same_collection = collection_path(game['rom_path'])
+        same_collection = collection_path(game['rom_path'], boundaries)
         if local:
             remaining = list(names)
             while remaining:
@@ -130,8 +166,8 @@ def prepare(inventory, output, fetcher, workers):
                     # Numbered bundles are meaningful inside their collection;
                     # "001" in another bundle proves no game identity.
                     name = candidate['original_name']
-                    generic = name.isdecimal() or name.casefold() in {'game', 'boot', 'eboot', 'default', 'start'}
-                    if generic: paths = [path for path in paths if collection_path(path) == same_collection]
+                    generic = generic_artwork_name(name)
+                    if generic: paths = [path for path in paths if same_collection is not None and collection_path(path, boundaries) == same_collection]
                     if paths:
                         matched = candidate; break
                     remaining.remove(name)
@@ -139,7 +175,7 @@ def prepare(inventory, output, fetcher, workers):
                     break
         entry = {key: game[key] for key in ('id', 'platform', 'title', 'rom_path', 'cache_key')}
         if matched:
-            selected = min(paths, key=lambda path: (collection_path(path) != same_collection, '/new/' not in path, path))
+            selected = min(paths, key=lambda path: (same_collection is None or collection_path(path, boundaries) != same_collection, path))
             entry.update(matched, status='local', source_path=selected, source_candidates=len(paths))
             overrides[game['id']] = entry
             counts['local_' + matched['method']] += 1

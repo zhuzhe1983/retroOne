@@ -72,6 +72,7 @@ COPY vendor/system/ /opt/retroone/system/
 COPY vendor/emulatorjs/ /opt/retroone/vendor/emulatorjs/
 COPY retroone/ /opt/retroone/retroone/
 COPY scripts/library_audit.py /opt/retroone/scripts/library_audit.py
+COPY scripts/consolidate_library.py /opt/retroone/scripts/consolidate_library.py
 COPY scripts/audit_switch_packages.py scripts/enrich_store_metadata.py /opt/retroone/scripts/
 COPY web/ /opt/retroone/web/
 COPY container/runtime-lock.json /opt/retroone/runtime-lock.json

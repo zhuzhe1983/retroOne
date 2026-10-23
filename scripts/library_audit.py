@@ -20,9 +20,10 @@ Examples:
     --cache /tmp/audit/cache.sqlite --output /tmp/audit/report.json --platform fbneo
   # Add --hash-all for full hashing, --rate-mib 16 to bound hashing throughput.
 
-For directory games outside library/<platform>/<source>/<collection>/<game>/,
-provide resource_root in each input record. It denotes the complete game folder;
-an EXE alone is insufficient. No source files, archives or saves are modified.
+Directory games require an explicit resource_root or a confirmed collection
+boundary from the library layout, Pegasus metadata, or a recognized legacy
+layout. The root denotes the complete game folder; an EXE alone is insufficient.
+No source files, archives or saves are modified.
 """
 from __future__ import annotations
 
@@ -506,10 +507,31 @@ class Auditor:
             if primary == self.root:
                 raise AuditIssue('unknown_directory_boundary', 'The whole ROM root is not a dedicated game directory')
             return primary
-        parts = primary.relative_to(self.root).parts
-        # Only a distinct child of a normalized collection is inferred as a game.
-        if len(parts) >= 6 and parts[0] == 'library':
-            return self.root.joinpath(*parts[:5])
+        # A collection boundary is not itself proof of a game resource closure.
+        # Never turn library/dos/Game/bin/main.exe into the incomplete bin/ tree.
+        repository = str(Path(__file__).resolve().parents[1])
+        if repository not in sys.path:
+            sys.path.insert(0, repository)
+        try:
+            from retroone.library_layout import LibraryLayout, LEGACY_SOURCES
+            layout = LibraryLayout.load(self.root)
+            collection = layout.collection_for(primary)
+            if collection is not None:
+                relative = collection.relative_to(self.root)
+                declared = any(binding.path == collection for binding in layout.collections)
+                legacy = (len(relative.parts) == 4 and relative.parts[0] == 'library'
+                          and relative.parts[2] in LEGACY_SOURCES)
+                # Pegasus can describe one game (bin/main.exe plus data/) or a
+                # whole collection. Its presence cannot prove either boundary.
+                explicit_collection = declared or legacy
+                inside_collection = primary.relative_to(collection)
+                if explicit_collection and len(inside_collection.parts) >= 2:
+                    folder = self.path(str(collection / inside_collection.parts[0]))
+                    if folder.is_dir():
+                        return folder
+        except (ImportError, OSError, ValueError) as error:
+            raise AuditIssue('unknown_directory_boundary',
+                             'Collection layout is unavailable or invalid; supply resource_root: ' + str(error))
         raise AuditIssue('unknown_directory_boundary', 'Complete game folder is unknown; supply resource_root')
 
     def walk(self, folder):

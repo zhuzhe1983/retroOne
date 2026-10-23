@@ -15,7 +15,9 @@ RetroOne 将资料展示、游戏资产与启动配置、玩家数据分开管�
 
 `RETROONE_LIBRARY_DATA_ROOT` 指定共享数据根目录；未设置时使用 `<CONFIG_ROOT>/library-data`。Compose 使用 `/library-data` 挂载。`RETROONE_LIBRARY_DATA_PATH` 与 provisioner 的 `RETROONE_HOST_LIBRARY_DATA_ROOT` 必须指向同一个宿主机绝对路径。先创建目录并授予运行用户写权限，再升级容器。已有额外成员也要增加该挂载，保留原 `/config`。
 
-Pegasus 元数据和媒体目录仍可作为只读导入来源，服务不会改写它们。玩家索引保留原 ID 和标题以兼容现有存档；本次不重新编号、不自动搬迁存档。**移动、重命名 ROM 仍可能改变路径派生的游戏 ID**，请先备份并保留映射。显示名称、封面不能作为内容判重依据。
+Pegasus 元数据和媒体目录仍可作为只读导入来源，服务不会改写它们。新库可使用 `library/<平台>/ROM` 或 `library/<平台>/<收藏>/`，不再需要来源层；旧来源分层继续兼容。
+
+已有库按完整集合搬迁时，`one/.retroone/library-layout.json` 的 `collections` 保存当前 `path` 与 `original_path`。扫描读取新路径，但沿用原路径对应的游戏 ID，保护收藏、游玩记录与存档关联；布局文件也需要备份。没有映射的手动移动、集合内部改名仍可能改变 ID。映射不能替代完整依赖检查，也不会自动搬迁玩家存档。示例与迁移边界见 [维护指南](operations.md#整理已有收藏)。显示名称、封面不能作为内容判重依据。
 
 游戏资料由共享 metadata 库管理；每位玩家的 catalog 只是用于搜索和展示的本地索引。更新资料后，各玩家在下次读取时同步。重新扫描更新导入资料，保留人工修改；不会覆盖每游戏的模拟器配置。显示标题可修改，浏览器原有存档名称保持不变。
 
@@ -64,7 +66,7 @@ curl -X PATCH 'http://localhost:8780/p/player1/api/games/<游戏ID>/configuratio
 
 ## 命令行与隔离试运行
 
-`scripts/library_audit.py` 只依赖 Python 标准库。输入为扫描导出的 `{games:[...],path_prefix:"/roms"}`，输出必须在 ROM 根目录外：
+`scripts/library_audit.py` 与仓库内的布局辅助模块只依赖 Python 标准库，运行时需保留对应仓库文件。输入为扫描导出的 `{games:[...],path_prefix:"/roms"}`，输出必须在 ROM 根目录外：
 
 ```sh
 python3 scripts/library_audit.py --catalog /srv/retroone/catalog.json \
@@ -73,6 +75,8 @@ python3 scripts/library_audit.py --catalog /srv/retroone/catalog.json \
 ```
 
 上述命令使用严格读取预算。不设预算并加 `--hash-all` 可读取全部受支持内容；`--platform nes --platform gba` 可限定平台。中断后用相同参数重跑，缓存会重新核对源文件状态。7z 等未完整解读的格式、资源边界不明确的目录保持未核验，不猜测重复。
+
+目录游戏优先使用记录中的显式 `resource_root`。没有显式值时，只有布局清单声明的集合或已识别的历史来源层可用于推断：将收藏下的独立游戏目录视为完整资源根，不会按固定层数截取路径。Pegasus 元数据可能描述一款游戏，也可能描述整个收藏，仅有该文件不能证明完整游戏边界。新库中没有集合证据的嵌套 EXE 路径需显式指定资源根；目录条目则核验该完整目录。启动文件直接位于收藏根、游戏分散在多个目录或布局不明确时，应提供 `resource_root`，不能仅哈希一个 EXE 就判定整款游戏重复。
 
 大集合的旁侧资源查询按目录缓存；目录发生变化或开始新一轮检测时重新检查。与 ROM 同名的补丁、配置或数据目录仍会阻止独立卡带合并，缓存不会忽略这些资源。
 

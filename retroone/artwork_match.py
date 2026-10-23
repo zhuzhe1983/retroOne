@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import unicodedata
 
@@ -82,5 +82,53 @@ class NameIndex:
         return None
 
 
-def collection_path(path: str) -> str:
-    return str(Path(*Path(path).parts[:6]))
+def generic_artwork_name(value: str) -> bool:
+    name = exact_name(value)
+    return name.isdecimal() or name in {'game', 'boot', 'eboot', 'default', 'start'}
+
+
+def artwork_collection(layout, path, record):
+    """Honor declared locations, then explicit legacy catalog provenance."""
+    path = Path(path)
+    for binding in layout.collections:
+        if path == binding.path or binding.path in path.parents:
+            return binding.path
+    source, collection = record.get('source'), record.get('collection')
+    platform = record.get('platform')
+    parts = (platform, source, collection)
+    if all(isinstance(value, str) and value and value not in {'.', '..'}
+           and not any(char in value for char in ('/', '\\', '\x00')) for value in parts):
+        boundary = layout.root / 'library' / platform / source / collection
+        if boundary == path or boundary in path.parents:
+            # Old arbitrary source names are evidence only when the actual
+            # catalog path agrees, never a reason to walk another directory.
+            if boundary.is_dir() and all(not parent.is_symlink() for parent in
+                                         (boundary, boundary.parent, boundary.parent.parent)):
+                return boundary
+    return layout.collection_for(path)
+
+
+def collection_path(path: str, collections=()) -> str | None:
+    """Find a recorded collection boundary; never infer it from path depth.
+
+    Artwork inventories use logical /roms paths so they remain usable off-host.
+    Unknown boundaries deliberately cannot establish a numbered game's identity.
+    """
+    if not isinstance(path, str) or not path or '\\' in path or '\x00' in path:
+        return None
+    candidate = PurePosixPath(path)
+    if '..' in candidate.parts:
+        return None
+    matches = []
+    for value in collections:
+        if not isinstance(value, str) or not value or '\\' in value or '\x00' in value:
+            continue
+        boundary = PurePosixPath(value)
+        if '..' in boundary.parts:
+            continue
+        try:
+            candidate.relative_to(boundary)
+        except ValueError:
+            continue
+        matches.append(boundary)
+    return str(max(matches, key=lambda item: len(item.parts))) if matches else None

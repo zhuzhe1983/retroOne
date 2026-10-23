@@ -6,6 +6,9 @@
 !retroone/**
 !scripts/
 !scripts/library_audit.py
+!scripts/consolidate_library.py
+!scripts/audit_switch_packages.py
+!scripts/enrich_store_metadata.py
 !web/
 !web/**
 !container/

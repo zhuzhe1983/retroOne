@@ -469,11 +469,13 @@ class Catalog:
         declared = {entry.path for entry in layout.collections}
         emitted = {}
         handled: set[Path] = set()
+        primary_paths: set[Path] = set()
         owned_dirs: set[Path] = set()
         def games(platform, source, collection, *, recursive=True, excluded=(), archives_only=False):
             for game in self._collection(platform, source, collection, layout=layout,
                                          recursive=recursive, excluded=excluded,
-                                         handled=handled, owned_dirs=owned_dirs, archives_only=archives_only):
+                                         handled=handled, primary_paths=primary_paths,
+                                         owned_dirs=owned_dirs, archives_only=archives_only):
                 previous = emitted.get(game['id'])
                 if previous is not None:
                     if previous != game['rom_path']:
@@ -522,11 +524,13 @@ class Catalog:
                                      recursive=not directory_game, archives_only=directory_game)
 
     def _collection(self, platform: str, source: str, collection: Path, *, layout=None,
-                    recursive=True, excluded=(), handled=None, owned_dirs=None, archives_only=False) -> Iterator[dict]:
+                    recursive=True, excluded=(), handled=None, primary_paths=None,
+                    owned_dirs=None, archives_only=False) -> Iterator[dict]:
         definition = platform_definitions().get(platform, {})
         extensions = {'.' + ext.lstrip('.').lower() for ext in definition.get('extensions', [])} or set(COMMON_EXTENSIONS)
         directory_game = definition.get('kind') in {'windows', 'dos'} or platform in {'teknoparrot', 'openbor'}
         handled = set() if handled is None else handled
+        primary_paths = set() if primary_paths is None else primary_paths
         owned_dirs = set() if owned_dirs is None else owned_dirs
         candidates: list[Path] = []
         def excluded_path(path):
@@ -579,11 +583,14 @@ class Catalog:
                         continue
                     # Directory ownership suppresses implicit helper discovery,
                     # never another explicit game in the same metadata file.
-                    if excluded_path(paths[0]) or paths[0] in handled:
+                    # A dependency can also be an explicitly listed game: an
+                    # arcade clone may reference its playable parent ZIP first.
+                    if excluded_path(paths[0]) or paths[0] in primary_paths:
                         continue
                     game = self._build_game(platform, source, collection, paths, record, directory, unsafe_reason, layout=layout)
                     handled.update(Path(p) for p in game['files'])
                     handled.update(paths)
+                    primary_paths.add(paths[0])
                     owned_dirs.update(new_owned_dirs)
                     yield game
             # Directory based PC games own their support files. Never turn drivers,
@@ -596,6 +603,7 @@ class Catalog:
                     owned_dirs.add(path)
                     handled.update(Path(p) for p in game['files'])
                     handled.add(path)
+                    primary_paths.add(path)
                     yield game
                 subdirs[:] = []
             for name in sorted(files):
@@ -613,6 +621,7 @@ class Catalog:
             game = self._build_game(platform, source, collection, [path], {}, path.parent, layout=layout)
             handled.update(Path(p) for p in game['files'])
             handled.add(path)
+            primary_paths.add(path)
             yield game
 
     def _build_game(self, platform: str, source: str, collection: Path, paths: list[Path], metadata: dict, media_root: Path,

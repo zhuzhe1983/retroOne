@@ -184,6 +184,30 @@ def test_platform_metadata_owns_all_secondary_disc_paths_across_child_scans(tmp_
     assert [Path(path).name for path in games[0]['launch_files']] == ['Disc2.chd', 'Disc1.chd']
 
 
+@pytest.mark.parametrize('layout', ['legacy', 'declared'])
+def test_arcade_parent_remains_playable_when_an_earlier_clone_uses_it_as_dependency(tmp_path, layout):
+    root = tmp_path / 'roms'
+    original = 'library/fbneo/import/Arcade'
+    collection = 'library/fbneo/Arcade' if layout == 'declared' else original
+    for name in ('clone.zip', 'parent.zip', 'bios.zip'):
+        archive = write(root, collection + '/' + name, b'')
+        with ZipFile(archive, 'w') as zipped:
+            zipped.writestr('generated.bin', ('generated ' + name).encode())
+    write(root, collection + '/metadata.pegasus.txt',
+          b'game: Clone\nfile: clone.zip\nfile: parent.zip\nfile: bios.zip\n\n'
+          b'game: Parent\nfile: parent.zip\nfile: bios.zip\n')
+    if layout == 'declared':
+        manifest(root, [dict(path=collection, original_path=original)])
+    games = list(Catalog(root, tmp_path / 'profile').discover())
+    assert {game['id'] for game in games} == {
+        game_id(original + '/clone.zip'), game_id(original + '/parent.zip'),
+    }
+    assert {game['title']: [Path(path).name for path in game['launch_files']] for game in games} == {
+        'Clone': ['clone.zip', 'parent.zip', 'bios.zip'], 'Parent': ['parent.zip', 'bios.zip'],
+    }
+    assert {game['source'] for game in games} == {'' if layout == 'declared' else 'import'}
+
+
 def test_platform_metadata_pc_directory_ownership_survives_child_scans(tmp_path):
     root = tmp_path / 'roms'
     write(root, 'library/windows/Family/Game/main.exe')

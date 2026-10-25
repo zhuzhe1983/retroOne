@@ -32,6 +32,18 @@ routes = f'''  location = {base} {{ return 302 {base}/; }}
 if os.environ.get('RETROONE_GATEWAY', 'true').lower() == 'true':
     if profile != 'player1':
         raise SystemExit('Only player1 may be the shared gateway')
+    routes += '''  location = /rom-tracker {
+    proxy_pass http://127.0.0.1:8088;
+    proxy_set_header Host $http_host;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_http_version 1.1;
+    proxy_read_timeout 1800s;
+    proxy_send_timeout 1800s;
+    proxy_buffering off;
+    access_log off;
+  }
+'''
     # Only server-generated numeric profile IDs become Docker DNS names. The
     # complete original URI reaches that worker, whose own route strips it.
     routes += f'''  location ~ "^/p/(?<retroone_profile>player(?:[2-9]|[1-9][0-9]{{1,5}}))(?:/|$)" {{

@@ -1,0 +1,18 @@
+{
+  "name": "retroone-private-torrent-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Private WebTorrent signaling and pinned browser bundle for RetroOne",
+  "engines": { "node": ">=22" },
+  "scripts": { "start": "node tracker.cjs", "build": "node build.cjs" },
+  "dependencies": {
+    "bittorrent-tracker": "11.2.3",
+    "ws": "8.22.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "fsa-chunk-store": "1.3.0",
+    "memory-chunk-store": "1.3.5",
+    "webtorrent": "3.0.21"
+  }
+}

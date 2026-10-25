@@ -14,6 +14,8 @@
 !container/
 !container/**
 **/__pycache__
+**/node_modules
+container/p2p/dist
 **/*.pyc
 **/.DS_Store
 **/._*

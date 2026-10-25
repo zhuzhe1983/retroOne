@@ -220,3 +220,54 @@ def test_lazy_generation_and_unknown_pc_engine_status(setup):
     assert store.summary(pc)['status'] == 'blocked'
     with pytest.raises(GameConfigError) as failure: store.resolve(pc)
     assert failure.value.code == 'engine_not_configured'
+
+
+def test_explicit_experiment_relaxes_only_size_rule_without_rewriting_identity(setup):
+    store, game, source = setup
+    with source.open('wb') as output:
+        output.truncate(32 * 1024**2)
+    game = dict(game, browser_eligible=False, unpacked_size=32 * 1024**2, mode='stream')
+    store.generate(game)
+    path = store.root / (game['id'] + '.json')
+    before = path.read_bytes()
+    resolved = store.resolve(game, 'browser', browser_limit=64 * 1024**2)
+    assert resolved['mode'] == 'browser' and resolved['id'] == game['id']
+    assert not resolved['browser_eligible']
+    assert path.read_bytes() == before and store.resolve(game)['mode'] == 'stream'
+    with pytest.raises(GameConfigError) as error:
+        store.resolve(game, 'browser')
+    assert error.value.code == 'browser_not_eligible'
+
+
+@pytest.mark.parametrize('mode,limit', [(None, 64 * 1024**2), ('auto', 64 * 1024**2),
+                                       ('stream', 64 * 1024**2), ('browser', True),
+                                       ('browser', 0), ('browser', 2 * 1024**3)])
+def test_experiment_limit_is_only_valid_on_explicit_browser_requests(setup, mode, limit):
+    store, game, _ = setup
+    with pytest.raises(GameConfigError) as error:
+        store.resolve(game, mode, browser_limit=limit)
+    assert error.value.code == 'invalid_browser_limit'
+
+
+@pytest.mark.parametrize('problem,code', [('disabled', 'manually_disabled'), ('stale', 'stale_config'),
+                                        ('review', 'review_dependency_error'), ('multi', 'browser_not_eligible'),
+                                        ('unpacked', 'browser_not_eligible')])
+def test_experiments_preserve_config_dependency_and_resource_guards(setup, problem, code):
+    store, game, source = setup
+    review = None
+    if problem == 'multi':
+        second = source.with_suffix('.dat')
+        second.write_bytes(b'dependency')
+        game = dict(game, files=[str(source), str(second)])
+    if problem == 'unpacked':
+        game = dict(game, unpacked_size=1024**3)
+    store.generate(game)
+    if problem == 'disabled':
+        store.update_overrides(game, {'disabled': True})
+    if problem == 'stale':
+        source.write_bytes(b'new contents')
+    if problem == 'review':
+        review = {'verification': {'status': 'dependency_error', 'mode': 'browser', 'engine': 'EmulatorJS', 'core': 'fceumm'}}
+    with pytest.raises(GameConfigError) as error:
+        store.resolve(game, 'browser', review, browser_limit=64 * 1024**2)
+    assert error.value.code == code

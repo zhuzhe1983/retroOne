@@ -43,7 +43,7 @@
     favorites: initial.get('favorite') === 'true', recent: initial.get('recent') === 'true', reviewFilter: validReviewFilter(initial.get('review_filter')), selected: null, initialGame: initial.get('game'),
     loading: false, request: 0, controller: null, session: null, playMode: null, health: null, connectionStatus: 'connecting',
     favoritePending: new Set(), scanPending: false, wasScanning: false, healthRefreshing: false,
-    detailRequest: 0, focusReturn: null, launching: false,
+    detailRequest: 0, focusReturn: null, launching: false, launchOptions: null, launchChoice: 'auto',
     profile: null, profiles: [], profileEpoch: 0, profileRequests: new Set(), profileEditing: null, profileEditEnter: false, profileAvatar: 'pixel', pendingProfile: null, profileSaving: false,
     profileRegistryEpoch: 0, profileLoading: false, profileCreateRequestId: null, profileWatchId: null, profileRetrying: new Set(), profileCapacity: null,
     playGameId: null, familySelectedId: null, presenceStale: false, presenceEpoch: 0,
@@ -199,8 +199,11 @@
       active.value = values[(values.indexOf(active.value) + 1) % values.length];
       active.dispatchEvent(new Event('change', {bubbles: true}));
     } else if (active.matches('select')) {
-      active.selectedIndex = (active.selectedIndex + 1) % active.options.length;
-      active.dispatchEvent(new Event('change', {bubbles: true}));
+      const available = [...active.options].filter(option => !option.disabled);
+      if (available.length) {
+        active.value = available[(available.findIndex(option => option.selected) + 1) % available.length].value;
+        active.dispatchEvent(new Event('change', {bubbles: true}));
+      }
     } else if (active.matches('button, a, summary')) active.click();
   }
 
@@ -952,6 +955,7 @@
     state.profileRequests.clear(); state.librarySettingsRequest++; state.librarySaving = false; state.libraryFresh = false; state.librarySettings = Library.settings();
     $('platform-dialog').close();
     state.profileEpoch++; state.interfaceRequest++; state.interfaceSaving = false; state.request++; state.detailRequest++;
+    state.launchOptions = null; state.launchChoice = 'auto';
     closeLibraryManagement({restoreFocus: false}); state.managementData = null; state.managementBusy = false;
     state.displayReadController?.abort(); state.displayReadController = null;
     state.displayRequest++; state.displayData = null; state.displayDraft = null; state.displayLoading = false; state.displaySaving = false; state.displayFresh = false;
@@ -1297,7 +1301,7 @@
     const added = game.added_at || game.first_added_at;
     if (Number.isFinite(added) && added > 0) add(t('加入游戏库'), I18n.date(new Date(added * 1000), {dateStyle: 'medium'}));
     if (Number.isSafeInteger(game.play_count)) add(t('已记录游玩次数'), t('{value1} 次', {value1: number(game.play_count)}));
-    add(t('运行方式'), modeLabels[game.mode] || modeLabels.unavailable); add(t('游戏大小'), formatSize(game.unpacked_size ?? game.size));
+    add(t('默认运行方式'), modeLabels[game.mode] || modeLabels.unavailable); add(t('游戏大小'), formatSize(game.unpacked_size ?? game.size));
     if (game.collection) add(t('来自收藏'), game.collection);
     if (duplicateCount(game)) add(t('相同内容副本'), t('{value1} 份（含当前）', {value1: number(duplicateCount(game))}));
     return facts.join('');
@@ -1309,6 +1313,100 @@
     const unit = {million_copies: t('百万份'), sales_rank: t('销售排名'), copies: t('份'), rating: t('评分')}[metric.unit] || (typeof metric.unit === 'string' ? metric.unit : '');
     const value = Number.isFinite(metric.value) ? `${number(metric.value)} ${unit}`.trim() : '';
     return `<p class="detail-popularity">${icon('info')}<span>${escapeHTML(t('公开热度参考'))}${value ? ` · <strong>${escapeHTML(value)}</strong>` : ''} · <a href="${escapeHTML(url)}" target="_blank" rel="noopener noreferrer">${escapeHTML(metric.source)}</a>${typeof metric.as_of === 'string' ? ` · ${escapeHTML(metric.as_of)}` : ''}</span></p>`;
+  }
+  function launchOptionLabel(id) {
+    return t({'auto': '自动选择（推荐）', 'stream': '云游戏', 'browser-http': '本机 WASM · HTTP 下载（实验）', 'browser-p2p': '本机 WASM · WebTorrent（实验）'}[id] || '未知启动方式');
+  }
+  let launchWebGL2;
+  function launchClientCapabilities() {
+    if (launchWebGL2 === undefined) {
+      try {
+        const context = document.createElement('canvas').getContext('webgl2');
+        launchWebGL2 = Boolean(context);
+        context?.getExtension('WEBGL_lose_context')?.loseContext();
+      } catch { launchWebGL2 = false; }
+    }
+    return {secure: Boolean(window.isSecureContext), rtc: typeof window.RTCPeerConnection === 'function',
+      crypto: Boolean(window.crypto?.subtle), threads: Boolean(window.crossOriginIsolated && typeof window.SharedArrayBuffer === 'function'), webgl2: launchWebGL2};
+  }
+  function usableLaunchOptions(data, capabilities) {
+    const allowed = ['auto', 'stream', 'browser-http', 'browser-p2p'];
+    const options = [];
+    for (const id of allowed) {
+      const original = data?.options?.find(option => option?.id === id);
+      if (!original) continue;
+      let reason = typeof original.reason === 'string' ? original.reason : '';
+      let available = original.available === true;
+      if (available && id === 'browser-p2p' && (!capabilities.secure || !capabilities.rtc || !capabilities.crypto)) {
+        available = false; reason = t('WebTorrent 需要 HTTPS，以及支持 WebRTC 和文件校验的浏览器。');
+      }
+      if (available && original.requires_threads && (!capabilities.threads || !capabilities.webgl2)) {
+        available = false; reason = t('此内核需要 HTTPS、跨源隔离、共享内存和 WebGL 2；当前浏览器环境不满足。');
+      }
+      options.push({...original, available, reason});
+    }
+    return options;
+  }
+  function currentLaunchOptions(game) {
+    const record = state.launchOptions;
+    if (record && game && record.gameId === game.id && record.epoch === state.profileEpoch && record.data) {
+      return usableLaunchOptions(record.data, launchClientCapabilities());
+    }
+    return [{id: 'auto', available: Boolean(game && game.mode !== 'unavailable'), reason: ''}];
+  }
+  function selectedLaunchMode(game) {
+    const same = Boolean(game && state.launchOptions && state.launchOptions.gameId === game.id && state.launchOptions.epoch === state.profileEpoch);
+    return same ? state.launchChoice : 'auto';
+  }
+  function renderLaunchChoices(game) {
+    const holder = $('launch-choices');
+    if (!holder || !game || state.selected?.id !== game.id) return;
+    const focusedId = holder.contains(document.activeElement) ? document.activeElement.id : null;
+    const record = state.launchOptions, options = currentLaunchOptions(game);
+    if (!options.some(option => option.id === state.launchChoice && option.available)) state.launchChoice = 'auto';
+    const selected = options.find(option => option.id === selectedLaunchMode(game));
+    const experimental = selected?.id.startsWith('browser-');
+    const peerNote = selected?.id === 'browser-p2p' ? `<p>${escapeHTML(t('由 NAS 的 HTTP 节点提供完整下载；其他家庭设备共享同一游戏时，可通过 WebRTC 互传。'))}</p>` : '';
+    const unavailable = options.filter(option => !option.available);
+    const note = $('game-detail').querySelector('.detail-note');
+    // The selected mode owns the description; the legacy note is reserved for
+    // the cloud preparation progress and must not describe a different mode.
+    if (note) note.hidden = !state.launching;
+    const defaultReason = $('game-detail').querySelector('.detail-reason');
+    if (defaultReason) defaultReason.hidden = selected?.id !== 'auto';
+    holder.innerHTML = `<label for="launch-mode">${escapeHTML(t('启动方式'))}</label><select id="launch-mode" aria-describedby="launch-mode-note" ${state.launching ? 'disabled' : ''}>${options.map(option => `<option value="${escapeHTML(option.id)}" ${option.id === state.launchChoice ? 'selected' : ''} ${option.available ? '' : 'disabled'}>${escapeHTML(launchOptionLabel(option.id))}${option.available ? '' : ` · ${escapeHTML(t('不可用'))}`}</option>`).join('')}</select><div id="launch-mode-note" class="launch-mode-note" role="status">${record?.loading ? escapeHTML(t('正在读取可用启动方式…')) : record?.error ? `${escapeHTML(t('暂时无法读取实验选项，仍可按原方式启动。'))} <button type="button" class="text-button" id="retry-launch-options">${escapeHTML(t('重试'))}</button>` : experimental ? `<p>${escapeHTML(t('需下载完整 ROM：{size}。下载后由这台设备运行。', {size: formatSize(selected.size_bytes)}))}</p>${peerNote}<p>${escapeHTML(t('运行时内存占用可能为 ROM 的数倍，建议使用内存充足的电脑；手机优先选云游戏。'))}</p><p>${escapeHTML(t('本机与云端存档分开；需要家人或智能体观战时，请选云游戏。'))}</p>` : escapeHTML(selected?.id === 'stream' ? t('服务器运行，无需下载 ROM；支持家人观战。') : t('沿用自动规则：符合条件的小 ROM 在浏览器运行，其余使用云游戏。'))}</div>${unavailable.length ? `<details class="launch-unavailable"><summary>${escapeHTML(t('查看不可用选项的原因'))}</summary><ul>${unavailable.map(option => `<li><strong>${escapeHTML(launchOptionLabel(option.id))}</strong><span>${escapeHTML(option.reason ? diagnostic(option.reason) : t('当前运行环境不支持此方式。'))}</span></li>`).join('')}</ul></details>` : ''}`;
+    $('launch-mode').addEventListener('change', event => {
+      const option = currentLaunchOptions(game).find(item => item.id === event.target.value && item.available);
+      if (!option) return;
+      state.launchChoice = option.id; renderLaunchChoices(game); updateLaunchButton(); $('launch-mode')?.focus({preventScroll: true});
+    });
+    $('retry-launch-options')?.addEventListener('click', () => loadLaunchOptions(game, true));
+    updateLaunchButton();
+    if (focusedId) $(focusedId)?.focus({preventScroll: true});
+  }
+  async function loadLaunchOptions(game, retry = false) {
+    if (!state.profile || !state.detailOpen || !game || state.selected?.id !== game.id) return;
+    const previous = state.launchOptions;
+    if (!retry && previous?.gameId === game.id && previous.epoch === state.profileEpoch) return;
+    const epoch = state.profileEpoch;
+    const record = {gameId: game.id, epoch, loading: true, data: null, error: false};
+    state.launchOptions = record;
+    if (!retry || previous?.gameId !== game.id) state.launchChoice = 'auto';
+    renderLaunchChoices(game);
+    try {
+      const data = await api(`/api/games/${encodeURIComponent(game.id)}/launch-options`, {timeoutMs: 10000});
+      if (epoch !== state.profileEpoch || state.launchOptions !== record || state.selected?.id !== game.id) return;
+      if (!Array.isArray(data?.options) || !data.options.some(option => option.id === 'auto')) throw new Error('Invalid launch options');
+      record.data = data;
+    } catch (error) {
+      if (epoch !== state.profileEpoch || state.launchOptions !== record || error.name === 'AbortError') return;
+      record.error = true;
+    } finally {
+      if (epoch === state.profileEpoch && state.launchOptions === record) {
+        record.loading = false;
+        if (state.detailOpen && state.selected?.id === game.id) renderLaunchChoices(game);
+      }
+    }
   }
   function renderDetail(game) {
     if (!state.detailOpen) { $('game-detail').replaceChildren(); renderDetailPage(); return; }
@@ -1322,12 +1420,13 @@
     const official = Library.secureURL(data.official_url);
     const sources = (Array.isArray(data.sources) ? data.sources : []).filter(source => source && typeof source.name === 'string' && Library.secureURL(source.url));
     const description = typeof data.description === 'string' && data.description || game.description;
-    $('game-detail').innerHTML = `<div class="detail-hero"><div class="detail-cover">${cover(game, true)}</div><div class="detail-introduction"><div class="detail-eyebrow"><p class="eyebrow">IN YOUR COLLECTION</p><span>${escapeHTML(game.favorite ? t('已收藏') : t('游戏详情'))}</span></div><p class="detail-platform">${Library.platformArt(game.platform)}${escapeHTML(platformName(game.platform, game.platform_name))}</p><h1 class="detail-title">${escapeHTML(game.title)}</h1>${variantTags(game)}${detailPopularity(game)}<div class="detail-actions"><button class="button detail-launch" id="launch-game" ${mode === 'unavailable' ? 'disabled' : ''}>${icon(mode === 'unavailable' ? 'info' : 'play')}${escapeHTML(mode === 'unavailable' ? t('等待配置') : mode === 'stream' ? t('开始云端游戏') : t('开始游戏'))}</button><button class="icon-button detail-favorite ${game.favorite ? 'is-favorite' : ''}" id="detail-favorite" aria-label="${escapeHTML(game.favorite ? t('取消收藏') : t('收藏'))} ${escapeHTML(game.title)}" aria-pressed="${Boolean(game.favorite)}" ${state.favoritePending.has(game.id) ? 'disabled' : ''}>${icon('star')}</button></div><p class="detail-note">${escapeHTML(mode === 'browser' ? t('在当前设备运行 · 进度可在模拟器中保存') : mode === 'stream' ? t('服务器运行 · 游戏镜像无需下载到本机') : t('保留在游戏库中，补齐环境后即可尝试启动'))}</p>${game.reason ? `<p class="detail-reason">${icon('info')}${escapeHTML(diagnostic(game.reason))}</p>` : ''}${official ? `<a class="button button-secondary official-link" href="${escapeHTML(official)}" target="_blank" rel="noopener noreferrer">${escapeHTML(t('访问官方页面'))}${icon('arrow')}</a>` : ''}</div></div><div class="detail-body"><section class="detail-about"><h2>${escapeHTML(t('关于这款游戏'))}</h2>${description ? `<p class="detail-description">${escapeHTML(description)}</p>` : `<p class="detail-missing">${escapeHTML(t('暂时没有可靠的游戏介绍，后续补充资料后会显示在这里。'))}</p>`}${videoURL ? `<button class="button button-secondary video-toggle" id="preview-video">${icon('play')}${escapeHTML(t('观看游戏预览'))}</button><video class="detail-video" id="detail-video" src="${escapeHTML(videoURL)}" controls preload="none" playsinline hidden></video>` : ''}${screenshots.length ? `<h2>${escapeHTML(t('游戏画面'))}</h2><div class="detail-screenshots">${screenshots.map((url, index) => `<a href="${escapeHTML(url)}" target="_blank" rel="noopener noreferrer" aria-label="${escapeHTML(t('查看游戏画面 {value1}', {value1: index + 1}))}"><img src="${escapeHTML(url)}" alt="${escapeHTML(t('《{value1}》游戏画面 {value2}', {value1: game.title, value2: index + 1}))}" loading="lazy" decoding="async" crossorigin="anonymous" referrerpolicy="no-referrer"></a>`).join('')}</div>` : ''}${sources.length ? `<p class="detail-sources">${escapeHTML(t('资料来源'))} · ${sources.map(source => `<a href="${escapeHTML(Library.secureURL(source.url))}" target="_blank" rel="noopener noreferrer">${escapeHTML(source.name)}</a>`).join(' · ')}</p>` : ''}</section><section class="detail-information"><h2>${escapeHTML(t('游戏资料'))}</h2><dl class="detail-facts">${detailFacts(game)}</dl></section></div><details class="detail-technical"><summary>${escapeHTML(t('版本、文件与运行检查'))}</summary>${launchConfigDetails(game)}${reviewDetails(game)}</details>`;
+    $('game-detail').innerHTML = `<div class="detail-hero"><div class="detail-cover">${cover(game, true)}</div><div class="detail-introduction"><div class="detail-eyebrow"><p class="eyebrow">IN YOUR COLLECTION</p><span>${escapeHTML(game.favorite ? t('已收藏') : t('游戏详情'))}</span></div><p class="detail-platform">${Library.platformArt(game.platform)}${escapeHTML(platformName(game.platform, game.platform_name))}</p><h1 class="detail-title">${escapeHTML(game.title)}</h1>${variantTags(game)}${detailPopularity(game)}<div class="detail-actions"><button class="button detail-launch" id="launch-game" ${mode === 'unavailable' ? 'disabled' : ''}>${icon(mode === 'unavailable' ? 'info' : 'play')}${escapeHTML(mode === 'unavailable' ? t('等待配置') : mode === 'stream' ? t('开始云端游戏') : t('开始游戏'))}</button><button class="icon-button detail-favorite ${game.favorite ? 'is-favorite' : ''}" id="detail-favorite" aria-label="${escapeHTML(game.favorite ? t('取消收藏') : t('收藏'))} ${escapeHTML(game.title)}" aria-pressed="${Boolean(game.favorite)}" ${state.favoritePending.has(game.id) ? 'disabled' : ''}>${icon('star')}</button></div><div id="launch-choices" class="launch-choices"></div><p class="detail-note">${escapeHTML(mode === 'browser' ? t('在当前设备运行 · 进度可在模拟器中保存') : mode === 'stream' ? t('服务器运行 · 游戏镜像无需下载到本机') : t('保留在游戏库中，补齐环境后即可尝试启动'))}</p>${game.reason ? `<p class="detail-reason">${icon('info')}${escapeHTML(diagnostic(game.reason))}</p>` : ''}${official ? `<a class="button button-secondary official-link" href="${escapeHTML(official)}" target="_blank" rel="noopener noreferrer">${escapeHTML(t('访问官方页面'))}${icon('arrow')}</a>` : ''}</div></div><div class="detail-body"><section class="detail-about"><h2>${escapeHTML(t('关于这款游戏'))}</h2>${description ? `<p class="detail-description">${escapeHTML(description)}</p>` : `<p class="detail-missing">${escapeHTML(t('暂时没有可靠的游戏介绍，后续补充资料后会显示在这里。'))}</p>`}${videoURL ? `<button class="button button-secondary video-toggle" id="preview-video">${icon('play')}${escapeHTML(t('观看游戏预览'))}</button><video class="detail-video" id="detail-video" src="${escapeHTML(videoURL)}" controls preload="none" playsinline hidden></video>` : ''}${screenshots.length ? `<h2>${escapeHTML(t('游戏画面'))}</h2><div class="detail-screenshots">${screenshots.map((url, index) => `<a href="${escapeHTML(url)}" target="_blank" rel="noopener noreferrer" aria-label="${escapeHTML(t('查看游戏画面 {value1}', {value1: index + 1}))}"><img src="${escapeHTML(url)}" alt="${escapeHTML(t('《{value1}》游戏画面 {value2}', {value1: game.title, value2: index + 1}))}" loading="lazy" decoding="async" crossorigin="anonymous" referrerpolicy="no-referrer"></a>`).join('')}</div>` : ''}${sources.length ? `<p class="detail-sources">${escapeHTML(t('资料来源'))} · ${sources.map(source => `<a href="${escapeHTML(Library.secureURL(source.url))}" target="_blank" rel="noopener noreferrer">${escapeHTML(source.name)}</a>`).join(' · ')}</p>` : ''}</section><section class="detail-information"><h2>${escapeHTML(t('游戏资料'))}</h2><dl class="detail-facts">${detailFacts(game)}</dl></section></div><details class="detail-technical"><summary>${escapeHTML(t('版本、文件与运行检查'))}</summary>${launchConfigDetails(game)}${reviewDetails(game)}</details>`;
     renderDetailPage();
     bindImageErrors($('game-detail'));
     $('game-detail').querySelectorAll('.detail-screenshots img').forEach(img => img.addEventListener('error', () => { const label = document.createElement('span'); label.className = 'screenshot-unavailable'; label.textContent = t('暂时无法载入这张画面'); img.replaceWith(label); }, {once: true}));
     updateLaunchButton();
-    $('launch-game').addEventListener('click', () => launchGame(game));
+    renderLaunchChoices(game); loadLaunchOptions(game);
+    $('launch-game').addEventListener('click', () => launchGame(game, {launchMode: selectedLaunchMode(game)}));
     $('detail-favorite').addEventListener('click', () => toggleFavorite(game.id));
     for (const name of ['evidence', 'copies']) $('review-' + name + '-toggle')?.addEventListener('click', (event) => {
       const panel = $('review-' + name); panel.hidden = !panel.hidden;
@@ -1421,7 +1520,7 @@
     finally { if (epoch === state.profileEpoch) { state.detailPaging = false; renderDetailPage(); } }
   }
   function focusDetailNeighbor(direction) {
-    const controls = [...$('detail-page').querySelectorAll('button, a, summary')].filter(element => !element.disabled && element.getClientRects().length);
+    const controls = [...$('detail-page').querySelectorAll('button, a, summary, select')].filter(element => !element.disabled && element.getClientRects().length);
     const index = controls.indexOf(document.activeElement), step = direction === 'left' || direction === 'up' ? -1 : 1;
     controls[(index + step + controls.length) % controls.length]?.focus();
   }
@@ -1557,15 +1656,20 @@
   function sessionNetworkRoomId(session) { return session?.network?.room_id || session?.network_room_id || null; }
   function sessionTitle(session) { return session?.game?.title || session?.title || session?.game_title || t("当前游戏"); }
   function updateLaunchButton() {
-    if (state.launching || state.selected?.mode !== 'stream' || !$('launch-game')) return;
-    $('launch-game').innerHTML = `${icon('play')}${escapeHTML(state.session && sessionGameId(state.session) === state.selected.id ? t("继续游戏") : t("开始云端游戏"))}`;
+    const game = state.selected, button = $('launch-game');
+    if (state.launching || !game || !button) return;
+    const choice = selectedLaunchMode(game), option = currentLaunchOptions(game).find(item => item.id === choice);
+    const cloud = choice === 'stream' || choice === 'auto' && game.mode === 'stream';
+    button.disabled = !option?.available;
+    const label = button.disabled ? t('等待配置') : cloud ? state.session && sessionGameId(state.session) === game.id ? t('继续游戏') : t('开始云端游戏') : choice.startsWith('browser-') ? t('下载并在本机启动') : t('开始游戏');
+    button.innerHTML = `${icon(button.disabled ? 'info' : 'play')}${escapeHTML(label)}`;
   }
-  function showLaunchConflict(game, detail, {networkRoomId = null} = {}) {
+  function showLaunchConflict(game, detail, {networkRoomId = null, launchMode = null} = {}) {
     const session = detail.session;
     if (!sessionId(session)) { notify(detail.message || t("当前云端会话已变化，请重新选择游戏。"), true); refreshSession(); return; }
     state.session = {...session, ...(detail.game ? {game: detail.game} : {})}; renderSession();
     if ($('network-dialog').open) closeNetwork();
-    state.pendingLaunch = {action: 'replace', game, session: state.session, epoch: state.profileEpoch, networkRoomId};
+    state.pendingLaunch = {action: 'replace', game, session: state.session, epoch: state.profileEpoch, networkRoomId, launchMode};
     $('replace-title').textContent = t("切换云端游戏？");
     $('replace-description').textContent = t("正在运行《{value1}》，结束并启动《{value2}》？", {value1: sessionTitle(state.session), value2: game.title});
     $('keep-current-game').textContent = t("继续玩《{value1}》", {value1: sessionTitle(state.session)});
@@ -1628,16 +1732,20 @@
     }
   }
 
-  async function launchGame(game, {replaceSessionId = null, networkRoomId = null} = {}) {
+  async function launchGame(game, {replaceSessionId = null, networkRoomId = null, launchMode = null} = {}) {
     const epoch = state.profileEpoch;
-    if (!game || game.mode === 'unavailable' || state.playMode || state.launching) return;
+    if (!game || state.playMode || state.launching) return;
+    const requestedMode = networkRoomId ? 'stream' : launchMode || selectedLaunchMode(game);
+    if (!networkRoomId && !replaceSessionId && !currentLaunchOptions(game).some(option => option.id === requestedMode && option.available)) return;
     state.launching = true;
+    if ($('launch-mode')) $('launch-mode').disabled = true;
     const button = state.selected?.id === game.id ? $('launch-game') : null;
     if (button) { button.disabled = true; button.textContent = t("正在准备游戏…"); }
     const note = state.selected?.id === game.id ? $('game-detail').querySelector('.detail-note') : null;
-    if (note && game.mode === 'stream') note.textContent = t("首次解压可能需要数分钟，请稍候。");
+    if (note && (requestedMode === 'stream' || requestedMode === 'auto' && game.mode === 'stream')) { note.hidden = false; note.textContent = t("首次解压可能需要数分钟，请稍候。"); }
     try {
-      const result = await requestGameLaunch(game.id, {mode: game.mode, device_id: displayDeviceId, ...(replaceSessionId ? {replace_session_id: replaceSessionId} : {}), ...(networkRoomId ? {network_room_id: networkRoomId} : {})});
+      const result = await requestGameLaunch(game.id, {mode: requestedMode, device_id: displayDeviceId, ...(replaceSessionId ? {replace_session_id: replaceSessionId} : {}), ...(networkRoomId ? {network_room_id: networkRoomId} : {})});
+      if (epoch !== state.profileEpoch) return;
       const url = localURL(result.play_url, [`${state.profile.base_path}/play/`, `${state.profile.base_path}/stream/`]);
       if (!url) throw interfaceError("没有收到有效的游戏入口，请重新加载游戏库。");
       state.activeNetworkRoomId = networkRoomId || sessionNetworkRoomId(result.session); renderFamilyPresence();
@@ -1645,7 +1753,7 @@
       openPlayer(url, game.title, result.mode || game.mode, game.id, game);
       if (result.device_preferences_supported === false && result.mode === 'stream') notify(t('当前游戏实例沿用玩家默认画质。'));
       refreshSession();
-    } catch (error) { if (epoch === state.profileEpoch) { if (error.status === 409 && error.detail?.code === 'session_conflict') showLaunchConflict(game, error.detail, {networkRoomId}); else { notify(errorMessage(error), true); if (networkRoomId && $('network-dialog').open) networkMessage(errorMessage(error), true); refreshSession(); } } }
+    } catch (error) { if (epoch === state.profileEpoch) { if (error.status === 409 && error.detail?.code === 'session_conflict') showLaunchConflict(game, error.detail, {networkRoomId, launchMode: requestedMode}); else { notify(errorMessage(error), true); if (networkRoomId && $('network-dialog').open) networkMessage(errorMessage(error), true); refreshSession(); } } }
     finally { if (epoch !== state.profileEpoch) return; state.launching = false; if (state.selected?.id === game.id) renderDetail(state.selected); }
   }
 
@@ -1970,7 +2078,7 @@
           if (key === 'back') closeGameDetail();
           else if (key === 'prev' || key === 'next') stepGameDetail(key === 'prev' ? -1 : 1);
           else if (directional) focusDetailNeighbor(key);
-          else if (key === 'accept') document.activeElement?.click();
+          else if (key === 'accept') activateFocused();
         }
         else if (window.RetroMobilePlayer?.isMenuOpen()) window.RetroMobilePlayer.navigate(key);
         else if (key === 'profiles') showProfiles();
@@ -2067,7 +2175,7 @@
           else notify(errorMessage(error), true);
         }
       }
-      else launchGame(pending.game, {replaceSessionId: sessionId(pending.session)});
+      else launchGame(pending.game, {replaceSessionId: sessionId(pending.session), launchMode: pending.launchMode});
     }
   });
   $('profile-button').addEventListener('click', showSelf);

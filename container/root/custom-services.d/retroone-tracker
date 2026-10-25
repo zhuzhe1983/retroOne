@@ -1,0 +1,8 @@
+#!/usr/bin/with-contenv bash
+if [ "${RETROONE_GATEWAY:-true}" != "true" ] || [ "${RETROONE_P2P_ENABLED:-1}" = "0" ]; then
+  exec sleep infinity
+fi
+cd /opt/retroone
+export RETROONE_TORRENT_SECRET_FILE="${RETROONE_TORRENT_SECRET_FILE:-${RETROONE_LIBRARY_DATA_ROOT:-/config/retroone/library-data}/metadata/.webtorrent-secret}"
+s6-setuidgid abc /lsiopy/bin/python -c 'import os; from pathlib import Path; from retroone.torrent_distribution import installation_secret; installation_secret(Path(os.environ["RETROONE_TORRENT_SECRET_FILE"]))' || exit 1
+exec s6-setuidgid abc /usr/local/bin/node /opt/retroone/container/p2p/tracker.cjs

@@ -44,6 +44,11 @@ jobs:
         env:
           RETROONE_FETCH_ARTWORK: '0'
         run: python -m pytest -q tests
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - name: Build pinned browser transport and private tracker
+        run: npm ci --prefix container/p2p --ignore-scripts --no-audit --no-fund && npm run build --prefix container/p2p
       - name: Browser input bridge regression tests (generated fixtures)
         run: node --test tests/test_*.cjs
 

@@ -4,6 +4,14 @@ ARG SELKIES_BASE=ghcr.io/linuxserver/baseimage-selkies:debiantrixie@sha256:a684b
 # Eden's official AppImage uses URuntime + DwarFS, not SquashFS. Run its
 # SHA-pinned extractor through Debian QEMU in this build-only stage so that
 # Apple Silicon buildx also works (Rosetta cannot run its static PIE loader).
+
+FROM node:22-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d AS webtorrent-build
+WORKDIR /build
+COPY container/p2p/package.json container/p2p/package-lock.json ./
+RUN npm ci --ignore-scripts --no-audit --no-fund
+COPY container/p2p/build.cjs ./
+RUN npm run build && npm prune --omit=dev --ignore-scripts --no-audit --no-fund
+
 FROM ${SELKIES_BASE} AS eden-extract
 RUN apt-get update && apt-get install -y --no-install-recommends qemu-user \
     && rm -rf /var/lib/apt/lists/*
@@ -56,6 +64,11 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/retroone
+COPY --from=webtorrent-build /usr/local/bin/node /usr/local/bin/node
+COPY --from=webtorrent-build /build/node_modules /opt/retroone/container/p2p/node_modules
+COPY --from=webtorrent-build /build/dist/ /opt/retroone/web/vendor/
+COPY container/p2p/tracker.cjs /opt/retroone/container/p2p/tracker.cjs
+COPY --from=webtorrent-build /usr/local/LICENSE /opt/retroone/container/p2p/NODE-LICENSE
 COPY requirements.txt ./
 RUN /lsiopy/bin/python -m pip install --no-cache-dir -r requirements.txt
 COPY vendor/libretro/ /opt/retroone/libretro/
@@ -84,7 +97,7 @@ COPY container/stream-input.js /opt/retroone/stream-input.js
 COPY container/azahar-core-options.cfg /opt/retroone/azahar-core-options.cfg
 COPY container/prepare-cores.py /opt/retroone/prepare-cores.py
 COPY container/root/ /
-RUN chmod +x /usr/local/bin/pcsx2 /usr/local/bin/sdlpal /usr/local/bin/retroone-eden /usr/local/bin/retroone-wine /custom-cont-init.d/99-retroone /custom-services.d/retroone-api
+RUN chmod +x /custom-services.d/retroone-tracker /usr/local/bin/pcsx2 /usr/local/bin/sdlpal /usr/local/bin/retroone-eden /usr/local/bin/retroone-wine /custom-cont-init.d/99-retroone /custom-services.d/retroone-api
 
 # Some upstream assembly lacks .note.GNU-stack. glibc 2.41 refuses that
 # executable-stack metadata on dlopen; apply the one reviewed SHA-pinned fix.

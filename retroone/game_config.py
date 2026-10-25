@@ -245,7 +245,7 @@ class GameConfigStore:
             core = None  # Standalone engines do not load the catalog's Libretro hint.
         return {'mode': mode, 'engine': engine, 'core': core, 'input_profile': settings['input_profile']}
 
-    def _issues(self, game, identity, settings, context, review=None):
+    def _issues(self, game, identity, settings, context, review=None, *, browser_limit=None):
         issues = []
         def add(code, message, blocking=False): issues.append({'code': code, 'message': message, 'blocking': blocking})
         for asset in identity['sources']:
@@ -266,9 +266,10 @@ class GameConfigStore:
             add('unsupported_engine_hint', '游戏布局不符合此引擎的已验证启动条件', True)
         if context['mode'] == 'browser':
             unpacked = identity.get('unpacked_size')
-            if (not identity['browser_eligible'] or len(identity['sources']) != 1 or
-                    type(unpacked) is not int or unpacked > BROWSER_LIMIT or unpacked < 0 or
-                    sum(asset.get('size', 0) for asset in identity['sources']) > BROWSER_LIMIT or
+            limit = BROWSER_LIMIT if browser_limit is None else browser_limit
+            if ((browser_limit is None and not identity['browser_eligible']) or len(identity['sources']) != 1 or
+                    type(unpacked) is not int or unpacked > limit or unpacked < 0 or
+                    sum(asset.get('size', 0) for asset in identity['sources']) > limit or
                     not settings.get('browser_core')):
                 add('browser_not_eligible', '此游戏不符合浏览器载入条件，请使用云端运行', True)
         if self.definitions.get(game.get('platform'), {}).get('arcade'):
@@ -288,7 +289,7 @@ class GameConfigStore:
             add('review_' + status, text, block)
         return issues
 
-    def _view(self, game, document, current_identity, current_signature, review=None, requested_mode=None):
+    def _view(self, game, document, current_identity, current_signature, review=None, requested_mode=None, *, browser_limit=None):
         if document is None:
             return {'status': 'needs_review', 'configured': False, 'stale': False, 'verified_playable': False,
                     'issues': ['尚未生成游戏启动配置'], 'issue_details': [{'code': 'config_missing', 'message': '尚未生成游戏启动配置', 'blocking': False}],
@@ -297,7 +298,7 @@ class GameConfigStore:
         overrides = self._validate_overrides(game, document['overrides'])
         settings.update({key: value for key, value in overrides.items() if value is not None})
         context = self._context(game, settings, self._mode(game, settings, requested_mode))
-        issues = self._issues(game, current_identity, settings, context, review)
+        issues = self._issues(game, current_identity, settings, context, review, browser_limit=browser_limit)
         stale = document['generated']['source_signature'] != current_signature
         if stale:
             issues.insert(0, {'code': 'stale_config', 'message': '游戏文件或运行规则已变化，请重新生成启动配置', 'blocking': True})
@@ -352,13 +353,21 @@ class GameConfigStore:
             identity, current_signature = self._snapshot(game)
             return self._view(game, document, identity, current_signature, review)
 
-    def resolve(self, game, requested_mode=None, review=None):
+    def resolve(self, game, requested_mode=None, review=None, *, browser_limit=None):
+        # Only an explicit, separately validated browser experiment may relax
+        # the auto rule. This is ephemeral: no schema, signature or saved setting
+        # changes. BrowserRuntime.require must validate the installed core,
+        # actual file format, dependencies and archive size before this call.
+        if browser_limit is not None and (requested_mode != 'browser' or type(browser_limit) is not int or
+                                          not 0 < browser_limit <= 1024**3):
+            raise GameConfigError('invalid_browser_limit', '浏览器实验模式的载入条件无效', 422)
         # Lazily create configurations for libraries imported before this feature.
         if self.get(game) is None: self.generate(game, review)
         with self.locked():
             document = self._read(game)
             identity, current_signature = self._snapshot(game)
-            view = self._view(game, document, identity, current_signature, review, requested_mode)
+            view = self._view(game, document, identity, current_signature, review, requested_mode,
+                              browser_limit=browser_limit)
             failures = [issue for issue in view.get('issue_details', []) if issue['blocking']]
             if failures:
                 raise GameConfigError(failures[0]['code'], failures[0]['message'], summary=view)

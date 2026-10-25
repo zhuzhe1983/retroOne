@@ -32,6 +32,8 @@ from .interface_settings import InterfaceLocale, InterfaceSettings, InterfaceSet
 from .library_settings import LibrarySettings, LibrarySettingsError, LibrarySort, SortDirection
 from .i18n import emulator_locale, player_messages, resolve_locale, text as translated_text
 from .pwa import register_pwa
+from .browser_runtime import BrowserRuntime, BrowserRuntimeError
+from .torrent_distribution import IceConfigurationError, TorrentDistribution, revision as rom_revision
 
 ROOT = Path(__file__).resolve().parent.parent
 MAX_SAVE_SIZE = 32 * 1024 * 1024
@@ -196,9 +198,9 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
     library_manager = LibraryManager(catalog)
     from .game_config import GameConfigError
 
-    def resolved_game(game, requested_mode=None):
+    def resolved_game(game, requested_mode=None, *, browser_limit=None):
         try:
-            return catalog.game_configs.resolve(game, requested_mode, game.get('review'))
+            return catalog.game_configs.resolve(game, requested_mode, game.get('review'), browser_limit=browser_limit)
         except GameConfigError as error:
             raise HTTPException(error.status_code, str(error)) from error
     artwork = ArtworkCache(config_root, enabled=os.getenv('RETROONE_FETCH_ARTWORK', '1') != '0', rom_root=rom_root)
@@ -213,6 +215,12 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
     capability_cache = {'time': 0.0, 'value': {}}
     bios_cache: dict[str, Path] = {}
     missing_bios_until: dict[str, float] = {}
+    browser_runtime = BrowserRuntime(rom_root, browser_data)
+    torrent_distribution = None
+    torrent_init_lock = threading.Lock()
+    torrent_bundle = ROOT / 'web/vendor/webtorrent.min.js'
+    if not torrent_bundle.is_file():
+        torrent_bundle = ROOT / 'container/p2p/dist/webtorrent.min.js'
     mode_refresh = {'time': 0.0, 'scan_finished': None}
 
     def bios_for(platform: str) -> Path | None:
@@ -362,6 +370,67 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
         except (ValueError, OSError, zipfile.BadZipFile) as error:
             raise HTTPException(409, 'ROM 无法安全解压：' + str(error)) from error
 
+    def experiment_bios(game):
+        if game['platform'] != 'nds':
+            return bios_for(game['platform'])
+        cached = bios_cache.get('nds-package')
+        if cached and cached.is_file():
+            return cached
+        if time.monotonic() < missing_bios_until.get('nds-package', 0):
+            return None
+        names = {'bios7.bin', 'bios9.bin', 'firmware.bin'}
+        files = {}
+        root = rom_root / 'firmware'
+        for directory, subdirs, filenames in os.walk(root, followlinks=False):
+            subdirs[:] = [name for name in subdirs if not (Path(directory) / name).is_symlink()]
+            for filename in filenames:
+                if filename.lower() in names and filename.lower() not in files:
+                    try:
+                        path = contained_path(root, Path(directory) / filename)
+                        if path.is_file() and 0 < path.stat().st_size <= BROWSER_LIMIT:
+                            files[filename.lower()] = path
+                    except (OSError, ValueError):
+                        pass
+            if len(files) == len(names):
+                break
+        if len(files) != len(names):
+            missing_bios_until['nds-package'] = time.monotonic() + 30
+            return None
+        identity = hashlib.sha256(''.join(name + rom_revision(files[name]) for name in sorted(files)).encode()).hexdigest()
+        destination = config_root / 'browser-firmware' / (identity + '.zip')
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = destination.with_suffix(f'.{time.time_ns()}.tmp')
+        try:
+            with zipfile.ZipFile(temporary, 'w') as archive:
+                for name in sorted(files):
+                    archive.write(files[name], name)
+            temporary.replace(destination)
+        finally:
+            temporary.unlink(missing_ok=True)
+        bios_cache['nds-package'] = destination
+        return destination
+
+    def experiment_game(game_id):
+        game = game_or_404(game_id)
+        browser_runtime.require(game)
+        game = resolved_game(game, 'browser', browser_limit=browser_runtime.max_bytes)
+        path = browser_runtime.require(game)
+        if (platform_definitions().get(game['platform'], {}).get('requires_bios') or game['platform'] == 'nds') and not experiment_bios(game):
+            raise HTTPException(409, '浏览器模拟器所需 BIOS 尚未齐全；DS 需要 bios7.bin、bios9.bin 和 firmware.bin')
+        return game, path
+
+    def torrents():
+        nonlocal torrent_distribution
+        if not torrent_bundle.is_file() or os.getenv('RETROONE_P2P_ENABLED', '1') == '0':
+            raise HTTPException(503, 'WebTorrent 组件尚未启用，请选择 HTTP 下载或云游戏')
+        with torrent_init_lock:
+            if torrent_distribution is None:
+                try:
+                    torrent_distribution = TorrentDistribution(catalog.library_data_root)
+                except IceConfigurationError as error:
+                    raise HTTPException(503, str(error)) from error
+        return torrent_distribution
+
     @asynccontextmanager
     async def lifespan(app):
         startup_scan = auto_scan
@@ -389,6 +458,11 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
     app.state.display_settings = display_settings
     app.state.interface_settings = interface_settings
     app.state.library_settings = library_settings
+    app.state.browser_runtime = browser_runtime
+
+    @app.exception_handler(BrowserRuntimeError)
+    async def browser_runtime_error(request: Request, error: BrowserRuntimeError):
+        return JSONResponse({'detail': str(error)}, status_code=error.status_code)
 
     @app.exception_handler(ProfileError)
     async def profile_error(request: Request, error: ProfileError):
@@ -690,9 +764,87 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
         except GameConfigError as error:
             raise HTTPException(error.status_code, str(error)) from error
 
+    @app.get('/api/games/{game_id}/launch-options')
+    def launch_options(game_id: str):
+        game = game_or_404(game_id)
+        options = []
+        for mode in ('auto', 'stream'):
+            reason = None
+            try:
+                resolved = resolved_game(game, mode)
+                if resolved['mode'] == 'browser':
+                    browser_rom(resolved)
+                    if platform_definitions().get(game['platform'], {}).get('requires_bios') and not bios_for(game['platform']):
+                        raise HTTPException(409, '浏览器模拟器所需 BIOS 尚未齐全')
+                else:
+                    runtime = capabilities()
+                    engine = runtime.get('engines', {}).get(resolved.get('engine_hint'), {}) if resolved.get('engine_hint') else runtime.get('platforms', {}).get(game['platform'], {})
+                    if not engine.get('available'):
+                        raise HTTPException(409, engine.get('reason') or '服务端尚未配置该平台模拟器')
+            except HTTPException as error:
+                reason = str(error.detail)
+            options.append({'id': mode, 'available': reason is None, 'reason': reason, 'requires_threads': False, 'size_bytes': game.get('size')})
+        experimental = browser_runtime.inspect(game)
+        if experimental['available']:
+            try:
+                experiment_game(game_id)
+            except (HTTPException, BrowserRuntimeError) as error:
+                experimental.update(available=False, reason=str(error.detail) if isinstance(error, HTTPException) else str(error))
+        options.append(dict(experimental, id='browser-http'))
+        p2p = dict(experimental, id='browser-p2p')
+        if p2p['available'] and (not torrent_bundle.is_file() or os.getenv('RETROONE_P2P_ENABLED', '1') == '0'):
+            p2p.update(available=False, reason='WebTorrent 组件尚未启用，请选择 HTTP 下载')
+        options.append(p2p)
+        return JSONResponse({'options': options, 'max_bytes': browser_runtime.max_bytes}, headers={'Cache-Control': 'no-store'})
+
+    @app.get('/vendor/webtorrent.min.js')
+    def webtorrent_client():
+        if not torrent_bundle.is_file():
+            raise HTTPException(404, 'WebTorrent 组件尚未安装')
+        return FileResponse(torrent_bundle, media_type='text/javascript', headers={'Cache-Control': 'public, max-age=3600'})
+
+    @app.get('/vendor/rom-chunk-store.js')
+    def torrent_chunk_store():
+        path = torrent_bundle.parent / 'rom-chunk-store.js'
+        if not path.is_file():
+            raise HTTPException(404, 'WebTorrent 存储组件尚未安装')
+        return FileResponse(path, media_type='text/javascript', headers={'Cache-Control': 'public, max-age=3600'})
+
+    @app.get('/api/games/{game_id}/browser-manifest')
+    def browser_manifest(game_id: str, transport: Literal['http', 'p2p'] = 'http'):
+        game, path = experiment_game(game_id)
+        state = browser_runtime.inspect(game)
+        current = rom_revision(path)
+        name = game_id + path.suffix.lower()
+        download_url = url(f'/api/games/{game_id}/browser-rom/{name}') + '?revision=' + current
+        result = {'name': name, 'size': state['size_bytes'], 'revision': current, 'download_url': download_url}
+        if transport == 'p2p':
+            try:
+                result.update(torrents().manifest(path, name, download_url=download_url, expected_revision=current))
+            except (OSError, ValueError) as error:
+                raise HTTPException(409, '无法准备游戏分片，请刷新后重试') from error
+        result.update(requires_threads=state['requires_threads'], requires_webgl2=state['requires_webgl2'], unpacked_bytes=state['unpacked_bytes'])
+        return JSONResponse(result, headers={'Cache-Control': 'no-store'})
+
+    @app.api_route('/api/games/{game_id}/browser-rom/{filename}', methods=['GET', 'HEAD'])
+    def experimental_rom(game_id: str, filename: str, revision: str = Query(..., pattern='^[a-f0-9]{64}$')):
+        _, path = experiment_game(game_id)
+        if filename != game_id + path.suffix.lower():
+            raise HTTPException(404, '文件不存在')
+        if rom_revision(path) != revision:
+            raise HTTPException(409, '游戏文件已变化，请刷新后重新下载')
+        return FileResponse(path, media_type='application/octet-stream', headers={'Cache-Control': 'private, no-store'})
+
     @app.post('/api/games/{game_id}/launch')
     def launch(game_id: str, body: LaunchBody | None = None):
-        game = resolved_game(game_or_404(game_id), body.mode if body else None)
+        requested_mode = body.mode if body else None
+        experimental = requested_mode in {'browser-http', 'browser-p2p'}
+        if experimental:
+            game, _ = experiment_game(game_id)
+            if requested_mode == 'browser-p2p':
+                torrents()
+        else:
+            game = resolved_game(game_or_404(game_id), requested_mode)
         room_id = str(body.network_room_id) if body and body.network_room_id else None
         if room_id and body.replace_session_id:
             raise HTTPException(422, '联机启动不会自动替换游戏，请先明确结束当前会话')
@@ -704,13 +856,15 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
         if requested not in {'browser', 'stream'}:
             raise HTTPException(409, game.get('reason') or '该平台尚未配置运行环境')
         if requested == 'browser':
-            browser_rom(game)
+            if not experimental:
+                browser_rom(game)
             if not (browser_data / 'loader.js').is_file():
                 raise HTTPException(503, '浏览器模拟器资源尚未安装')
             if platform_definitions().get(game['platform'], {}).get('requires_bios') and not bios_for(game['platform']):
                 raise HTTPException(409, '游戏需要 BIOS；已保留游戏，待配置对应固件')
             catalog.mark_played(game_id)
-            return {'mode': 'browser', 'play_url': url(f'/play/{game_id}'), 'profile_id': profile_id}
+            query = '?experimental=true&transport=' + ('p2p' if requested_mode == 'browser-p2p' else 'http') if experimental else ''
+            return {'mode': 'browser', 'play_url': url(f'/play/{game_id}') + query, 'profile_id': profile_id}
         if game.get('blocked_reason'):
             raise HTTPException(409, game['blocked_reason'])
         runtime = capabilities(force=True)
@@ -832,10 +986,13 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
         return FileResponse(path, headers={'Cache-Control': 'public, max-age=86400'})
 
     @app.get('/api/games/{game_id}/bios')
-    def bios(game_id: str):
-        game = game_or_404(game_id)
-        browser_rom(game)
-        path = bios_for(game['platform'])
+    def bios(game_id: str, experimental: bool = False):
+        if experimental:
+            game, _ = experiment_game(game_id)
+        else:
+            game = game_or_404(game_id)
+            browser_rom(game)
+        path = experiment_bios(game) if experimental else bios_for(game['platform'])
         if not path:
             raise HTTPException(404, '未找到对应 BIOS')
         return FileResponse(path, media_type='application/octet-stream')
@@ -871,15 +1028,21 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
         return {'saved': True, 'size': len(data)}
 
     @app.get('/play/{game_id}', response_class=HTMLResponse)
-    def play(game_id: str, request: Request, restore: bool = False):
+    def play(game_id: str, request: Request, restore: bool = False, experimental: bool = False, transport: Literal['http', 'p2p'] = 'http'):
         locale = request_locale(request)
         messages = player_messages(locale)
-        game = resolved_game(game_or_404(game_id), 'browser')
-        path = browser_rom(game)
+        if experimental:
+            game, path = experiment_game(game_id)
+            if transport == 'p2p':
+                torrents()
+        else:
+            game = resolved_game(game_or_404(game_id), 'browser')
+            path = browser_rom(game)
         if not (browser_data / 'loader.js').is_file():
             raise HTTPException(503, messages['browser_resources_missing'])
-        path = browser_payload(game, path)
-        bios_path = bios_for(game['platform'])
+        if not experimental:
+            path = browser_payload(game, path)
+        bios_path = experiment_bios(game) if experimental else bios_for(game['platform'])
         if platform_definitions().get(game['platform'], {}).get('requires_bios') and not bios_path:
             raise HTTPException(409, messages['browser_bios_missing'])
         # Player1 retains the historical storage keys, including already-created
@@ -891,19 +1054,30 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
                     'EJS_defaultControls': DEFAULT_CONTROLS, 'EJS_language': emulator_locale(locale), 'EJS_color': '#64d9f3', 'EJS_backgroundColor': '#0b1424',
                     'EJS_startOnLoaded': False, 'EJS_startButtonName': messages['start_game'], 'EJS_defaultOptions': {'save-state-location': 'download'}}
         if bios_path:
-            settings['EJS_biosUrl'] = url(f'/api/games/{game_id}/bios')
+            settings['EJS_biosUrl'] = url(f'/api/games/{game_id}/bios') + ('?experimental=true' if experimental else '')
+        if experimental:
+            settings['EJS_CacheLimit'] = 0
         if restore and save_path(game_id).is_file():
             settings['EJS_loadStateURL'] = url(f'/api/games/{game_id}/save-state')
         settings_json = json.dumps(settings, ensure_ascii=False).replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
         messages_json = json.dumps(messages, ensure_ascii=False).replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
         title = html.escape(game['title'])
         home_url, play_url, save_url = url('/'), url(f'/play/{game_id}'), url(f'/api/games/{game_id}/save-state')
+        restore_url = play_url + ('?experimental=true&transport=' + transport + '&restore=true' if experimental else '?restore=true')
         storage_namespace = '' if profile_id == 'player1' else f'RetroOne-{profile_id}-'
         bridge = ROOT / 'web' / 'emulator-input.js'
         bridge_version = hashlib.sha256(bridge.read_bytes()).hexdigest()[:16] if bridge.is_file() else 'pending'
+        runtime_script = f'<script src="{url("/emulatorjs/data/loader.js")}"></script>'
+        if experimental:
+            config = {'transport': transport, 'manifestUrl': url(f'/api/games/{game_id}/browser-manifest') + '?transport=' + transport,
+                      'loaderUrl': url('/emulatorjs/data/loader.js'), 'webtorrentUrl': url('/vendor/webtorrent.min.js'),
+                      'chunkStoreUrl': url('/vendor/rom-chunk-store.js'), 'locale': locale}
+            transfer_script = ROOT / 'web/rom-transfer.js'
+            version = hashlib.sha256(transfer_script.read_bytes()).hexdigest()[:16] if transfer_script.is_file() else 'pending'
+            runtime_script = '<script>window.RetroRomTransferConfig=' + json.dumps(config).replace('<', '\\u003c') + ';</script>' + f'<script src="{url("/rom-transfer.js")}?v={version}"></script>'
         document = f'''<!doctype html><html lang="{locale}"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>{title} · RetroOne</title><link rel="icon" href="{url('/favicon.svg')}" type="image/svg+xml">
 <style>html,body{{margin:0;background:#08111e;color:#deedf7;font:14px system-ui;height:100%;width:100%;min-height:0}}body{{display:flex;flex-direction:column}}header{{display:flex;gap:8px 12px;align-items:center;padding:8px 12px;flex-wrap:wrap;flex-shrink:0}}a{{color:#7de5f8;text-decoration:none}}h1{{font-size:16px;font-weight:500;margin:0}}#game{{flex:1;min-height:0;position:relative;overflow:hidden}}footer{{padding:6px 12px;color:#9dacc2;font-size:12px;flex-shrink:0}}button{{background:#162a42;color:#deedf7;border:1px solid #31506d;border-radius:5px;padding:6px 9px;cursor:pointer}}#status{{color:#c4d3e3}}@media(max-height:480px){{footer{{display:none}}header{{font-size:12px;padding:4px 8px}}}}</style>
-<header><a class="back-link" href="{home_url}" onclick="leave();return false">← {html.escape(messages['back_library'])}</a><h1>{title}</h1><a href="{play_url}?restore=true">{html.escape(messages['load_server_save'])}</a><a href="{save_url}">{html.escape(messages['export_server_save'])}</a><label><button onclick="document.getElementById('save-upload').click()">{html.escape(messages['upload_existing_save'])}</button><input hidden type="file" id="save-upload" accept=".state"></label><span id="status"></span></header>
+<header><a class="back-link" href="{home_url}" onclick="leave();return false">← {html.escape(messages['back_library'])}</a><h1>{title}</h1><a href="{html.escape(restore_url)}">{html.escape(messages['load_server_save'])}</a><a href="{save_url}">{html.escape(messages['export_server_save'])}</a><label><button onclick="document.getElementById('save-upload').click()">{html.escape(messages['upload_existing_save'])}</button><input hidden type="file" id="save-upload" accept=".state"></label><span id="status"></span></header>
 <div id="game"></div><footer>{html.escape(messages['controls_help'])}</footer>
 <script>
 // IDBFS uses a fixed /data/saves database upstream. Scope only personal data;
@@ -915,7 +1089,7 @@ const status=document.getElementById('status');const messages={messages_json};
 async function backupState(blob){{const response=await fetch('{save_url}',{{method:'PUT',body:blob}});if(!response.ok)throw Error((await response.json()).detail);status.textContent=messages.save_backed_up}}
 window.EJS_onSaveState=async(event)=>{{if(!event||!event.state){{status.textContent=messages.save_invalid;return}}const blob=new Blob([event.state],{{type:'application/octet-stream'}});const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download='{game_id}.state';link.click();setTimeout(()=>URL.revokeObjectURL(url),10000);try{{await backupState(blob)}}catch(error){{status.textContent=messages.save_downloaded_backup_failed+error.message}}}};
 document.getElementById('save-upload').addEventListener('change',async(e)=>{{const file=e.target.files[0];if(!file)return;if(file.size>{MAX_SAVE_SIZE}){{status.textContent=messages.save_too_large;return}}try{{await backupState(file)}}catch(error){{status.textContent=messages.save_backup_failed+error.message}}}});
-</script><script src="{url('/emulator-input.js')}?v={bridge_version}"></script><script src="{url('/emulatorjs/data/loader.js')}"></script></html>'''
+</script><script src="{url('/emulator-input.js')}?v={bridge_version}"></script>{runtime_script}</html>'''
         return HTMLResponse(document, headers={'Content-Language': locale, 'Vary': 'Accept-Language', 'Cache-Control': 'no-store'})
 
     # Only bundled application/vendor files are static mounts. ROMs are never mounted.

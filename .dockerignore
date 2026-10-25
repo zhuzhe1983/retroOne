@@ -1,5 +1,7 @@
 .git
 .venv
+**/node_modules
+container/p2p/dist
 .pytest_cache
 **/__pycache__
 artifacts

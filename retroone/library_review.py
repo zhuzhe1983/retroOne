@@ -10,8 +10,10 @@ import json
 import re
 import threading
 import os
+import stat
 import tempfile
 from bisect import bisect_left
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
 LABELS = {
@@ -23,6 +25,23 @@ LABELS = {
 }
 ID = re.compile(r'^[a-f0-9]{24}$')
 SHA = re.compile(r'^[a-f0-9]{64}$')
+
+
+@dataclass(frozen=True)
+class _Sidecars:
+    stamp: tuple
+    prefix: str
+    names: frozenset[str]
+    folded: frozenset[str]
+    ordered: list[str]
+
+
+@dataclass
+class _ValidationBatch:
+    # Only directory work is shared. Every source is still lstat'ed on every
+    # validation, and each public validation call starts a fresh batch.
+    parents: dict[Path, bool] = field(default_factory=dict)
+    sidecars: dict[Path, _Sidecars] = field(default_factory=dict)
 
 
 def publish_report(report: dict, destination: Path) -> dict:
@@ -183,32 +202,41 @@ class ReviewIndex:
                 self.entries, self.groups, self.key = {}, {}, None
                 self.known_sources, self.directory_cache = set(), {}
 
-    def _sidecars(self, path: Path) -> bool:
+    def _sidecars(self, path: Path, batch: _ValidationBatch) -> bool:
         parent = path.parent
         stem = path.stem.casefold()
-        if path.relative_to(self.root).as_posix() not in self.known_sources:
+        cached = batch.sidecars.get(parent)
+        if cached is None:
+            info = parent.stat()
+            stamp = (info.st_mtime_ns, info.st_ctime_ns, info.st_ino, info.st_dev)
+            cached = self.directory_cache.get(parent)
+            if cached is None or cached.stamp != stamp:
+                # A collection can contain thousands of known ROMs. Compute
+                # its relative prefix once, without constructing a Path for
+                # every sibling. Entries of any type can be sidecars.
+                relative = parent.relative_to(self.root).as_posix()
+                prefix = '' if relative == '.' else relative + '/'
+                with os.scandir(parent) as entries:
+                    names = frozenset(item.name for item in entries
+                                      if prefix + item.name not in self.known_sources)
+                folded = frozenset(name.casefold() for name in names)
+                cached = _Sidecars(stamp, prefix, names, folded, sorted(folded))
+                self.directory_cache[parent] = cached
+            batch.sidecars[parent] = cached
+        if cached.prefix + path.name not in self.known_sources:
             # Legacy/noncanonical indexes may omit the current source. Preserve
             # the original explicit exclusion, including case-colliding files.
-            return any(p != path and p.relative_to(self.root).as_posix() not in self.known_sources
-                       and (p.name.casefold() == stem or p.name.casefold().startswith(stem + '.'))
-                       for p in parent.iterdir())
-        info = parent.stat()
-        stamp = (info.st_mtime_ns, info.st_ctime_ns, info.st_ino)
-        cached = self.directory_cache.get(parent)
-        if not cached or cached[0] != stamp:
-            # A collection can contain thousands of known ROMs. Filter those
-            # once per directory change, then search only unowned sidecar names.
-            # Rewalking all siblings for every hidden alias makes each library
-            # request quadratic in large cartridge collections.
-            unknown = frozenset(p.name.casefold() for p in parent.iterdir()
-                                if p.relative_to(self.root).as_posix() not in self.known_sources)
-            cached = (stamp, unknown, sorted(unknown))
-            self.directory_cache[parent] = cached
+            return any(name != path.name and (name.casefold() == stem or name.casefold().startswith(stem + '.'))
+                       for name in cached.names)
         prefix = stem + '.'
-        index = bisect_left(cached[2], prefix)
-        return stem in cached[1] or (index < len(cached[2]) and cached[2][index].startswith(prefix))
+        index = bisect_left(cached.ordered, prefix)
+        return stem in cached.folded or (index < len(cached.ordered) and cached.ordered[index].startswith(prefix))
 
     def current(self, entry: dict) -> bool:
+        with self.lock:
+            return self._current(entry, _ValidationBatch())
+
+    def _current(self, entry: dict, batch: _ValidationBatch) -> bool:
         sources = entry.get('sources', [])
         if not sources:
             return False
@@ -219,12 +247,18 @@ class ReviewIndex:
                 if relative.is_absolute() or '..' in relative.parts or '\\' in name:
                     return False
                 path = self.root / name
-                if path.is_symlink() or not path.resolve().is_relative_to(self.root):
+                # One non-following stat both rejects source symlinks and
+                # checks regular-file identity. Parent symlinks remain allowed
+                # when their resolved destination stays within the ROM root.
+                info = path.lstat()
+                if not stat.S_ISREG(info.st_mode) or any(getattr(info, 'st_' + key) != source[key] for key in ('size', 'mtime_ns', 'ctime_ns', 'ino')):
                     return False
-                info = path.stat()
-                if not path.is_file() or any(getattr(info, 'st_' + key) != source[key] for key in ('size', 'mtime_ns', 'ctime_ns', 'ino')):
+                parent = path.parent
+                if parent not in batch.parents:
+                    batch.parents[parent] = parent.resolve().is_relative_to(self.root)
+                if not batch.parents[parent]:
                     return False
-                if entry.get('fingerprint', {}).get('scope') in ('single_cartridge_payload', 'switch_nca_set') and self._sidecars(path):
+                if entry.get('fingerprint', {}).get('scope') in ('single_cartridge_payload', 'switch_nca_set') and self._sidecars(path, batch):
                     return False
             except (OSError, KeyError, TypeError, ValueError):
                 return False
@@ -249,9 +283,14 @@ class ReviewIndex:
 
     def rows(self) -> list[tuple]:
         """Called on index change or explicit scan; page/detail recheck evidence."""
-        self.load()
+        with self.lock:
+            self.load()
+            return self._rows()
+
+    def _rows(self) -> list[tuple]:
+        batch = _ValidationBatch()
         membership = {member: group for group, members in self.groups.items() for member in members}
-        valid = {key: self.current(value) for key, value in self.entries.items()}
+        valid = {key: self._current(value, batch) for key, value in self.entries.items()}
         invalid_groups = {group for group, members in self.groups.items() if not all(valid[m] for m in members)}
         result = []
         for game_id, entry in self.entries.items():
@@ -268,7 +307,9 @@ class ReviewIndex:
 
     def changed_groups(self) -> set[str]:
         """Check every hidden alias, so a changed alias cannot stay concealed."""
-        return {g for g, members in self.groups.items() if not all(self.current(self.entries[m]) for m in members)}
+        with self.lock:
+            batch = _ValidationBatch()
+            return {g for g, members in self.groups.items() if not all(self._current(self.entries[m], batch) for m in members)}
 
     def public(self, game: dict, entry: dict | None, status: str | None = None) -> dict:
         review = {'variant_tags': filename_tags(Path(game.get('rom_path', '')).name),

@@ -257,6 +257,7 @@ class Catalog:
         self._reviews = ReviewIndex(self.rom_root, self.library_data_root / 'metadata' / 'library-review.json')
         self._review_key = object()
         self._review_lock = threading.RLock()
+        self._review_generation = 0
         self._media_roots: dict[Path, bool] = {}
         self.scan_status = {'running': False, 'scanned': 0, 'errors': 0, 'started_at': None, 'finished_at': None, 'last_error': None, 'error_types': {}, 'warning_samples': []}
         with self.connect() as db:
@@ -335,6 +336,7 @@ class Catalog:
             return db.execute('SELECT 1 FROM games LIMIT 1').fetchone() is not None
 
     def _sync_reviews(self):
+        generation = self._review_generation
         with self._review_lock:
             self._reviews.load()
             if self._review_key != self._reviews.key:
@@ -343,10 +345,19 @@ class Catalog:
                     db.execute('DELETE FROM game_reviews')
                     db.executemany('INSERT INTO game_reviews VALUES(?,?,?,?)', rows)
                 self._review_key = self._reviews.key
+                # rows() already validates every source, including hidden aliases.
+                self._review_generation += 1
+                return
+            if generation != self._review_generation:
+                # A complete validation finished while this request waited. Share
+                # that snapshot with overlapping requests only: the next request
+                # still rechecks every alias, without a stale-validity TTL.
+                return
             invalid = self._reviews.changed_groups()
             if invalid:
                 with self.connect() as db:
                     db.executemany("UPDATE game_reviews SET group_id=NULL,status='stale' WHERE group_id=?", [(g,) for g in invalid])
+            self._review_generation += 1
 
     def begin_scan(self) -> bool:
         if not self._scan_lock.acquire(blocking=False):
@@ -789,7 +800,7 @@ class Catalog:
             return self._decode(row) if row else None
 
     def _query(self, *, q='', platform='', mode='', favorite=False, recent=False,
-               review_filter='', sort='default', direction=None):
+               review_filter='', sort='default', direction=None, count_only=False):
         if sort not in SORT_OPTIONS or direction not in (None, 'asc', 'desc'):
             raise ValueError('无效的游戏排序方式')
         where, values = ['1=1'], []
@@ -815,6 +826,11 @@ class Catalog:
             where.append("coalesce(r.status,'unverified') NOT IN ('dependency_error','load_failed','boot_observed','input_observed','gameplay_observed')")
         clause = ' AND '.join(where)
         joins = 'FROM games g LEFT JOIN favorites f ON f.game_id=g.id LEFT JOIN history h ON h.game_id=g.id LEFT JOIN game_play_counts pc ON pc.game_id=g.id LEFT JOIN game_reviews r ON r.game_id=g.id'
+        if count_only:
+            # Counting identities does not need to sort each group or choose its
+            # representative. Keep precisely the same filters and mode boundary.
+            return f'''SELECT count(*) FROM (SELECT coalesce(r.group_id,g.id),g.mode
+                {joins} WHERE {clause} GROUP BY coalesce(r.group_id,g.id),g.mode)''', '', values
         selection = f'''WITH ranked AS (SELECT g.id,coalesce(r.group_id,g.id) identity,g.mode,
             coalesce(f.favorite,0) favorite,h.played_at,coalesce(pc.play_count,0) play_count,
             row_number() OVER (PARTITION BY coalesce(r.group_id,g.id),g.mode ORDER BY h.played_at DESC,coalesce(f.favorite,0) DESC,g.id) choice
@@ -839,8 +855,11 @@ class Catalog:
         self._sync_reviews()
         selection, order, values = self._query(q=q, platform=platform, mode=mode, favorite=favorite,
                                               recent=recent, review_filter=review_filter, sort=sort, direction=direction)
+        count_query, _, _ = self._query(q=q, platform=platform, mode=mode, favorite=favorite,
+                                       recent=recent, review_filter=review_filter, sort=sort, direction=direction,
+                                       count_only=True)
         with self.connect() as db:
-            total = db.execute(selection + ' SELECT count(*) FROM ranked WHERE choice=1', values).fetchone()[0]
+            total = db.execute(count_query, values).fetchone()[0]
             rows = db.execute(f'''{selection} SELECT g.*,ranked.favorite,ranked.played_at,ranked.play_count,r.payload review_payload,r.group_id,r.status review_status
                 FROM ranked JOIN games g ON g.id=ranked.id LEFT JOIN game_reviews r ON r.game_id=g.id
                 WHERE choice=1 ORDER BY {order} LIMIT ? OFFSET ?''', [*values, limit, offset]).fetchall()
@@ -860,7 +879,8 @@ class Catalog:
                 ON n.identity=target.identity AND n.mode=target.mode WHERE target.id=?''', [*values, game_id]).fetchone()
             if row:
                 return {'previous_id': row['previous_id'], 'next_id': row['next_id'], 'index': row['position'], 'total': row['total']}
-            total = db.execute(selection + ' SELECT count(*) FROM ranked WHERE choice=1', values).fetchone()[0]
+            count_query, _, _ = self._query(**filters, count_only=True)
+            total = db.execute(count_query, values).fetchone()[0]
             return {'previous_id': None, 'next_id': None, 'index': None, 'total': total}
 
     def platforms(self) -> list[dict]:

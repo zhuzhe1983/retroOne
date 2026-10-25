@@ -13,7 +13,7 @@
   'use strict';
   const MiB = 1024 * 1024, HARD_LIMIT = 1024 * MiB, MEMORY_LIMIT = 128 * MiB;
   const WORDS = {
-    prepare: ['正在准备本机游戏', 'Preparing local play'],
+    prepare: ['正在准备浏览器游戏', 'Preparing browser play'],
     manifest: ['正在检查游戏文件…', 'Checking the game file…'],
     download: ['正在下载完整 ROM', 'Downloading the complete ROM'],
     loading: ['下载完成，正在加载模拟器…', 'Download complete. Loading the emulator…'],
@@ -23,6 +23,7 @@
     http: ['改用 HTTP 下载', 'Use HTTP download'],
     failed: ['下载未完成', 'Download did not finish'],
     fallback: ['没有其他浏览器时，会从 NAS 的 HTTP 节点下载。', 'Without other browser peers, the NAS HTTP node supplies the download.'],
+    direct: ['已改为从 NAS 直接下载，仍将在浏览器运行。', 'Downloading directly from the NAS. The game will still run in your browser.'],
     hint: ['完整下载后才开始模拟；游戏运行时会占用更多内存。', 'Emulation starts after the full download and uses additional memory.'],
     server: ['NAS HTTP', 'NAS HTTP'],
     peer: ['浏览器互传', 'Browser peers'],
@@ -47,6 +48,14 @@
   const message = (key, locale) => (WORDS[key] || WORDS.network)[locale === 'en' ? 1 : 0];
   const error = key => Object.assign(new Error(key), {transferCode: key});
   const abortError = () => Object.assign(new Error('Cancelled'), {name: 'AbortError'});
+  function transferError(problem, fallback = 'network') {
+    if (problem?.transferCode || problem?.name === 'AbortError') return problem;
+    if (problem?.name === 'QuotaExceededError') return error('quota');
+    if (problem?.name === 'RangeError' || /out of memory|allocation failed|cannot allocate/i.test(problem?.message || '')) return error('memory');
+    if (/failed verification|hash mismatch/i.test(problem?.message || '')) return error('mismatch');
+    if (problem?.name === 'SyntaxError' || /invalid torrent|torrent is missing required field|invalid (?:bencode|metadata)/i.test(problem?.message || '')) return error('invalid');
+    return error(fallback);
+  }
   const bytes = value => `${(Math.max(0, Number(value) || 0) / MiB).toFixed(1)} MiB`;
 
   function sameOriginURL(value, location, websocket = false) {
@@ -168,7 +177,7 @@
       const retry = button(this.text('retry'), () => this.start(this.config.transport)); retry.hidden = true;
       const http = button(this.text('http'), () => this.start('http')); http.hidden = true;
       panel.append(title, detail, progress, stats, hint, actions); game.replaceChildren(panel);
-      this.ui = {panel, title, detail, progress, stats, cancel, retry, http};
+      this.ui = {panel, title, detail, progress, stats, hint, cancel, retry, http};
     }
     update() {
       const size = this.manifest?.size || 0, stats = this.stats.snapshot();
@@ -208,18 +217,22 @@
       // A sibling preserves the game's existing save-status text and controls.
       status.after(wrapper); this.sharing = {wrapper, label, button}; this.update();
     }
-    async start(transport = this.config.transport) {
+    async start(transport = this.config.transport, fallbackFrom = null) {
       this.cancel(false); this.sharing?.wrapper.remove(); this.sharing = null;
       if (this.unloaded) return;
       if (!['http', 'p2p'].includes(transport)) { this.phase = 'error'; return; }
       this.config.transport = transport; this.phase = 'preparing'; this.stats = createStats(); this.received = 0; this.manifest = null; this.failure = null;
       this.abort = new this.env.AbortController(); const epoch = this.epoch, signal = this.abort.signal;
       this.render(); let deadline;
+      if (fallbackFrom) this.ui.hint.textContent = `${this.text('direct')} ${this.text('hint')}`;
       try {
         const manifestURL = new URL(sameOriginURL(this.config.manifestUrl, this.env.location));
         manifestURL.searchParams.set('transport', transport);
         deadline = this.env.setTimeout(() => { if (epoch === this.epoch) { this.failure = 'timeout'; this.abort?.abort(); } }, 120000);
-        const response = await this.env.fetch(manifestURL.href, {signal, credentials: 'same-origin', cache: 'no-store'});
+        const response = await this.env.fetch(manifestURL.href, {signal, credentials: 'same-origin', cache: 'no-store'}).catch(problem => {
+          if (problem.name === 'AbortError') throw problem;
+          throw error('network');
+        });
         if (!response.ok) throw error('network');
         const manifest = validateManifest(await response.json(), transport, this.env.location);
         this.check(epoch); this.manifest = manifest;
@@ -256,12 +269,23 @@
         if (this.client) this.sharingStatus(); else this.clearTimers();
       } catch (problem) {
         if (epoch !== this.epoch || this.unloaded) return;
+        const code = this.failure || transferError(problem, 'invalid').transferCode;
+        // Both transports serve the same browser game. A failed peer client
+        // must not force a new launch choice, but integrity/resource failures
+        // and explicit cancellation must never be bypassed by an HTTP retry.
+        const retryDirect = transport === 'p2p' && this.phase !== 'loading' &&
+          ['unsupported', 'component', 'network', 'timeout'].includes(code);
         this.clearTimers(); this.destroyClient();
+        if (retryDirect) {
+          if (deadline !== null && deadline !== undefined) this.env.clearTimeout(deadline);
+          deadline = null;
+          return this.start('http', code);
+        }
         this.phase = 'error';
         if (!this.ui?.panel.isConnected) this.render();
         this.ui.title.textContent = this.text('failed');
-        this.ui.detail.textContent = this.text(this.failure || problem.transferCode || 'network');
-        this.ui.cancel.hidden = true; this.ui.retry.hidden = false; this.ui.http.hidden = transport !== 'p2p';
+        this.ui.detail.textContent = this.text(code || 'network');
+        this.ui.cancel.hidden = true; this.ui.retry.hidden = false; this.ui.http.hidden = true;
       } finally { if (deadline !== null && deadline !== undefined) this.env.clearTimeout(deadline); }
     }
     async downloadHTTP(manifest, epoch) {
@@ -318,11 +342,11 @@
           if (problem) reject(problem); else resolve(blob);
         };
         const aborted = () => finish(abortError());
-        const failed = () => {
+        const failed = problem => {
           if (!ownsClient()) { finish(abortError()); return; }
           if (this.phase === 'running') this.stopSharing(true);
           else if (settled) this.destroyClient();
-          else finish(error('network'));
+          else finish(transferError(problem));
         };
         signal.addEventListener('abort', aborted, {once: true});
         client.on('error', failed);
@@ -351,10 +375,13 @@
           torrent.on('error', failed);
           torrent.on('wire', wire => { if (ownsClient()) this.stats.attach(wire); });
           torrent.on('download', () => { if (ownsClient()) { this.received = Math.min(manifest.size, torrent.downloaded); this.lastProgress = Date.now(); } });
-          // Tracker warnings do not fail a download: HTTP Web Seed is enough.
-          torrent.on('warning', () => {});
+          // Tracker warnings leave the HTTP Web Seed usable. A rejected piece
+          // must not later trigger a direct download that bypasses its hash.
+          torrent.on('warning', problem => {
+            if (transferError(problem).transferCode === 'mismatch') failed(error('mismatch'));
+          });
           if (signal.aborted) aborted();
-        } catch (problem) { finish(error('component')); }
+        } catch (problem) { finish(transferError(problem, 'component')); }
       });
     }
   }

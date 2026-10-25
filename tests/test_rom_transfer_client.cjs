@@ -167,14 +167,104 @@ test('page exit closes the owned torrent and releases timers without touching ga
   await h.controller.start();assert.equal(h.clients.length,1,'an unloaded frame must not restart');
 });
 
-test('failed P2P downloads require explicit HTTP retry and do not silently start another mode',async()=>{
+test('failed P2P downloads automatically retry HTTP once and preserve the browser game identity',async()=>{
   const h=harness({transport:'p2p',autoDone:false});try{
+    h.env.EJS_gameName='player2-original-save';h.env.EJS_gameID=42;
     const first=h.controller.start();await flush();h.clients[0].emit('error',new Error('private diagnostic'));await first;
-    assert.equal(h.controller.phase,'error');assert.equal(h.requests.length,1);assert.equal(h.controller.ui.http.hidden,false);
-    assert.doesNotMatch(h.controller.ui.detail.textContent,/private diagnostic/);
-    await h.controller.start('http');assert.equal(h.controller.phase,'running');assert.equal(h.clients.length,1);
+    assert.equal(h.controller.phase,'running');assert.equal(h.clients.length,1);assert.equal(h.clients[0].destroyCalls,1);
     assert.equal(new URL(h.requests[1].url).searchParams.get('transport'),'http');
+    assert.equal(h.requests.length,3);assert.equal(h.controller.snapshot().transport,'http');
+    assert.equal(h.env.EJS_gameName,'player2-original-save');assert.equal(h.env.EJS_gameID,42);
+    assert.equal(h.scripts.filter(url=>url.endsWith('/loader.js')).length,1);
   }finally{h.controller.cancel(false);}
+});
+
+test('missing WebRTC falls back to HTTP without attempting peer discovery',async()=>{
+  const h=harness({transport:'p2p'});delete h.env.RTCPeerConnection;
+  try{await h.controller.start();assert.equal(h.controller.phase,'running');assert.equal(h.clients.length,0);assert.equal(h.controller.snapshot().transport,'http');}
+  finally{h.controller.cancel(false);}
+});
+
+test('a failed HTTP fallback is shown once instead of retrying forever',async()=>{
+  const h=harness({transport:'p2p',autoDone:false,fetch:async url=>url.includes('manifest')?{ok:true,json:async()=>fixture()}:{ok:false}});
+  try{
+    const run=h.controller.start();await flush();h.clients[0].emit('error',new Error('network'));await run;
+    assert.equal(h.controller.phase,'error');assert.equal(h.requests.length,3);assert.equal(h.controller.ui.retry.hidden,false);
+    assert.equal(h.controller.ui.http.hidden,true);assert.equal(h.intervals.size,0);assert.equal(h.timeouts.size,0);
+  }finally{h.controller.cancel(false);}
+});
+
+test('P2P stalls fall back to HTTP and discard timers from the old transfer',async()=>{
+  const h=harness({transport:'p2p',autoDone:false});
+  try{
+    const run=h.controller.start();await flush();h.controller.lastProgress=0;
+    for(const tick of [...h.intervals.values()])tick();await run;
+    assert.equal(h.controller.phase,'running');assert.equal(h.controller.snapshot().transport,'http');
+    assert.equal(h.clients[0].destroyCalls,1);assert.equal(h.intervals.size,0);assert.equal(h.timeouts.size,0);
+  }finally{h.controller.cancel(false);}
+});
+
+test('P2P integrity and memory failures do not bypass validation through HTTP',async()=>{
+  const corrupt=harness({transport:'p2p',fetch:async()=>({ok:true,json:async()=>({...fixture(),info_hash:'bad'})})});
+  try{await corrupt.controller.start();assert.equal(corrupt.controller.phase,'error');assert.equal(corrupt.requests.length,1);assert.equal(corrupt.scripts.length,0);}
+  finally{corrupt.controller.cancel(false);}
+  const lowMemory=harness({transport:'p2p',fetch:async()=>({ok:true,json:async()=>({...fixture(),size:100*MiB})})});lowMemory.env.navigator.deviceMemory=2;
+  try{await lowMemory.controller.start();assert.equal(lowMemory.controller.phase,'error');assert.equal(lowMemory.requests.length,1);assert.equal(lowMemory.scripts.length,0);}
+  finally{lowMemory.controller.cancel(false);}
+});
+
+test('runtime torrent storage, allocation and integrity errors never retry through HTTP',async()=>{
+  for (const [problem, expected] of [
+    [Object.assign(new Error('disk full'),{name:'QuotaExceededError'}),'insufficient free storage'],
+    [new RangeError('Array buffer allocation failed'),'memory allowance'],
+    [Object.assign(new Error('content changed'),{transferCode:'mismatch'}),'content identity changed'],
+    [Object.assign(new Error('bad metadata'),{transferCode:'invalid'}),'Invalid download information'],
+    [new Error('Invalid torrent identifier'),'Invalid download information'],
+    [new Error('Torrent is missing required field'),'Invalid download information'],
+    [Object.assign(new Error('cancelled'),{name:'AbortError'}),'download connection failed'],
+  ]) {
+    const h=harness({transport:'p2p',autoDone:false});
+    try {
+      const run=h.controller.start();await flush();h.clients[0].torrent.emit('error',problem);await run;
+      assert.equal(h.controller.phase,'error');assert.equal(h.requests.length,1);assert.equal(h.scripts.length,0);
+      assert.ok(h.controller.ui.detail.textContent.toLowerCase().includes(expected.toLowerCase()));
+      assert.equal(h.controller.ui.http.hidden,true);assert.equal(h.clients[0].destroyCalls,1);
+      assert.equal(h.intervals.size,0);assert.equal(h.timeouts.size,0);
+    }finally{h.controller.cancel(false);}
+  }
+});
+
+test('malformed manifest JSON does not retry but a manifest network rejection can retry HTTP once',async()=>{
+  for(const malformed of [true,false]){
+    const h=harness({transport:'p2p',fetch:async(url,options,count)=>{
+      if(count===1){if(malformed)return {ok:true,json:async()=>{throw new SyntaxError('invalid JSON');}};throw new TypeError('Failed to fetch');}
+      return url.includes('manifest')?{ok:true,json:async()=>fixture()}:new Response(new Uint8Array(64));
+    }});
+    try{await h.controller.start();assert.equal(h.controller.phase,malformed?'error':'running');assert.equal(h.requests.length,malformed?1:3);assert.equal(h.clients.length,0);}
+    finally{h.controller.cancel(false);}
+  }
+});
+
+test('failed piece verification stops before HTTP fallback but tracker warnings leave the web seed usable',async()=>{
+  const h=harness({transport:'p2p',autoDone:false});
+  try {
+    const run=h.controller.start();await flush();
+    h.clients[0].torrent.emit('warning',new Error('Tracker connection failed'));await flush();
+    assert.equal(h.controller.phase,'downloading');assert.equal(h.requests.length,1);
+    h.clients[0].torrent.emit('warning',new Error('Piece 0 failed verification'));await run;
+    assert.equal(h.controller.phase,'error');assert.equal(h.requests.length,1);assert.equal(h.scripts.length,0);
+    assert.match(h.controller.ui.detail.textContent,/content identity changed/);
+    assert.equal(h.intervals.size,0);assert.equal(h.clients[0].destroyCalls,1);
+  }finally{h.controller.cancel(false);}
+});
+
+test('cancelling while HTTP fallback is preparing cannot restart emulation',async()=>{
+  let resolveFallback;
+  const h=harness({transport:'p2p',autoDone:false,fetch:async(url,options,count)=>count===1?{ok:true,json:async()=>fixture()}:new Promise(resolve=>resolveFallback=resolve)});
+  const run=h.controller.start();await flush();h.clients[0].emit('error',new Error('network'));await flush();
+  assert.equal(h.requests.length,2);h.controller.cancel();resolveFallback({ok:true,json:async()=>fixture()});await run;
+  assert.equal(h.controller.phase,'cancelled');assert.equal(h.requests.length,2);assert.equal(h.scripts.length,0);
+  assert.equal(h.timeouts.size,0);assert.equal(h.intervals.size,0);
 });
 
 test('late events from a cancelled torrent cannot stop the replacement client or pollute its statistics',async()=>{

@@ -43,7 +43,7 @@
     favorites: initial.get('favorite') === 'true', recent: initial.get('recent') === 'true', reviewFilter: validReviewFilter(initial.get('review_filter')), selected: null, initialGame: initial.get('game'),
     loading: false, request: 0, controller: null, session: null, playMode: null, health: null, connectionStatus: 'connecting',
     favoritePending: new Set(), scanPending: false, wasScanning: false, healthRefreshing: false,
-    detailRequest: 0, focusReturn: null, launching: false, launchOptions: null, launchChoice: 'auto',
+    detailRequest: 0, focusReturn: null, launching: false, launchOptions: null, launchChoice: 'auto', browserP2P: remembered('retroone:browser-p2p') !== 'false',
     profile: null, profiles: [], profileEpoch: 0, profileRequests: new Set(), profileEditing: null, profileEditEnter: false, profileAvatar: 'pixel', pendingProfile: null, profileSaving: false,
     profileRegistryEpoch: 0, profileLoading: false, profileCreateRequestId: null, profileWatchId: null, profileRetrying: new Set(), profileCapacity: null,
     playGameId: null, familySelectedId: null, presenceStale: false, presenceEpoch: 0,
@@ -1315,7 +1315,7 @@
     return `<p class="detail-popularity">${icon('info')}<span>${escapeHTML(t('公开热度参考'))}${value ? ` · <strong>${escapeHTML(value)}</strong>` : ''} · <a href="${escapeHTML(url)}" target="_blank" rel="noopener noreferrer">${escapeHTML(metric.source)}</a>${typeof metric.as_of === 'string' ? ` · ${escapeHTML(metric.as_of)}` : ''}</span></p>`;
   }
   function launchOptionLabel(id) {
-    return t({'auto': '自动选择（推荐）', 'stream': '云游戏', 'browser-http': '本机 WASM · HTTP 下载（实验）', 'browser-p2p': '本机 WASM · WebTorrent（实验）'}[id] || '未知启动方式');
+    return t({'auto': '自动选择（推荐）', 'stream': '云游戏', 'browser': '浏览器运行（实验）'}[id] || '未知启动方式');
   }
   let launchWebGL2;
   function launchClientCapabilities() {
@@ -1338,7 +1338,7 @@
       let reason = typeof original.reason === 'string' ? original.reason : '';
       let available = original.available === true;
       if (available && id === 'browser-p2p' && (!capabilities.secure || !capabilities.rtc || !capabilities.crypto)) {
-        available = false; reason = t('WebTorrent 需要 HTTPS，以及支持 WebRTC 和文件校验的浏览器。');
+        available = false; reason = t('P2P 分享需要 HTTPS，以及支持 WebRTC 和文件校验的浏览器。');
       }
       if (available && original.requires_threads && (!capabilities.threads || !capabilities.webgl2)) {
         available = false; reason = t('此内核需要 HTTPS、跨源隔离、共享内存和 WebGL 2；当前浏览器环境不满足。');
@@ -1346,6 +1346,19 @@
       options.push({...original, available, reason});
     }
     return options;
+  }
+  function mergeBrowserLaunchOptions(options, allowP2P = true) {
+    const http = options.find(option => option.id === 'browser-http');
+    const p2p = options.find(option => option.id === 'browser-p2p');
+    const chosen = allowP2P && p2p?.available ? p2p : http?.available ? http : null;
+    return ['auto', 'stream'].map(id => options.find(option => option.id === id) || {id, available: false}).concat({
+      ...(chosen || http || p2p), id: 'browser', available: Boolean(chosen), launchMode: chosen?.id || null,
+      reason: chosen ? '' : http?.reason || (!allowP2P && p2p?.available ? t('当前无法直接下载；可开启 P2P 分享后重试，或选择云游戏。') : p2p?.reason || t('当前游戏暂不支持浏览器运行。')),
+    });
+  }
+  function setBrowserP2PPreference(allowed) {
+    state.browserP2P = Boolean(allowed);
+    remember('retroone:browser-p2p', String(state.browserP2P));
   }
   function currentLaunchOptions(game) {
     const record = state.launchOptions;
@@ -1356,17 +1369,19 @@
   }
   function selectedLaunchMode(game) {
     const same = Boolean(game && state.launchOptions && state.launchOptions.gameId === game.id && state.launchOptions.epoch === state.profileEpoch);
-    return same ? state.launchChoice : 'auto';
+    if (!same) return 'auto';
+    return state.launchChoice === 'browser' ? mergeBrowserLaunchOptions(currentLaunchOptions(game), state.browserP2P).find(option => option.id === 'browser').launchMode : state.launchChoice;
   }
   function renderLaunchChoices(game) {
     const holder = $('launch-choices');
     if (!holder || !game || state.selected?.id !== game.id) return;
     const focusedId = holder.contains(document.activeElement) ? document.activeElement.id : null;
-    const record = state.launchOptions, options = currentLaunchOptions(game);
-    if (!options.some(option => option.id === state.launchChoice && option.available)) state.launchChoice = 'auto';
-    const selected = options.find(option => option.id === selectedLaunchMode(game));
-    const experimental = selected?.id.startsWith('browser-');
-    const peerNote = selected?.id === 'browser-p2p' ? `<p>${escapeHTML(t('由 NAS 的 HTTP 节点提供完整下载；其他家庭设备共享同一游戏时，可通过 WebRTC 互传。'))}</p>` : '';
+    const advancedOpen = holder.querySelector('.launch-advanced')?.open;
+    const record = state.launchOptions, options = mergeBrowserLaunchOptions(currentLaunchOptions(game), state.browserP2P);
+    if (!options.some(option => option.id === state.launchChoice)) state.launchChoice = 'auto';
+    const selected = options.find(option => option.id === state.launchChoice);
+    const experimental = selected?.id === 'browser';
+    const advanced = `<details class="launch-advanced" ${advancedOpen ? 'open' : ''}><summary>${escapeHTML(t('高级设置'))}</summary><button type="button" id="launch-allow-p2p" class="launch-p2p-toggle" role="switch" aria-checked="${state.browserP2P}" aria-describedby="launch-p2p-note" ${state.launching ? 'disabled' : ''}><span>${escapeHTML(t('允许 P2P 分享'))}</span><span class="launch-switch-track" aria-hidden="true"></span></button><p id="launch-p2p-note">${escapeHTML(t('开启后可从其他家庭设备接收游戏分片，也会向它们分享。关闭后仅从服务器下载；不支持 P2P 时也会自动从服务器下载。'))}</p><p>${escapeHTML(t('仅保存在这台设备，下次启动浏览器游戏时生效。'))}</p></details>`;
     const unavailable = options.filter(option => !option.available);
     const note = $('game-detail').querySelector('.detail-note');
     // The selected mode owns the description; the legacy note is reserved for
@@ -1374,11 +1389,14 @@
     if (note) note.hidden = !state.launching;
     const defaultReason = $('game-detail').querySelector('.detail-reason');
     if (defaultReason) defaultReason.hidden = selected?.id !== 'auto';
-    holder.innerHTML = `<label for="launch-mode">${escapeHTML(t('启动方式'))}</label><select id="launch-mode" aria-describedby="launch-mode-note" ${state.launching ? 'disabled' : ''}>${options.map(option => `<option value="${escapeHTML(option.id)}" ${option.id === state.launchChoice ? 'selected' : ''} ${option.available ? '' : 'disabled'}>${escapeHTML(launchOptionLabel(option.id))}${option.available ? '' : ` · ${escapeHTML(t('不可用'))}`}</option>`).join('')}</select><div id="launch-mode-note" class="launch-mode-note" role="status">${record?.loading ? escapeHTML(t('正在读取可用启动方式…')) : record?.error ? `${escapeHTML(t('暂时无法读取实验选项，仍可按原方式启动。'))} <button type="button" class="text-button" id="retry-launch-options">${escapeHTML(t('重试'))}</button>` : experimental ? `<p>${escapeHTML(t('需下载完整 ROM：{size}。下载后由这台设备运行。', {size: formatSize(selected.size_bytes)}))}</p>${peerNote}<p>${escapeHTML(t('运行时内存占用可能为 ROM 的数倍，建议使用内存充足的电脑；手机优先选云游戏。'))}</p><p>${escapeHTML(t('本机与云端存档分开；需要家人或智能体观战时，请选云游戏。'))}</p>` : escapeHTML(selected?.id === 'stream' ? t('服务器运行，无需下载 ROM；支持家人观战。') : t('沿用自动规则：符合条件的小 ROM 在浏览器运行，其余使用云游戏。'))}</div>${unavailable.length ? `<details class="launch-unavailable"><summary>${escapeHTML(t('查看不可用选项的原因'))}</summary><ul>${unavailable.map(option => `<li><strong>${escapeHTML(launchOptionLabel(option.id))}</strong><span>${escapeHTML(option.reason ? diagnostic(option.reason) : t('当前运行环境不支持此方式。'))}</span></li>`).join('')}</ul></details>` : ''}`;
+    holder.innerHTML = `<label for="launch-mode">${escapeHTML(t('启动方式'))}</label><select id="launch-mode" aria-describedby="launch-mode-note" ${state.launching ? 'disabled' : ''}>${options.map(option => `<option value="${escapeHTML(option.id)}" ${option.id === state.launchChoice ? 'selected' : ''} ${option.available ? '' : 'disabled'}>${escapeHTML(launchOptionLabel(option.id))}${option.available ? '' : ` · ${escapeHTML(t('不可用'))}`}</option>`).join('')}</select><div id="launch-mode-note" class="launch-mode-note" role="status">${record?.loading ? escapeHTML(t('正在读取可用启动方式…')) : record?.error ? `${escapeHTML(t('暂时无法读取实验选项，仍可按原方式启动。'))} <button type="button" class="text-button" id="retry-launch-options">${escapeHTML(t('重试'))}</button>` : experimental ? `<p>${escapeHTML(t('需下载完整 ROM：{size}，之后在浏览器运行。', {size: formatSize(selected.size_bytes)}))}</p><p>${escapeHTML(t('运行时内存占用可能为 ROM 的数倍，建议使用内存充足的电脑；手机优先选云游戏。'))}</p><p>${escapeHTML(t('浏览器与云端存档分开；需要家人或智能体观战时，请选云游戏。'))}</p>` : escapeHTML(selected?.id === 'stream' ? t('服务器运行，无需下载 ROM；支持家人观战。') : t('沿用自动规则：符合条件的小 ROM 在浏览器运行，其余使用云游戏。'))}</div>${advanced}${unavailable.length ? `<details class="launch-unavailable"><summary>${escapeHTML(t('查看不可用选项的原因'))}</summary><ul>${unavailable.map(option => `<li><strong>${escapeHTML(launchOptionLabel(option.id))}</strong><span>${escapeHTML(option.reason ? diagnostic(option.reason) : t('当前运行环境不支持此方式。'))}</span></li>`).join('')}</ul></details>` : ''}`;
     $('launch-mode').addEventListener('change', event => {
-      const option = currentLaunchOptions(game).find(item => item.id === event.target.value && item.available);
+      const option = mergeBrowserLaunchOptions(currentLaunchOptions(game), state.browserP2P).find(item => item.id === event.target.value && item.available);
       if (!option) return;
       state.launchChoice = option.id; renderLaunchChoices(game); updateLaunchButton(); $('launch-mode')?.focus({preventScroll: true});
+    });
+    $('launch-allow-p2p')?.addEventListener('click', () => {
+      setBrowserP2PPreference(!state.browserP2P); renderLaunchChoices(game); $('launch-allow-p2p')?.focus({preventScroll: true});
     });
     $('retry-launch-options')?.addEventListener('click', () => loadLaunchOptions(game, true));
     updateLaunchButton();
@@ -1661,7 +1679,7 @@
     const choice = selectedLaunchMode(game), option = currentLaunchOptions(game).find(item => item.id === choice);
     const cloud = choice === 'stream' || choice === 'auto' && game.mode === 'stream';
     button.disabled = !option?.available;
-    const label = button.disabled ? t('等待配置') : cloud ? state.session && sessionGameId(state.session) === game.id ? t('继续游戏') : t('开始云端游戏') : choice.startsWith('browser-') ? t('下载并在本机启动') : t('开始游戏');
+    const label = button.disabled ? t('等待配置') : cloud ? state.session && sessionGameId(state.session) === game.id ? t('继续游戏') : t('开始云端游戏') : choice?.startsWith('browser-') ? t('下载并在浏览器启动') : t('开始游戏');
     button.innerHTML = `${icon(button.disabled ? 'info' : 'play')}${escapeHTML(label)}`;
   }
   function showLaunchConflict(game, detail, {networkRoomId = null, launchMode = null} = {}) {
@@ -1739,6 +1757,7 @@
     if (!networkRoomId && !replaceSessionId && !currentLaunchOptions(game).some(option => option.id === requestedMode && option.available)) return;
     state.launching = true;
     if ($('launch-mode')) $('launch-mode').disabled = true;
+    if ($('launch-allow-p2p')) $('launch-allow-p2p').disabled = true;
     const button = state.selected?.id === game.id ? $('launch-game') : null;
     if (button) { button.disabled = true; button.textContent = t("正在准备游戏…"); }
     const note = state.selected?.id === game.id ? $('game-detail').querySelector('.detail-note') : null;

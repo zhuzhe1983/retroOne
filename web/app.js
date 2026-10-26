@@ -500,8 +500,10 @@
     $('choose-download-directory').hidden = directory.can_choose_directory === false;
     $('choose-download-directory').disabled = !supported || state.downloadBusy;
     $('choose-download-directory').textContent = t(directory.name && !storage.browser ? '更换目录' : '选择目录');
-    $('use-browser-storage').hidden = storage.browser || !directory.can_use_browser_storage;
-    $('use-browser-storage').disabled = state.downloadBusy;
+    if ($('use-browser-storage')) {
+      $('use-browser-storage').hidden = storage.browser || !directory.can_use_browser_storage;
+      $('use-browser-storage').disabled = state.downloadBusy;
+    }
     $('reconnect-download-directory').hidden = !supported || storage.browser || !directory.name || ready;
     $('reconnect-download-directory').disabled = state.downloadBusy;
     $('download-sharing-toggle').disabled = !manager;
@@ -2477,7 +2479,7 @@
   $('downloads-dialog').addEventListener('close', syncModalBody);
   $('choose-download-directory').addEventListener('click', () => chooseDownloadDirectory());
   $('reconnect-download-directory').addEventListener('click', () => chooseDownloadDirectory(true));
-  $('use-browser-storage').addEventListener('click', () => chooseDownloadDirectory(false, true));
+  $('use-browser-storage')?.addEventListener('click', () => chooseDownloadDirectory(false, true));
   $('download-sharing-toggle').addEventListener('click', () => { setBrowserP2PPreference(!state.browserP2P); if (state.detailOpen && state.selected) renderLaunchChoices(state.selected); });
   $('download-entries').addEventListener('click', event => { const button = event.target.closest('[data-download-action]'); if (button && !button.disabled) downloadEntryAction(button.dataset.downloadId, button.dataset.downloadAction); });
   $('close-display').addEventListener('click', closeDisplaySettings);

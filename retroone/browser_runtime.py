@@ -17,8 +17,7 @@ import zipfile
 from .platforms import PLATFORMS
 
 AUTO_LIMIT = 20 * 1024**2
-DEFAULT_MAX_BYTES = 512 * 1024**2
-HARD_MAX_BYTES = 1024**3
+DEFAULT_MAX_BYTES = 0  # No artificial size ceiling; positive operator values opt in.
 LARGE_PLATFORMS = frozenset({'gba', 'n64', 'nds', 'psx', 'psp'})
 # Match the pinned EmulatorJS 4.2.3 cores, not the native emulator's formats.
 # In particular, its PCSX-ReARMed and PPSSPP cores do not advertise CHD.
@@ -51,9 +50,9 @@ class BrowserRuntime:
         self.library = self.rom_root / 'library'
         self.browser_data = Path(browser_data).resolve()
         value = os.environ.get('RETROONE_WASM_MAX_BYTES', str(DEFAULT_MAX_BYTES)) if max_bytes is None else max_bytes
-        if isinstance(value, bool) or not re.fullmatch(r'[0-9]+', str(value)) or int(value) < 1:
-            raise ValueError('RETROONE_WASM_MAX_BYTES must be a positive integer')
-        self.max_bytes = min(int(value), HARD_MAX_BYTES)
+        if isinstance(value, bool) or not re.fullmatch(r'[0-9]+', str(value)):
+            raise ValueError('RETROONE_WASM_MAX_BYTES must be a non-negative integer')
+        self.max_bytes = int(value)
 
     def _path(self, value) -> Path:
         if not isinstance(value, str) or not value or '\x00' in value or '\\' in value:
@@ -64,6 +63,11 @@ class BrowserRuntime:
         if '..' in candidate.parts or not candidate.is_relative_to(self.library):
             raise BrowserRuntimeError('游戏文件不在游戏库内', 403)
         try:
+            cursor = self.library
+            for component in ('', *candidate.relative_to(self.library).parts):
+                cursor = cursor / component
+                if stat.S_ISLNK(cursor.lstat().st_mode):
+                    raise BrowserRuntimeError('游戏资源不能通过符号链接下载', 403)
             result = candidate.resolve(strict=True)
             if not result.is_relative_to(self.library) or not result.is_file():
                 raise BrowserRuntimeError('游戏文件不在游戏库内或不是独立文件', 403)
@@ -110,11 +114,39 @@ class BrowserRuntime:
                 if len(members) != 1 or Path(members[0].filename).suffix.lower() not in extensions:
                     raise ValueError('not a single cartridge')
                 unpacked = members[0].file_size
-                if not 0 < unpacked <= max_bytes:
+                if unpacked <= 0 or (max_bytes and unpacked > max_bytes):
                     raise ValueError('unpacked limit')
                 return unpacked
         except (OSError, ValueError, zipfile.BadZipFile, NotImplementedError, struct.error) as error:
             raise BrowserRuntimeError('浏览器实验版仅支持大小可核验的单卡带 ZIP；请改用云游戏', 403) from error
+
+    def standalone(self, game: dict) -> Path:
+        """A catalog-owned original file, without any emulator/BIOS requirement.
+
+        This does not claim that an arcade archive contains its parent/BIOS set.
+        Loose resource directories and descriptor files are not complete downloads.
+        """
+        if game.get('blocked_reason'):
+            raise BrowserRuntimeError('游戏资源存在待处理问题，请先检查游戏库')
+        if game.get('resource_root'):
+            raise BrowserRuntimeError('此游戏包含外部资源目录，尚不支持完整打包下载')
+        path = self._path(game.get('rom_path'))
+        for field in ('files', 'launch_files'):
+            values = game.get(field, [game.get('rom_path')])
+            if not isinstance(values, list) or len(values) != 1 or self._path(values[0]) != path:
+                raise BrowserRuntimeError('此游戏包含多个文件或分盘，尚不支持完整打包下载')
+        return path
+
+    def download(self, game: dict) -> Path:
+        path = self.standalone(game)
+        suffix = path.suffix.lower()
+        if (suffix not in PLATFORMS.get(game.get('platform'), {}).get('extensions', ()) or
+                suffix in {'.cue', '.m3u', '.gdi', '.lst', '.ccd', '.mds', '.toc',
+                           '.exe', '.com', '.bat', '.conf', '.self', '.xex', '.elf'}):
+            raise BrowserRuntimeError('此入口不是可独立下载的 ROM 文件；资源目录尚未打包', 403)
+        if path.stat().st_size <= 0:
+            raise BrowserRuntimeError('游戏文件为空，无法下载', 409)
+        return path
 
     def _inspect(self, game: dict) -> tuple[dict, Path]:
         platform = game.get('platform')
@@ -124,20 +156,12 @@ class BrowserRuntime:
             raise BrowserRuntimeError('该平台尚未开放浏览器实验模式，请使用云游戏')
         if not core or core != definition.get('browser_core'):
             raise BrowserRuntimeError('该游戏没有匹配的浏览器模拟器核心')
-        if game.get('blocked_reason'):
-            raise BrowserRuntimeError('游戏资源存在待处理问题，请先检查游戏库')
-        if game.get('resource_root'):
-            raise BrowserRuntimeError('包含外部资源的游戏尚不支持浏览器实验模式')
-        path = self._path(game.get('rom_path'))
-        for field in ('files', 'launch_files'):
-            values = game.get(field, [game.get('rom_path')])
-            if not isinstance(values, list) or len(values) != 1 or self._path(values[0]) != path:
-                raise BrowserRuntimeError('多文件、分盘或依赖其他 ROM 的游戏请使用云游戏')
+        path = self.standalone(game)
         try:
             size = path.stat().st_size
         except OSError as error:
             raise BrowserRuntimeError('游戏文件暂时无法读取') from error
-        if not 0 < size <= self.max_bytes:
+        if size <= 0 or (self.max_bytes and size > self.max_bytes):
             raise BrowserRuntimeError('游戏大小超过浏览器实验模式上限，请使用云游戏', 403)
         extensions = CARTRIDGES.get(platform, DISC_FILES.get(platform, set()))
         if path.suffix.lower() == '.zip' and platform in CARTRIDGES:

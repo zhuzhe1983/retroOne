@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import stat
 import tempfile
+import time
 from urllib.parse import parse_qs, urlsplit
 import zipfile
 
@@ -98,6 +99,19 @@ def environment(tmp_path, monkeypatch):
 
 def local_url(value):
     return re.sub(r'^/p/player\d+', '', value)
+
+
+def ready_manifest(client, endpoint):
+    deadline = time.monotonic() + 5
+    while True:
+        response = client.get(endpoint)
+        if response.status_code != 202:
+            assert response.status_code == 200, response.text
+            return response.json()
+        assert response.headers['retry-after'] == '2'
+        assert response.json()['status'] == 'preparing'
+        assert time.monotonic() < deadline
+        time.sleep(.01)
 
 
 def settings(response):
@@ -282,8 +296,8 @@ def test_personal_save_names_are_unchanged_and_swarm_is_shared_between_players(e
         assert client.put(endpoint + '/save-state', content=player.encode()).status_code == 200
     assert a.get(endpoint + '/save-state').content == b'player1'
     assert b.get(endpoint + '/save-state').content == b'player2'
-    ma = a.get(endpoint + '/browser-manifest?transport=p2p').json()
-    mb = b.get(endpoint + '/browser-manifest?transport=p2p').json()
+    ma = ready_manifest(a, endpoint + '/browser-manifest?transport=p2p')
+    mb = ready_manifest(b, endpoint + '/browser-manifest?transport=p2p')
     assert ma['info_hash'] == mb['info_hash'] and ma['torrent_base64'] == mb['torrent_base64']
     assert ma['download_url'].startswith('/p/player1/')
     assert mb['download_url'].startswith('/p/player2/')
@@ -386,19 +400,34 @@ def test_hashing_a_growing_source_stops_at_initial_size_and_does_not_publish(tmp
     with pytest.raises(ValueError, match='变化'):
         distribution.info(source, 'game.z64')
     assert requests == [PIECE_LENGTH, 123]
-    assert not distribution.cache_root.exists()
+    assert list(distribution.cache_root.glob('*.json')) == []
 
 
-def test_torrent_limits_are_enforced_before_source_read(tmp_path, monkeypatch):
+def test_large_sparse_torrent_uses_bounded_cache_without_full_source_read(tmp_path, monkeypatch):
     source = tmp_path / 'oversized.z64'
+    size = 3 * 1024**3 + 1
     with source.open('wb') as output:
-        output.truncate(1024**3 + 1)
+        output.truncate(size)
     distribution = TorrentDistribution(tmp_path / 'shared')
-    def no_open(*args, **kwargs):
-        raise AssertionError('oversized game must be rejected before read')
-    monkeypatch.setattr(torrent_module.os, 'open', no_open)
-    with pytest.raises(ValueError, match='limit'):
-        distribution.info(source, 'game.z64')
+    current = revision(source)
+    key = hashlib.sha256((str(source) + ':' + current).encode()).hexdigest()
+    distribution.cache_root.mkdir(parents=True)
+    pieces = b'x' * (((size + PIECE_LENGTH - 1) // PIECE_LENGTH) * 20)
+    cache = distribution.cache_root / (key + '.json')
+    cache.write_text(json.dumps({'revision': current, 'pieces': base64.b64encode(pieces).decode()}))
+    assert 64 * 1024 < cache.stat().st_size < torrent_module.MAX_CACHE_BYTES
+    original = torrent_module.os.open
+    def no_source_open(path, *args, **kwargs):
+        assert Path(path) != source, 'cached sparse source must never be fully read'
+        return original(path, *args, **kwargs)
+    monkeypatch.setattr(torrent_module.os, 'open', no_source_open)
+    info, _, _ = distribution.info(source, 'game.z64')
+    assert info['length'] == size and info['pieces'] == pieces
+    for huge in (1024**3, 8 * 1024**3, 1024**4, 2**63 - 1):
+        length = torrent_module.piece_length(huge)
+        assert (huge + length - 1) // length <= torrent_module.MAX_PIECES
+        assert length >= PIECE_LENGTH and length & (length - 1) == 0
+    assert torrent_module.piece_length(1024**3) == PIECE_LENGTH
 
 
 def test_ice_default_is_empty_and_operator_services_reach_manifest_without_changing_swarm(tmp_path, monkeypatch):

@@ -1,12 +1,13 @@
 """Private, single-file WebTorrent manifests backed by the existing HTTP server.
 
 No ROM is copied or published. Only piece hashes are cached; every download is
-resolved again through the game's browser eligibility checks in the API.
+resolved again through the catalog's independent file-download checks in the API.
 """
 from __future__ import annotations
 
 import base64
 import copy
+import fcntl
 import hashlib
 import hmac
 import ipaddress
@@ -21,8 +22,10 @@ import time
 from urllib.parse import urlsplit
 
 PIECE_LENGTH = 1024 * 1024
-MAX_SOURCE_BYTES = 1024**3
-MAX_CACHE_BYTES = 64 * 1024
+MAX_PIECES = 4096
+READ_BLOCK_BYTES = 1024 * 1024
+MAX_CACHE_BYTES = 256 * 1024
+MAX_JOB_RECORDS = 64
 _hash_slots = threading.BoundedSemaphore(2)
 ICE_ENV = 'RETROONE_WEBRTC_ICE_SERVERS'
 
@@ -152,81 +155,192 @@ def installation_secret(path: Path) -> bytes:
     return value
 
 
+def piece_length(size: int) -> int:
+    """Keep historical <=1 GiB swarms stable and metadata bounded at any size."""
+    length = PIECE_LENGTH
+    while (size + length - 1) // length > MAX_PIECES:
+        length *= 2
+    return length
+
+
 class TorrentDistribution:
-    def __init__(self, data_root: Path, *, secret_file: Path | None = None):
-        self.ice_servers = ice_servers_from_env()
+    def __init__(self, data_root: Path, *, secret_file: Path | None = None, peer_transport: bool = True):
+        self.ice_servers = []
         self.cache_root = data_root / 'metadata' / 'webtorrent'
         self.secret_file = secret_file or Path(os.getenv('RETROONE_TORRENT_SECRET_FILE', str(data_root / 'metadata' / '.webtorrent-secret')))
-        # A single installation key lets every player join the gateway's swarm.
-        self.secret = installation_secret(self.secret_file)
+        self.secret = None
         self.lock = threading.Lock()
+        self.jobs = {}
+        self.closed = threading.Event()
+        if peer_transport:
+            self.enable_peers()
 
-    def info(self, path: Path, name: str, expected_revision: str | None = None):
+    def enable_peers(self):
+        """HTTP piece verification does not require ICE or a tracker secret."""
+        with self.lock:
+            if self.secret is None:
+                servers = ice_servers_from_env()
+                secret = installation_secret(self.secret_file)
+                self.ice_servers, self.secret = servers, secret
+
+    def close(self):
+        # Workers check between bounded reads; no long wait during API shutdown.
+        self.closed.set()
+
+    def _source(self, path, name, expected_revision=None):
         source_stat = _regular_stat(path)
         current = _revision(source_stat)
         if expected_revision and current != expected_revision:
             raise ValueError('游戏文件已变化，请刷新后重新下载')
         size = source_stat.st_size
-        if not 0 < size <= MAX_SOURCE_BYTES:
-            raise ValueError('Game exceeds the browser distribution limit')
-        if not isinstance(name, str) or not name or name in {'.', '..'} or any(
+        if size <= 0:
+            raise ValueError('Empty files cannot be distributed')
+        if not isinstance(name, str) or not 0 < len(name) <= 255 or name in {'.', '..'} or any(
                 character in '/\\:' or ord(character) < 32 for character in name):
             raise ValueError('Invalid distribution filename')
-        cache_key = hashlib.sha256((str(path) + ':' + current).encode()).hexdigest()
-        cache = self.cache_root / (cache_key + '.json')
-        with self.lock:
-            pieces = None
-            try:
-                fd = os.open(cache, os.O_RDONLY | os.O_NOFOLLOW)
-                with os.fdopen(fd, 'r', encoding='ascii') as stream:
-                    cache_stat = os.fstat(stream.fileno())
-                    if not stat.S_ISREG(cache_stat.st_mode) or cache_stat.st_size > MAX_CACHE_BYTES:
-                        raise ValueError('Invalid piece cache')
-                    record = json.loads(stream.read(MAX_CACHE_BYTES + 1))
-                candidate = base64.b64decode(record['pieces'], validate=True)
-                if record['revision'] == current and len(candidate) == ((size + PIECE_LENGTH - 1) // PIECE_LENGTH) * 20:
-                    pieces = candidate
-            except (OSError, ValueError, KeyError, TypeError):
-                pass
+        key = hashlib.sha256((str(path) + ':' + current).encode()).hexdigest()
+        return current, size, piece_length(size), self.cache_root / (key + '.json')
+
+    def _cached(self, cache, current, size, length):
+        try:
+            fd = os.open(cache, os.O_RDONLY | os.O_NOFOLLOW)
+            with os.fdopen(fd, 'r', encoding='ascii') as stream:
+                info = os.fstat(stream.fileno())
+                if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_CACHE_BYTES:
+                    return None
+                record = json.loads(stream.read(MAX_CACHE_BYTES + 1))
+            candidate = base64.b64decode(record['pieces'], validate=True)
+            if (record['revision'] == current and record.get('piece_length', PIECE_LENGTH) == length and
+                    len(candidate) == ((size + length - 1) // length) * 20):
+                return candidate
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+        return None
+
+    @staticmethod
+    def _info_result(path, name, current, size, length, pieces):
+        if revision(path) != current:
+            raise ValueError('游戏文件已变化，请刷新后重新下载')
+        info = {'length': size, 'name': name, 'piece length': length, 'pieces': pieces, 'private': 1}
+        return info, hashlib.sha1(bencode(info)).hexdigest(), current
+
+    def _compute(self, path, name, expected_revision=None, progress=None):
+        current, size, length, cache = self._source(path, name, expected_revision)
+        pieces = self._cached(cache, current, size, length)
+        if pieces is not None:
+            return self._info_result(path, name, current, size, length, pieces)
+        self.cache_root.mkdir(parents=True, exist_ok=True)
+        # The cache is shared by profiles. Only one worker hashes this revision;
+        # later workers wait in the background and reuse its atomic result.
+        lockfd = os.open(cache.with_suffix('.lock'), os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(lockfd, 'a+b') as lock:
+            while True:
+                if self.closed.is_set():
+                    raise ValueError('分片准备已停止，请重试')
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    self.closed.wait(.1)
+            pieces = self._cached(cache, current, size, length)
             if pieces is None:
-                with _hash_slots:
-                    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
-                    with os.fdopen(fd, 'rb') as stream:
-                        opened = os.fstat(stream.fileno())
-                        if not stat.S_ISREG(opened.st_mode) or _revision(opened) != current:
-                            raise ValueError('游戏文件已变化，请刷新后重新下载')
-                        hashes = []
-                        remaining = size
-                        while remaining:
-                            chunk = stream.read(min(PIECE_LENGTH, remaining))
+                fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+                with os.fdopen(fd, 'rb') as stream:
+                    opened = os.fstat(stream.fileno())
+                    if not stat.S_ISREG(opened.st_mode) or _revision(opened) != current:
+                        raise ValueError('游戏文件已变化，请刷新后重新下载')
+                    hashes = []
+                    remaining = size
+                    while remaining:
+                        hasher = hashlib.sha1()
+                        piece_remaining = min(length, remaining)
+                        while piece_remaining:
+                            if self.closed.is_set():
+                                raise ValueError('分片准备已停止，请重试')
+                            chunk = stream.read(min(READ_BLOCK_BYTES, piece_remaining))
                             if not chunk:
                                 raise ValueError('游戏文件读取不完整，请刷新后重新下载')
+                            hasher.update(chunk)
                             remaining -= len(chunk)
-                            hashes.append(hashlib.sha1(chunk).digest())
-                        if _revision(os.fstat(stream.fileno())) != current:
-                            raise ValueError('游戏文件已变化，请刷新后重新下载')
-                        pieces = b''.join(hashes)
+                            piece_remaining -= len(chunk)
+                            if progress:
+                                progress(size - remaining)
+                        hashes.append(hasher.digest())
+                    if _revision(os.fstat(stream.fileno())) != current:
+                        raise ValueError('游戏文件已变化，请刷新后重新下载')
+                    pieces = b''.join(hashes)
                 if revision(path) != current:
                     raise ValueError('游戏文件已变化，请刷新后重新下载')
-                self.cache_root.mkdir(parents=True, exist_ok=True)
                 temporary = cache.with_suffix('.' + secrets.token_hex(8) + '.tmp')
                 try:
-                    temporary.write_text(json.dumps({'revision': current, 'pieces': base64.b64encode(pieces).decode('ascii')}), 'ascii')
+                    temporary.write_text(json.dumps({'revision': current, 'piece_length': length,
+                                                     'pieces': base64.b64encode(pieces).decode('ascii')}), 'ascii')
                     temporary.replace(cache)
                 finally:
                     temporary.unlink(missing_ok=True)
-        if revision(path) != current:
-            raise ValueError('游戏文件已变化，请刷新后重新下载')
-        info = {'length': size, 'name': name, 'piece length': PIECE_LENGTH, 'pieces': pieces, 'private': 1}
-        return info, hashlib.sha1(bencode(info)).hexdigest(), current
+        return self._info_result(path, name, current, size, length, pieces)
 
-    def manifest(self, path: Path, name: str, *, download_url: str, expected_revision: str | None = None):
-        info, info_hash, current = self.info(path, name, expected_revision)
-        # Valid while the browser is playing/seeding; a reload obtains a fresh ticket.
-        expires = str(int(time.time()) + 12 * 60 * 60)
-        signature = hmac.new(self.secret, (info_hash + ':' + expires).encode('ascii'), hashlib.sha256).hexdigest()
+    def info(self, path: Path, name: str, expected_revision: str | None = None):
+        """Synchronous helper for offline callers; HTTP uses poll_manifest."""
+        with _hash_slots:
+            return self._compute(path, name, expected_revision)
+
+    def _manifest(self, result, download_url, *, peers=True):
+        info, info_hash, current = result
+        tracker = None
+        if peers:
+            self.enable_peers()
+            expires = str(int(time.time()) + 12 * 60 * 60)
+            signature = hmac.new(self.secret, (info_hash + ':' + expires).encode('ascii'), hashlib.sha256).hexdigest()
+            tracker = '/rom-tracker?token=' + expires + '.' + signature
         torrent = bencode({'created by': 'RetroOne', 'info': info})
-        return {'name': name, 'size': info['length'], 'revision': current,
+        return {'name': info['name'], 'size': info['length'], 'revision': current,
                 'info_hash': info_hash, 'torrent_base64': base64.b64encode(torrent).decode('ascii'),
-                'download_url': download_url, 'tracker_path': '/rom-tracker?token=' + expires + '.' + signature,
-                'piece_length': PIECE_LENGTH, 'ice_servers': copy.deepcopy(self.ice_servers), 'private': True}
+                'download_url': download_url, 'tracker_path': tracker, 'p2p_available': bool(peers),
+                'piece_length': info['piece length'], 'ice_servers': copy.deepcopy(self.ice_servers) if peers else [], 'private': True}
+
+    def manifest(self, path: Path, name: str, *, download_url: str, expected_revision: str | None = None, peers: bool = True):
+        return self._manifest(self.info(path, name, expected_revision), download_url, peers=peers)
+
+    def poll_manifest(self, path: Path, name: str, *, download_url: str, expected_revision: str | None = None, peers: bool = True):
+        current, size, length, cache = self._source(path, name, expected_revision)
+        pieces = self._cached(cache, current, size, length)
+        if pieces is not None:
+            return self._manifest(self._info_result(path, name, current, size, length, pieces), download_url, peers=peers)
+        if self.closed.is_set():
+            raise ValueError('分片准备已停止，请重试')
+        key = cache.stem
+        with self.lock:
+            now = time.monotonic()
+            for previous in list(self.jobs):
+                job = self.jobs[previous]
+                if job['done'] and (now - job['updated'] > 60 or len(self.jobs) >= MAX_JOB_RECORDS or
+                                    (previous == key and not job.get('error'))):
+                    del self.jobs[previous]
+            job = self.jobs.get(key)
+            if job and job.get('error'):
+                raise ValueError('无法准备游戏分片，请检查文件后稍后重试')
+            if job is None and len(self.jobs) < MAX_JOB_RECORDS and _hash_slots.acquire(blocking=False):
+                job = self.jobs[key] = {'bytes_hashed': 0, 'done': False, 'updated': now}
+                def progress(count):
+                    with self.lock:
+                        job['bytes_hashed'] = count
+                def run():
+                    try:
+                        self._compute(path, name, current, progress)
+                    except (OSError, ValueError):
+                        with self.lock:
+                            job['error'] = True
+                    finally:
+                        with self.lock:
+                            job['done'], job['updated'] = True, time.monotonic()
+                        _hash_slots.release()
+                try:
+                    threading.Thread(target=run, name='retroone-rom-hash', daemon=True).start()
+                except RuntimeError:
+                    del self.jobs[key]
+                    _hash_slots.release()
+                    raise ValueError('分片任务暂时无法启动，请重试')
+            return {'status': 'preparing', 'name': name, 'size': size, 'revision': current,
+                    'bytes_hashed': job['bytes_hashed'] if job else 0, 'total_bytes': size,
+                    'retry_after': 2}

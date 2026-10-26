@@ -138,7 +138,7 @@ class Provisioner:
             "RETROONE_ARTWORK_ROOT": "/artwork",
             "RETROONE_LIBRARY_DATA_ROOT": "/library-data",
             "RETROONE_SCREENSHOT_DNS": self.screenshot_dns,
-            "RETROONE_WASM_MAX_BYTES": os.environ.get("RETROONE_WASM_MAX_BYTES", "536870912"),
+            "RETROONE_WASM_MAX_BYTES": os.environ.get("RETROONE_WASM_MAX_BYTES", "0"),
             "RETROONE_P2P_ENABLED": os.environ.get("RETROONE_P2P_ENABLED", "1"),
             "RETROONE_WEBRTC_ICE_SERVERS": os.environ.get("RETROONE_WEBRTC_ICE_SERVERS", "[]"),
             "RETROONE_PROFILE_ID": profile, "RETROONE_BASE_PATH": "/p/" + profile,

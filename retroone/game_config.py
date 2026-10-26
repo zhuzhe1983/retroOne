@@ -268,8 +268,8 @@ class GameConfigStore:
             unpacked = identity.get('unpacked_size')
             limit = BROWSER_LIMIT if browser_limit is None else browser_limit
             if ((browser_limit is None and not identity['browser_eligible']) or len(identity['sources']) != 1 or
-                    type(unpacked) is not int or unpacked > limit or unpacked < 0 or
-                    sum(asset.get('size', 0) for asset in identity['sources']) > limit or
+                    type(unpacked) is not int or (limit and unpacked > limit) or unpacked < 0 or
+                    (limit and sum(asset.get('size', 0) for asset in identity['sources']) > limit) or
                     not settings.get('browser_core')):
                 add('browser_not_eligible', '此游戏不符合浏览器载入条件，请使用云端运行', True)
         if self.definitions.get(game.get('platform'), {}).get('arcade'):
@@ -353,13 +353,34 @@ class GameConfigStore:
             identity, current_signature = self._snapshot(game)
             return self._view(game, document, identity, current_signature, review)
 
+    def require_download(self, game):
+        """Validate enabled/source configuration without requiring an emulator.
+
+        The caller separately verifies a single contained regular ROM. Runtime
+        failures, absent cores and BIOS do not make the original file unavailable.
+        """
+        if self.get(game) is None:
+            self.generate(game)
+        with self.locked():
+            document = self._read(game)
+            identity, signature = self._snapshot(game)
+            overrides = self._validate_overrides(game, document['overrides'])
+            if overrides.get('disabled'):
+                raise GameConfigError('manually_disabled', '此游戏已在启动配置中停用')
+            if game.get('blocked_reason'):
+                raise GameConfigError('catalog_blocked', '游戏资源存在待处理问题，请先检查游戏库')
+            if any(asset.get('error') for asset in identity['sources']):
+                raise GameConfigError('invalid_sources', '游戏资源缺失或路径不安全')
+            if document['generated']['source_signature'] != signature:
+                raise GameConfigError('stale_config', '游戏文件或运行规则已变化，请重新扫描游戏库')
+
     def resolve(self, game, requested_mode=None, review=None, *, browser_limit=None):
         # Only an explicit, separately validated browser experiment may relax
         # the auto rule. This is ephemeral: no schema, signature or saved setting
         # changes. BrowserRuntime.require must validate the installed core,
         # actual file format, dependencies and archive size before this call.
         if browser_limit is not None and (requested_mode != 'browser' or type(browser_limit) is not int or
-                                          not 0 < browser_limit <= 1024**3):
+                                          browser_limit < 0):
             raise GameConfigError('invalid_browser_limit', '浏览器实验模式的载入条件无效', 422)
         # Lazily create configurations for libraries imported before this feature.
         if self.get(game) is None: self.generate(game, review)

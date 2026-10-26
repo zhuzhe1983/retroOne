@@ -7,7 +7,7 @@ import zipfile
 
 import pytest
 
-from retroone.browser_runtime import BrowserRuntime, BrowserRuntimeError, HARD_MAX_BYTES
+from retroone.browser_runtime import BrowserRuntime, BrowserRuntimeError
 from retroone.platforms import PLATFORMS
 
 MIB = 1024**2
@@ -170,10 +170,20 @@ def test_zip_links_and_excessive_directory_are_rejected(fixture):
     assert not runtime.inspect(game)['available']
 
 
-def test_settings_bound_memory_and_do_not_accept_boolean_or_zero(fixture, monkeypatch):
-    runtime, _ = fixture
+def test_default_is_unlimited_and_positive_admin_limits_are_not_clamped(fixture, monkeypatch):
+    runtime, make = fixture
+    monkeypatch.delenv('RETROONE_WASM_MAX_BYTES', raising=False)
+    assert BrowserRuntime(runtime.rom_root, runtime.browser_data).max_bytes == 0
     monkeypatch.setenv('RETROONE_WASM_MAX_BYTES', str(4 * 1024**3))
-    assert BrowserRuntime(runtime.rom_root, runtime.browser_data).max_bytes == HARD_MAX_BYTES
-    for invalid in (0, -1, True, 'invalid'):
+    assert BrowserRuntime(runtime.rom_root, runtime.browser_data).max_bytes == 4 * 1024**3
+    for invalid in (-1, True, 'invalid', '1.5'):
         with pytest.raises(ValueError):
             BrowserRuntime(runtime.rom_root, runtime.browser_data, max_bytes=invalid)
+    game, path = make('psp', '.iso', size=3 * 1024**3 + 7)
+    # Eligibility must stat a sparse large file, never read it into memory.
+    def no_read(*args, **kwargs):
+        raise AssertionError('raw ROM contents must not be read for eligibility')
+    monkeypatch.setattr(Path, 'open', no_read)
+    assert runtime.require(game) == path and runtime.inspect(game)['max_bytes'] == 0
+    limited = BrowserRuntime(runtime.rom_root, runtime.browser_data, max_bytes=1024**3)
+    assert not limited.inspect(game)['available']

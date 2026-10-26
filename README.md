@@ -2,7 +2,7 @@
 
 **把多年收藏放进一个网页，和家人接着玩。**
 
-RetroOne 是面向家庭局域网的怀旧游戏库。它读取你自己的 ROM 目录，将平台分类、搜索、收藏、玩家档案和游戏启动放在同一个入口里：小型游戏可以在浏览器本地模拟，大型游戏由家中的服务器运行，再把画面与声音传到浏览器。
+RetroOne 是面向家庭局域网的怀旧游戏库。它读取你自己的 ROM 目录，将平台分类、搜索、收藏、玩家档案和游戏启动放在同一个入口里：小型游戏可以在浏览器模拟，大型游戏由家中的服务器运行，再把画面与声音传到浏览器。
 
 界面采用主机式导航，打开即支持键盘和手柄。底层复用 EmulatorJS、RetroArch、Selkies 等开源项目；运行环境封装为 Docker 镜像，由多个家庭成员实例复用。
 
@@ -24,7 +24,7 @@ Open a game card for a dedicated detail page with available facts, screenshots, 
 
 On phones, touch controls adapt to the game platform, with landscape side controls and a portrait layout below the picture. The play menu offers fullscreen, aspect-preserving or horizontal-stretch presentation, and button size/opacity settings. Install the PWA from a supported HTTPS browser for a standalone window. Games still require a connection; the offline page does not cache ROMs or saves. See [mobile play](docs/mobile-play.md) for setup and limitations.
 
-**Experimental browser play:** eligible larger ROMs have one browser-play option. Downloads use the NAS HTTP source and, when available, WebTorrent browser peers. P2P sharing can be disabled in advanced settings on each device; missing P2P support or transport failures fall back to direct HTTP. The existing automatic 20 MiB rule is unchanged. The full ROM is downloaded before emulation starts. The default experimental limit is 512 MiB, with an administrator maximum of 1 GiB; installed cores, supported single-file formats, firmware and client memory still determine eligibility. Browser and cloud saves remain separate. Use cloud mode for spectators. See [browser WASM experiments](docs/browser-wasm.md) for requirements and limitations.
+**Experimental browser play:** eligible larger ROMs have one browser-play option. Downloads use the NAS HTTP source and, when available, WebTorrent browser peers. P2P sharing can be disabled in advanced settings on each device; missing P2P support or transport failures fall back to direct HTTP. The existing automatic 20 MiB rule is unchanged. The full ROM is downloaded before emulation starts. There is no default fixed download or experimental ROM size cap; administrators can optionally limit browser launches. A selected device directory provides persistent, piece-verified downloads and seeding while the website is open; installed cores, supported single-file formats, firmware and client memory still determine eligibility. Browser and cloud saves remain separate. Use cloud mode for spectators. See [browser WASM experiments](docs/browser-wasm.md) for requirements and limitations.
 
 下面三张截图来自实际家庭游戏库，展示已有的最近游玩、单个平台和个人收藏。游戏标题、封面、排序与数量取自真实目录；成员昵称仅在截图页面中作匿名化处理，没有修改服务器资料。
 
@@ -48,6 +48,7 @@ On phones, touch controls adapt to the game platform, with landscape side contro
 - **打开完整游戏详情**：查看已有的介绍、官方截图、发行信息和资料来源，快速切换前后游戏；没有可靠资料时明确保留空缺。
 - **一个入口，两种运行方式**：轻量游戏在浏览器运行；大型镜像留在服务器，通过串流游玩。
 - **按设备尝试浏览器运行**：符合条件的大 ROM 可在详情页选择“浏览器运行（实验）”，自动通过 NAS HTTP 来源及可用的 P2P 来源下载；高级设置可关闭 P2P 分享，默认启动规则不变。详见 [浏览器 WASM 实验功能](docs/browser-wasm.md)。
+- **保留在这台设备，继续分享**：在用户设置的“下载与分享”中选择目录，分片下载大 ROM、暂停或恢复任务；已下载游戏带设备缓存图标。打开网站时可继续做种，浏览器游戏优先复用已校验文件；下载能力与模拟器兼容性分开。
 - **全家各有进度**：自选昵称和头像，独立收藏、最近记录、设置与存档；首页“＋”可添加成员。
 - **看看谁在玩**：顶栏显示在线家人的头像与活动；开启观战服务后，可点开家人活动，再点独立的“观看”按钮，只读观看当前云游戏。本人的状态入口可以继续、结束游戏或打开用户设置。
 - **让 AI 玩或看**：可选 MCP 服务提供授权档案、强制云端启动、截图与限时手柄输入。小型 NES 游戏也可只对这一次改为云端，不影响家庭的默认玩法。

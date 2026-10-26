@@ -241,7 +241,7 @@ def test_explicit_experiment_relaxes_only_size_rule_without_rewriting_identity(s
 
 @pytest.mark.parametrize('mode,limit', [(None, 64 * 1024**2), ('auto', 64 * 1024**2),
                                        ('stream', 64 * 1024**2), ('browser', True),
-                                       ('browser', 0), ('browser', 2 * 1024**3)])
+                                       ('browser', -1), ('browser', '0')])
 def test_experiment_limit_is_only_valid_on_explicit_browser_requests(setup, mode, limit):
     store, game, _ = setup
     with pytest.raises(GameConfigError) as error:

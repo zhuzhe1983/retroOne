@@ -34,6 +34,7 @@ from .i18n import emulator_locale, player_messages, resolve_locale, text as tran
 from .pwa import register_pwa
 from .browser_runtime import BrowserRuntime, BrowserRuntimeError
 from .torrent_distribution import IceConfigurationError, TorrentDistribution, revision as rom_revision
+from .safe_rom_response import SafeRomResponse
 
 ROOT = Path(__file__).resolve().parent.parent
 MAX_SAVE_SIZE = 32 * 1024 * 1024
@@ -419,16 +420,31 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
             raise HTTPException(409, '浏览器模拟器所需 BIOS 尚未齐全；DS 需要 bios7.bin、bios9.bin 和 firmware.bin')
         return game, path
 
-    def torrents():
+    def downloadable_game(game_id):
+        game = game_or_404(game_id)
+        try:
+            path = browser_runtime.download(game)
+            catalog.game_configs.require_download(game)
+            return game, path
+        except GameConfigError as error:
+            raise HTTPException(error.status_code, str(error)) from error
+        except OSError as error:
+            raise HTTPException(409, '游戏文件暂时无法读取') from error
+
+    def torrents(*, peers=True):
         nonlocal torrent_distribution
-        if not torrent_bundle.is_file() or os.getenv('RETROONE_P2P_ENABLED', '1') == '0':
+        if peers and (not torrent_bundle.is_file() or os.getenv('RETROONE_P2P_ENABLED', '1') == '0'):
             raise HTTPException(503, 'WebTorrent 组件尚未启用，请选择 HTTP 下载或云游戏')
         with torrent_init_lock:
-            if torrent_distribution is None:
-                try:
-                    torrent_distribution = TorrentDistribution(catalog.library_data_root)
-                except IceConfigurationError as error:
-                    raise HTTPException(503, str(error)) from error
+            try:
+                if torrent_distribution is None:
+                    torrent_distribution = TorrentDistribution(catalog.library_data_root, peer_transport=False)
+                if peers:
+                    torrent_distribution.enable_peers()
+            except IceConfigurationError as error:
+                raise HTTPException(503, str(error)) from error
+            except (OSError, ValueError) as error:
+                raise HTTPException(503, '私有 P2P 配置暂时不可用，请选择 HTTP 下载') from error
         return torrent_distribution
 
     @asynccontextmanager
@@ -443,6 +459,8 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
             catalog.begin_scan()
         yield
         # The service only owns this Runner instance and its child process.
+        if torrent_distribution is not None:
+            torrent_distribution.close()
         runner.stop()
         artwork.close()
 
@@ -810,30 +828,72 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
             raise HTTPException(404, 'WebTorrent 存储组件尚未安装')
         return FileResponse(path, media_type='text/javascript', headers={'Cache-Control': 'public, max-age=3600'})
 
+    def distribution_manifest(game_id, path, transport, *, channel, state=None):
+        current = rom_revision(path)
+        name = game_id + path.suffix.lower()
+        download_url = url(f'/api/games/{game_id}/{channel}-rom/{name}') + '?revision=' + current
+        result = {'name': name, 'size': path.stat().st_size, 'revision': current, 'download_url': download_url}
+        if transport == 'p2p' or channel == 'download':
+            try:
+                try:
+                    distributor, peers = torrents(), True
+                except HTTPException:
+                    if transport != 'http':
+                        raise
+                    distributor, peers = torrents(peers=False), False
+                result.update(distributor.poll_manifest(path, name, download_url=download_url,
+                                                        expected_revision=current, peers=peers))
+            except (OSError, ValueError) as error:
+                raise HTTPException(409, '无法准备游戏分片，请刷新后重试') from error
+        if state:
+            result.update(requires_threads=state['requires_threads'], requires_webgl2=state['requires_webgl2'], unpacked_bytes=state['unpacked_bytes'])
+        preparing = result.get('status') == 'preparing'
+        headers = {'Cache-Control': 'no-store'}
+        if preparing:
+            headers['Retry-After'] = '2'
+        return JSONResponse(result, status_code=202 if preparing else 200, headers=headers)
+
+    @app.get('/api/games/{game_id}/download-options')
+    def download_options(game_id: str):
+        game_or_404(game_id)
+        try:
+            game, path = downloadable_game(game_id)
+            result = {'available': True, 'reason': None, 'size_bytes': path.stat().st_size,
+                      'name': game_id + path.suffix.lower(),
+                      'manifest_url': url(f'/api/games/{game_id}/download-manifest') + '?transport=p2p'}
+        except (HTTPException, BrowserRuntimeError) as error:
+            result = {'available': False, 'reason': str(error.detail) if isinstance(error, HTTPException) else str(error),
+                      'size_bytes': None, 'name': None, 'manifest_url': None}
+        try:
+            experiment_game(game_id)
+            result.update(browser_launchable=True, browser_reason=None)
+        except (HTTPException, BrowserRuntimeError) as error:
+            result.update(browser_launchable=False, browser_reason=str(error.detail) if isinstance(error, HTTPException) else str(error))
+        return JSONResponse(result, headers={'Cache-Control': 'no-store'})
+
+    @app.get('/api/games/{game_id}/download-manifest')
+    def download_manifest(game_id: str, transport: Literal['http', 'p2p'] = 'http'):
+        _, path = downloadable_game(game_id)
+        return distribution_manifest(game_id, path, transport, channel='download')
+
+    @app.api_route('/api/games/{game_id}/download-rom/{filename}', methods=['GET', 'HEAD'])
+    def download_rom(game_id: str, filename: str, revision: str = Query(..., pattern='^[a-f0-9]{64}$')):
+        _, path = downloadable_game(game_id)
+        if filename != game_id + path.suffix.lower():
+            raise HTTPException(404, '文件不存在')
+        return SafeRomResponse(browser_runtime.library, path, revision, filename=filename)
+
     @app.get('/api/games/{game_id}/browser-manifest')
     def browser_manifest(game_id: str, transport: Literal['http', 'p2p'] = 'http'):
         game, path = experiment_game(game_id)
-        state = browser_runtime.inspect(game)
-        current = rom_revision(path)
-        name = game_id + path.suffix.lower()
-        download_url = url(f'/api/games/{game_id}/browser-rom/{name}') + '?revision=' + current
-        result = {'name': name, 'size': state['size_bytes'], 'revision': current, 'download_url': download_url}
-        if transport == 'p2p':
-            try:
-                result.update(torrents().manifest(path, name, download_url=download_url, expected_revision=current))
-            except (OSError, ValueError) as error:
-                raise HTTPException(409, '无法准备游戏分片，请刷新后重试') from error
-        result.update(requires_threads=state['requires_threads'], requires_webgl2=state['requires_webgl2'], unpacked_bytes=state['unpacked_bytes'])
-        return JSONResponse(result, headers={'Cache-Control': 'no-store'})
+        return distribution_manifest(game_id, path, transport, channel='browser', state=browser_runtime.inspect(game))
 
     @app.api_route('/api/games/{game_id}/browser-rom/{filename}', methods=['GET', 'HEAD'])
     def experimental_rom(game_id: str, filename: str, revision: str = Query(..., pattern='^[a-f0-9]{64}$')):
         _, path = experiment_game(game_id)
         if filename != game_id + path.suffix.lower():
             raise HTTPException(404, '文件不存在')
-        if rom_revision(path) != revision:
-            raise HTTPException(409, '游戏文件已变化，请刷新后重新下载')
-        return FileResponse(path, media_type='application/octet-stream', headers={'Cache-Control': 'private, no-store'})
+        return SafeRomResponse(browser_runtime.library, path, revision)
 
     @app.post('/api/games/{game_id}/launch')
     def launch(game_id: str, body: LaunchBody | None = None):
@@ -1067,14 +1127,17 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
         storage_namespace = '' if profile_id == 'player1' else f'RetroOne-{profile_id}-'
         bridge = ROOT / 'web' / 'emulator-input.js'
         bridge_version = hashlib.sha256(bridge.read_bytes()).hexdigest()[:16] if bridge.is_file() else 'pending'
-        runtime_script = f'<script src="{url("/emulatorjs/data/loader.js")}"></script>'
-        if experimental:
-            config = {'transport': transport, 'manifestUrl': url(f'/api/games/{game_id}/browser-manifest') + '?transport=' + transport,
-                      'loaderUrl': url('/emulatorjs/data/loader.js'), 'webtorrentUrl': url('/vendor/webtorrent.min.js'),
-                      'chunkStoreUrl': url('/vendor/rom-chunk-store.js'), 'locale': locale}
-            transfer_script = ROOT / 'web/rom-transfer.js'
-            version = hashlib.sha256(transfer_script.read_bytes()).hexdigest()[:16] if transfer_script.is_file() else 'pending'
-            runtime_script = '<script>window.RetroRomTransferConfig=' + json.dumps(config).replace('<', '\\u003c') + ';</script>' + f'<script src="{url("/rom-transfer.js")}?v={version}"></script>'
+        config = {'transport': transport, 'cachedOnly': not experimental, 'gameId': game_id,
+                  'profileId': profile_id, 'title': game['title'],
+                  'manifestUrl': url(f'/api/games/{game_id}/browser-manifest') + '?transport=' + transport,
+                  'downloadManifestUrl': url(f'/api/games/{game_id}/download-manifest') + '?transport=p2p',
+                  'loaderUrl': url('/emulatorjs/data/loader.js'), 'webtorrentUrl': url('/vendor/webtorrent.min.js'),
+                  'chunkStoreUrl': url('/vendor/rom-chunk-store.js'), 'locale': locale}
+        runtime_script = '<script>window.RetroRomTransferConfig=' + json.dumps(config).replace('<', '\\u003c') + ';</script>'
+        for filename in ('rom-directory-store.js', 'rom-library.js', 'rom-transfer.js'):
+            script = ROOT / 'web' / filename
+            version = hashlib.sha256(script.read_bytes()).hexdigest()[:16] if script.is_file() else 'pending'
+            runtime_script += f'<script src="{url("/" + filename)}?v={version}"></script>'
         document = f'''<!doctype html><html lang="{locale}"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>{title} · RetroOne</title><link rel="icon" href="{url('/favicon.svg')}" type="image/svg+xml">
 <style>html,body{{margin:0;background:#08111e;color:#deedf7;font:14px system-ui;height:100%;width:100%;min-height:0}}body{{display:flex;flex-direction:column}}header{{display:flex;gap:8px 12px;align-items:center;padding:8px 12px;flex-wrap:wrap;flex-shrink:0}}a{{color:#7de5f8;text-decoration:none}}h1{{font-size:16px;font-weight:500;margin:0}}#game{{flex:1;min-height:0;position:relative;overflow:hidden}}footer{{padding:6px 12px;color:#9dacc2;font-size:12px;flex-shrink:0}}button{{background:#162a42;color:#deedf7;border:1px solid #31506d;border-radius:5px;padding:6px 9px;cursor:pointer}}#status{{color:#c4d3e3}}@media(max-height:480px){{footer{{display:none}}header{{font-size:12px;padding:4px 8px}}}}</style>
 <header><a class="back-link" href="{home_url}" onclick="leave();return false">← {html.escape(messages['back_library'])}</a><h1>{title}</h1><a href="{html.escape(restore_url)}">{html.escape(messages['load_server_save'])}</a><a href="{save_url}">{html.escape(messages['export_server_save'])}</a><label><button onclick="document.getElementById('save-upload').click()">{html.escape(messages['upload_existing_save'])}</button><input hidden type="file" id="save-upload" accept=".state"></label><span id="status"></span></header>
@@ -1102,7 +1165,7 @@ document.getElementById('save-upload').addEventListener('change',async(e)=>{{con
         @app.get('/index.html', response_class=HTMLResponse)
         def versioned_index():
             document = (web_root / 'index.html').read_text('utf-8')
-            for filename in ('app.js', 'styles.css', 'i18n.js', 'i18n-en.js', 'library-ui.js', 'mobile-player.js', 'mobile-player.css', 'pwa-install.js'):
+            for filename in ('app.js', 'styles.css', 'i18n.js', 'i18n-en.js', 'library-ui.js', 'rom-directory-store.js', 'rom-library.js', 'mobile-player.js', 'mobile-player.css', 'pwa-install.js'):
                 path = web_root / filename
                 if path.is_file():
                     version = hashlib.sha256(path.read_bytes()).hexdigest()[:16]

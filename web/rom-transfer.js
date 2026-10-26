@@ -11,10 +11,14 @@
   }
 })(typeof window === 'object' ? window : null, function (root) {
   'use strict';
-  const MiB = 1024 * 1024, HARD_LIMIT = 1024 * MiB, MEMORY_LIMIT = 128 * MiB;
+  const MiB = 1024 * 1024, MEMORY_LIMIT = 128 * MiB;
   const WORDS = {
     prepare: ['正在准备浏览器游戏', 'Preparing browser play'],
     manifest: ['正在检查游戏文件…', 'Checking the game file…'],
+    hashing: ['服务器正在准备文件分片…', 'The server is preparing file pieces…'],
+    cached: ['正在读取这台设备上的游戏文件…', 'Reading the game file saved on this device…'],
+    folder: ['请在“下载与分享”中重新授权缓存目录，文件仍会保留。', 'Grant access to your cache directory in Downloads & sharing. Your files are retained.'],
+    busy: ['另一个标签页正在使用此缓存，请在该标签页启动游戏，或暂停分享后重试。', 'Another tab is using this cache. Play there, or pause sharing there and retry.'],
     download: ['正在下载完整 ROM', 'Downloading the complete ROM'],
     loading: ['下载完成，正在加载模拟器…', 'Download complete. Loading the emulator…'],
     cancel: ['取消下载', 'Cancel download'],
@@ -50,6 +54,10 @@
   const abortError = () => Object.assign(new Error('Cancelled'), {name: 'AbortError'});
   function transferError(problem, fallback = 'network') {
     if (problem?.transferCode || problem?.name === 'AbortError') return problem;
+    if (['permission', 'ownership', 'directory-changed'].includes(problem?.code)) return error('folder');
+    if (problem?.code === 'busy') return error('busy');
+    if (['modified', 'revision-changed', 'mismatch'].includes(problem?.code)) return error('mismatch');
+    if (['quota', 'invalid', 'component'].includes(problem?.code)) return error(problem.code);
     if (problem?.name === 'QuotaExceededError') return error('quota');
     if (problem?.name === 'RangeError' || /out of memory|allocation failed|cannot allocate/i.test(problem?.message || '')) return error('memory');
     if (/failed verification|hash mismatch/i.test(problem?.message || '')) return error('mismatch');
@@ -66,7 +74,7 @@
     return result.href;
   }
   function validateManifest(value, transport, location) {
-    if (!value || typeof value !== 'object' || !Number.isSafeInteger(value.size) || value.size < 1 || value.size > HARD_LIMIT ||
+    if (!value || typeof value !== 'object' || !Number.isSafeInteger(value.size) || value.size < 1 ||
         typeof value.name !== 'string' || !/^[a-zA-Z0-9_-]+\.[a-zA-Z0-9]{1,8}$/.test(value.name) ||
         typeof value.revision !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(value.revision)) throw error('invalid');
     const result = {...value, downloadURL: sameOriginURL(value.download_url, location)};
@@ -217,50 +225,132 @@
       // A sibling preserves the game's existing save-status text and controls.
       status.after(wrapper); this.sharing = {wrapper, label, button}; this.update();
     }
+    async diskLibrary() {
+      // The library page owns long-lived downloads and sharing. Leaving the
+      // iframe must not close that manager or create a competing disk writer.
+      let library;
+      try { library = this.env.parent?.RetroRomLibrary; } catch { /* Cross-origin parents are never used. */ }
+      library ||= this.env.RetroRomLibrary;
+      if (!library || !this.config.gameId) return null;
+      await library.init();
+      return library.snapshot().directory.permission === 'granted' ? library : null;
+    }
+    async fetchManifest(url, transport, epoch) {
+      const address = new URL(sameOriginURL(url, this.env.location));
+      address.searchParams.set('transport', transport);
+      const signal = this.abort.signal;
+      while (true) {
+        const deadline = this.env.setTimeout(() => { if (epoch === this.epoch) { this.failure = 'timeout'; this.abort.abort(); } }, 45000);
+        let response;
+        try {
+          response = await this.env.fetch(address.href, {signal, credentials: 'same-origin', cache: 'no-store'}).catch(problem => {
+            if (problem.name === 'AbortError') throw problem;
+            throw error('network');
+          });
+          this.check(epoch);
+          if (response.status !== 202) {
+            if (!response.ok) throw error('network');
+            return validateManifest(await response.json(), transport, this.env.location);
+          }
+        } finally { this.env.clearTimeout(deadline); }
+        if (this.ui) this.ui.detail.textContent = this.text('hashing');
+        const delay = Math.max(1, Math.min(30, Number(response.headers.get('retry-after')) || 2)) * 1000;
+        await new Promise((resolve, reject) => {
+          const finish = problem => { this.env.clearTimeout(timer); signal.removeEventListener('abort', cancel); problem ? reject(problem) : resolve(); };
+          const cancel = () => finish(abortError()), timer = this.env.setTimeout(() => finish(), delay);
+          signal.addEventListener('abort', cancel, {once: true}); if (signal.aborted) cancel();
+        });
+        this.check(epoch);
+      }
+    }
+    async diskFile(library, manifest, epoch) {
+      this.ui.detail.textContent = this.text('cached');
+      const unsubscribe = library.subscribe?.(snapshot => {
+        if (epoch !== this.epoch || this.unloaded) return;
+        const entry = snapshot.entries.find(entry => entry.gameId === this.config.gameId);
+        if (!entry) return;
+        this.ui.progress.max = entry.size || manifest.size; this.ui.progress.value = entry.received || 0;
+        this.ui.detail.textContent = entry.status === 'queued' ? this.text('hashing') : entry.status === 'downloading' ?
+          `${this.text('download')} · ${bytes(entry.received)} / ${bytes(entry.size)}` : this.text('cached');
+        this.ui.stats.textContent = `${this.text('server')} ${bytes(entry.http_bytes)} · ${this.text('peer')} ${bytes(entry.peer_bytes)} · ${this.text('peers')} ${entry.peers || 0}`;
+      });
+      try {
+        const file = await library.ensureFile(manifest, {gameId: this.config.gameId, title: this.config.title,
+          profileId: this.config.profileId, manifestUrl: this.config.downloadManifestUrl,
+          allowP2P: this.config.transport === 'p2p', signal: this.abort.signal});
+        this.check(epoch);
+        if (!file || file.size !== manifest.size || file.name !== manifest.name) throw error('mismatch');
+        // EmulatorJS checks `instanceof File/Blob` in its iframe. A parent File
+        // needs a local wrapper; structured clone retains its backing bytes
+        // without reading the ROM into a JavaScript ArrayBuffer.
+        if (file instanceof this.env.File) return file;
+        return typeof this.env.structuredClone === 'function' ? this.env.structuredClone(file) :
+          new this.env.File([file], file.name, {type: file.type, lastModified: file.lastModified});
+      } finally { unsubscribe?.(); }
+    }
+    async startCachedOrDefault() {
+      this.cancel(false); if (this.unloaded) return;
+      this.abort = new this.env.AbortController(); const epoch = this.epoch;
+      this.phase = 'preparing'; this.failure = null;
+      try {
+        const library = await this.diskLibrary(); this.check(epoch);
+        if (library?.snapshot().entries.some(entry => entry.gameId === this.config.gameId)) {
+          this.render();
+          const manifest = await this.fetchManifest(this.config.downloadManifestUrl, 'http', epoch);
+          this.manifest = manifest;
+          this.env.EJS_gameUrl = await this.diskFile(library, manifest, epoch);
+          this.env.EJS_CacheLimit = 0;
+          this.env.document.getElementById('game').replaceChildren();
+        }
+        this.phase = 'loading';
+        await loadScript(this.env, this.config.loaderUrl, this.abort.signal, 'emulator');
+        this.check(epoch); this.phase = 'running';
+      } catch (problem) {
+        if (epoch !== this.epoch || this.unloaded) return;
+        this.phase = 'error'; if (!this.ui?.panel.isConnected) this.render();
+        this.ui.title.textContent = this.text('failed'); this.ui.detail.textContent = this.text(this.failure || transferError(problem, 'invalid').transferCode || 'network');
+        this.ui.cancel.hidden = true; this.ui.retry.hidden = false;
+      }
+    }
     async start(transport = this.config.transport, fallbackFrom = null) {
+      if (this.config.cachedOnly) return this.startCachedOrDefault();
       this.cancel(false); this.sharing?.wrapper.remove(); this.sharing = null;
       if (this.unloaded) return;
       if (!['http', 'p2p'].includes(transport)) { this.phase = 'error'; return; }
       this.config.transport = transport; this.phase = 'preparing'; this.stats = createStats(); this.received = 0; this.manifest = null; this.failure = null;
       this.abort = new this.env.AbortController(); const epoch = this.epoch, signal = this.abort.signal;
-      this.render(); let deadline;
+      this.render(); let library;
       if (fallbackFrom) this.ui.hint.textContent = `${this.text('direct')} ${this.text('hint')}`;
       try {
-        const manifestURL = new URL(sameOriginURL(this.config.manifestUrl, this.env.location));
-        manifestURL.searchParams.set('transport', transport);
-        deadline = this.env.setTimeout(() => { if (epoch === this.epoch) { this.failure = 'timeout'; this.abort?.abort(); } }, 120000);
-        const response = await this.env.fetch(manifestURL.href, {signal, credentials: 'same-origin', cache: 'no-store'}).catch(problem => {
-          if (problem.name === 'AbortError') throw problem;
-          throw error('network');
-        });
-        if (!response.ok) throw error('network');
-        const manifest = validateManifest(await response.json(), transport, this.env.location);
+        library = await this.diskLibrary(); this.check(epoch);
+        // Persistent downloads fetch their own verified distribution manifest.
+        // Avoid waiting for the browser P2P manifest to hash the same file first.
+        const manifest = await this.fetchManifest(this.config.manifestUrl, library ? 'http' : transport, epoch);
         this.check(epoch); this.manifest = manifest;
         let webgl2 = true;
         if (manifest.requires_webgl2) {
           const context = this.env.document.createElement('canvas').getContext('webgl2'); webgl2 = Boolean(context);
           context?.getExtension('WEBGL_lose_context')?.loseContext();
         }
-        const disk = supportsDisk(this.env);
-        const unsupported = clientEligibility(manifest, transport, {disk, memory: this.env.navigator?.deviceMemory,
+        const disk = Boolean(library) || supportsDisk(this.env);
+        const unsupported = clientEligibility(manifest, library ? 'http' : transport, {disk, memory: this.env.navigator?.deviceMemory,
           secure: this.env.isSecureContext, threads: this.env.crossOriginIsolated && typeof this.env.SharedArrayBuffer === 'function',
           rtc: typeof this.env.RTCPeerConnection === 'function', crypto: Boolean(this.env.crypto?.subtle), webgl2});
         if (unsupported) throw error(unsupported);
-        if (disk && this.env.navigator.storage.estimate) {
+        if (!library && disk && this.env.navigator.storage.estimate) {
           const estimate = await this.env.navigator.storage.estimate(); this.check(epoch);
           if (Number.isFinite(estimate.quota) && Number.isFinite(estimate.usage) && estimate.quota - estimate.usage < manifest.size * 1.15) throw error('quota');
         }
-        this.env.clearTimeout(deadline); deadline = null;
         this.phase = 'downloading'; this.lastProgress = Date.now(); this.update();
-        this.timer = this.env.setInterval(() => {
+        if (!library) this.timer = this.env.setInterval(() => {
           if (this.phase === 'downloading' && Date.now() - this.lastProgress > 120000) { this.failure = 'timeout'; this.abort?.abort(); this.destroyClient(); }
           this.update();
         }, 1000);
-        const blob = transport === 'p2p' ? await this.downloadTorrent(manifest, epoch, disk) : await this.downloadHTTP(manifest, epoch);
+        const blob = library ? await this.diskFile(library, manifest, epoch) : transport === 'p2p' ? await this.downloadTorrent(manifest, epoch, disk) : await this.downloadHTTP(manifest, epoch);
         this.check(epoch);
         if (!blob || blob.size !== manifest.size) throw error('mismatch');
         this.phase = 'loading'; this.ui.detail.textContent = this.text('loading'); this.ui.cancel.hidden = false;
-        this.env.EJS_gameUrl = new this.env.File([blob], manifest.name, {type: 'application/octet-stream'});
+        this.env.EJS_gameUrl = library ? blob : new this.env.File([blob], manifest.name, {type: 'application/octet-stream'});
         this.env.EJS_CacheLimit = 0; // Avoid another whole-ROM cache in EmulatorJS.
         this.check(epoch);
         this.env.document.getElementById('game').replaceChildren();
@@ -273,12 +363,10 @@
         // Both transports serve the same browser game. A failed peer client
         // must not force a new launch choice, but integrity/resource failures
         // and explicit cancellation must never be bypassed by an HTTP retry.
-        const retryDirect = transport === 'p2p' && this.phase !== 'loading' &&
+        const retryDirect = !library && transport === 'p2p' && this.phase !== 'loading' &&
           ['unsupported', 'component', 'network', 'timeout'].includes(code);
         this.clearTimers(); this.destroyClient();
         if (retryDirect) {
-          if (deadline !== null && deadline !== undefined) this.env.clearTimeout(deadline);
-          deadline = null;
           return this.start('http', code);
         }
         this.phase = 'error';
@@ -286,7 +374,7 @@
         this.ui.title.textContent = this.text('failed');
         this.ui.detail.textContent = this.text(code || 'network');
         this.ui.cancel.hidden = true; this.ui.retry.hidden = false; this.ui.http.hidden = true;
-      } finally { if (deadline !== null && deadline !== undefined) this.env.clearTimeout(deadline); }
+      }
     }
     async downloadHTTP(manifest, epoch) {
       const response = await this.env.fetch(manifest.downloadURL, {signal: this.abort.signal, credentials: 'same-origin', cache: 'no-store'});

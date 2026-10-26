@@ -15,13 +15,13 @@ test('download and tracker URLs stay same-origin and use the correct WebSocket s
   for(const url of ['https://other.example/file','//other.example/file','/\\other.example/file','javascript:alert(1)','/file#fragment','/a\nb'])assert.throws(()=>sameOriginURL(url,location));
 });
 
-test('manifest validation rejects oversized files, unsafe filenames and unrelated tracker URLs',()=>{
+test('manifest validation accepts large files but rejects unsafe metadata and unrelated tracker URLs',()=>{
   const valid=validateManifest(fixture(),'p2p',location);
   assert.equal(valid.size,64); assert.deepEqual(valid.ice_servers,[]);
-  for(const patch of [{size:0},{size:1024*MiB+1},{size:1.2},{name:'../save.bin'},{name:'a/b.iso'},{revision:'x\n'},{tracker_path:'//public.example/announce'},{info_hash:'not-a-hash'},{torrent_base64:'bad%'},{ice_servers:[{urls:['https://example.com']}]},{ice_servers:[{urls:'turn:example.com',credential:{secret:true}}]}]) {
+  for(const patch of [{size:0},{size:Number.MAX_SAFE_INTEGER+1},{size:1.2},{name:'../save.bin'},{name:'a/b.iso'},{revision:'x\n'},{tracker_path:'//public.example/announce'},{info_hash:'not-a-hash'},{torrent_base64:'bad%'},{ice_servers:[{urls:['https://example.com']}]},{ice_servers:[{urls:'turn:example.com',credential:{secret:true}}]}]) {
     assert.throws(()=>validateManifest({...fixture(),...patch},'p2p',location));
   }
-  assert.doesNotThrow(()=>validateManifest({...fixture(),size:1024*MiB},'http',location));
+  assert.doesNotThrow(()=>validateManifest({...fixture(),size:8*1024*MiB},'http',location));
 });
 
 test('client memory, disk and emulator requirements are checked independently of transport',()=>{
@@ -115,7 +115,7 @@ test('HTTP downloads a complete file before loading EmulatorJS and never starts 
 test('cancel during manifest fetch cannot download a ROM or start the emulator after a late response',async()=>{
   let resolve;
   const h=harness({fetch:()=>new Promise(done=>resolve=done)});
-  const run=h.controller.start();h.controller.cancel();
+  const run=h.controller.start();await flush();h.controller.cancel();
   resolve({ok:true,json:async()=>fixture()});await run;
   assert.equal(h.requests.length,1);assert.equal(h.scripts.length,0);assert.equal(h.controller.phase,'cancelled');
   assert.equal(h.timeouts.size,0);assert.equal(h.intervals.size,0);
@@ -280,4 +280,53 @@ test('late events from a cancelled torrent cannot stop the replacement client or
     assert.equal(current.destroyed,false);assert.equal(current.destroyCalls,0);
     assert.deepEqual(h.controller.snapshot(),snapshot);
   }finally{h.controller.cancel(false);}
+});
+
+function attachLibrary(h, {known=true,permission='granted',ensure}={}) {
+  const file=new File([new Uint8Array(64)],fixture().name),calls=[];
+  const snapshot=()=>({directory:{permission},entries:known?[{gameId:'abc',size:64,received:64,status:'ready'}]:[]});
+  const library={init:async()=>{},snapshot,subscribe(callback){callback(snapshot());return ()=>calls.push('unsubscribe');},async ensureFile(manifest,options){calls.push(options);return ensure?ensure(manifest,options):file;}};
+  h.env.parent={RetroRomLibrary:library};
+  Object.assign(h.controller.config,{gameId:'abc',profileId:'player2',title:'Generated demo',downloadManifestUrl:'/p/player2/api/games/abc/download-manifest'});
+  return {file,calls,library};
+}
+
+test('browser launch uses the parent-owned verified disk File without re-downloading or another peer client',async()=>{
+  const h=harness({transport:'p2p'}),disk=attachLibrary(h);
+  h.env.RetroRomLibrary={init:()=>{throw Error('must use parent library');}};
+  h.env.EJS_gameName='player2-save-identity';h.env.EJS_gameID=123;
+  try {
+    await h.controller.start();assert.equal(h.controller.phase,'running');assert.equal(h.env.EJS_gameUrl,disk.file);
+    assert.equal(h.clients.length,0);assert.equal(h.requests.length,1);assert.equal(new URL(h.requests[0].url).searchParams.get('transport'),'http');
+    assert.equal(disk.calls[0].profileId,'player2');assert.equal(disk.calls[0].allowP2P,true);assert.equal(disk.calls[1],'unsubscribe');
+    assert.equal(h.env.EJS_gameName,'player2-save-identity');assert.equal(h.env.EJS_gameID,123);
+    h.listeners.pagehide();assert.equal(h.controller.phase,'closed');assert.equal(disk.calls.length,2,'leaving the game does not pause the parent library');
+  }finally{h.controller.cancel(false);}
+});
+
+test('automatic browser launch reuses an existing disk cache but never downloads an uncached game through the library',async()=>{
+  for(const known of [true,false]){
+    const h=harness(),disk=attachLibrary(h,{known});h.controller.config.cachedOnly=true;h.env.EJS_gameUrl='/original/rom';
+    try {
+      await h.controller.start();assert.equal(h.controller.phase,'running');assert.equal(h.requests.length,known?1:0);
+      assert.equal(h.env.EJS_gameUrl,known?disk.file:'/original/rom');assert.equal(disk.calls.length,known?2:0);assert.equal(h.clients.length,0);
+      assert.deepEqual(h.scripts,['https://retro.example/emulatorjs/data/loader.js']);
+    }finally{h.controller.cancel(false);}
+  }
+});
+
+test('cancelling while the parent library verifies a file prevents a late emulator start',async()=>{
+  let finish;const h=harness(),disk=attachLibrary(h,{ensure:()=>new Promise(resolve=>finish=resolve)});
+  const run=h.controller.start();await flush();assert.equal(typeof finish,'function');h.controller.cancel();finish(disk.file);await run;
+  assert.equal(h.controller.phase,'cancelled');assert.equal(h.scripts.length,0);assert.equal(disk.calls.at(-1),'unsubscribe');
+});
+
+test('202 piece preparation polls without downloading early and cancellation clears the polling timer',async()=>{
+  for(const cancel of [false,true]){
+    const h=harness({transport:'p2p',fetch:async(url,options,count)=>count===1?{ok:true,status:202,headers:{get:()=>1}}:{ok:true,status:200,json:async()=>fixture()}});
+    const run=h.controller.start();await flush();assert.equal(h.requests.length,1);assert.equal(h.clients.length,0);assert.equal(h.timeouts.size,1);
+    if(cancel)h.controller.cancel();else for(const tick of [...h.timeouts.values()])tick();
+    await run;assert.equal(h.controller.phase,cancel?'cancelled':'running');assert.equal(h.requests.length,cancel?1:2);
+    assert.equal(h.timeouts.size,0);h.controller.cancel(false);
+  }
 });

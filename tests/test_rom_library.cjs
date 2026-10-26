@@ -11,7 +11,7 @@ function setup({directory=new Directory(),persistence,locks=new Map(),sharing=fa
  persistence=persistence||{async load(){return saved;},async save(value){saved={...value,entries:value.entries.map(x=>({...x}))};}};
  const env={isSecureContext:true,indexedDB:{},location:{href:'https://retro.example/',origin:'https://retro.example'},crypto:{randomUUID:()=>`unique-${++uuidSerial}`},AbortController,RTCPeerConnection:class{},
   localStorage:{getItem:()=>String(sharing),setItem(){}},showDirectoryPicker:async()=>directory,
-  navigator:{locks:{async request(name,options,callback){if(locks.has(name))return callback(null);locks.set(name,true);try{return await callback({name});}finally{locks.delete(name);}}}},
+  navigator:{locks:{async request(name,options,callback){if(options.ifAvailable&&locks.has(name))return callback(null);while(locks.has(name))await locks.get(name);let release;locks.set(name,new Promise(resolve=>release=resolve));try{return await callback({name});}finally{locks.delete(name);release();}}}},
   addEventListener:(name,callback)=>{listeners[name]=callback;},setTimeout,clearTimeout,
   setInterval:fn=>{const id=++serial;timers.set(id,fn);return id;},clearInterval:id=>timers.delete(id),atob:value=>Buffer.from(value,'base64').toString('binary'),
   fetch:fetch||(async()=>({ok:true,status:200,json:async()=>fixture()})),RetroRomDirectoryStore:DirectoryStore};
@@ -242,4 +242,164 @@ test('a shorter tracker expiry refreshes before expiration rather than waiting s
   await h.manager.chooseDirectory();await add(h.manager);await until(()=>h.manager.snapshot().entries[0].complete);
   assert.equal([...h.manager.jobs.values()][0].refreshAt,expiry*1000-5*60*1000);
  }finally{await h.manager.pauseAll();}
+});
+
+
+function enableOPFS(h, directory=new Directory('browser-storage'), estimate=async()=>({quota:1e9,usage:0})) {
+ h.env.navigator.storage={getDirectory:async()=>directory,estimate};return directory;
+}
+test('first launch creates one persistent OPFS owner without a picker or changing sharing preference',async()=>{
+ const h=setup({sharing:false}),opfs=enableOPFS(h);delete h.env.showDirectoryPicker;
+ try{
+  await h.manager.init();const state=h.manager.snapshot();
+  assert.equal(state.directory.storage_kind,'opfs');assert.equal(state.directory.permission,'granted');assert.equal(state.directory.can_choose_directory,false);assert.equal(state.directory.supported,true);assert.equal(state.sharing,false);
+  const first=await h.manager.ensureFile(fixture(),{gameId:'game1',profileId:'player1',manifestUrl:'/manifest',allowP2P:false});
+  const next=await h.manager.ensureFile(fixture(),{gameId:'game1',profileId:'player2',manifestUrl:'/manifest',allowP2P:false});
+  assert.equal(first.size,next.size);assert.equal(h.clients.length,1);assert.equal(h.clients[0].downloaded,10);assert.equal(opfs.dirs.size,1);assert.equal(opfs.requests,0);
+ }finally{await h.manager.pauseAll();}
+});
+test('two simultaneous first tabs create and adopt exactly one OPFS registry and owner',async()=>{
+ let saved=null,writes=0;const persistence={async load(){await tick();return saved;},async save(value){await tick();saved=value;writes++;}},locks=new Map(),opfs=new Directory('browser-storage');
+ const a=setup({persistence,locks}),b=setup({persistence,locks});enableOPFS(a,opfs);enableOPFS(b,opfs);
+ await Promise.all([a.manager.init(),b.manager.init()]);
+ assert.equal(writes,1);assert.equal(opfs.dirs.size,1);assert.equal(a.manager.state.owner,b.manager.state.owner);assert.equal(locks.size,0);
+});
+test('legacy external records remain authoritative when permission is denied, without OPFS replacement',async()=>{
+ const old=setup();await old.manager.chooseDirectory();await add(old.manager);await until(()=>old.manager.snapshot().entries[0]?.complete);await until(()=>old.manager.jobs.size===0);
+ const record=await old.persistence.load();delete record.storage_kind;await old.persistence.save(record);old.directory.permission='denied';
+ const h=setup({directory:old.directory,persistence:old.persistence}),opfs=enableOPFS(h);
+ await h.manager.init();assert.equal(h.manager.snapshot().directory.storage_kind,'external');assert.equal(h.manager.snapshot().directory.error,'permission');assert.equal(h.manager.snapshot().directory.permission,'denied');assert.equal(opfs.dirs.size,0);assert.equal(h.clients.length,0);assert.equal(old.directory.requests,0);
+ await assert.rejects(add(h.manager),{code:'permission'});await h.manager.reconnect();await until(()=>h.manager.snapshot().entries[0]?.complete);assert.equal(h.clients[0].downloaded,0);await h.manager.pauseAll();
+});
+test('HTTP-only opt out remains in the OPFS registry after a full manager reload',async()=>{
+ const a=setup({sharing:true}),opfs=enableOPFS(a);
+ await a.manager.ensureFile(fixture(),{gameId:'game1',profileId:'player1',manifestUrl:'/manifest',allowP2P:false});await until(()=>a.manager.jobs.size===0);
+ assert.equal((await a.persistence.load()).entries[0].allowP2P,false);
+ const b=setup({sharing:true,persistence:a.persistence});enableOPFS(b,opfs);await b.manager.init();await until(()=>b.manager.snapshot().entries[0]?.complete);
+ assert.equal(b.clients[0].downloaded,0);assert.equal(b.clients[0].options.tracker,false);assert.equal(b.manager.snapshot().sharing,true);await b.manager.pauseAll();
+});
+test('OPFS quota failure is specific and occurs before torrent starts; a complete file remains reusable',async()=>{
+ const h=setup();enableOPFS(h,new Directory('browser-storage'),async()=>({quota:5,usage:0}));
+ try{await assert.rejects(h.manager.ensureFile(fixture(),{gameId:'game1',profileId:'player1',manifestUrl:'/manifest'}),{code:'quota'});assert.equal(h.clients.length,0);}
+ finally{await h.manager.pauseAll();}
+ const a=setup();const opfs=enableOPFS(a);await a.manager.ensureFile(fixture(),{gameId:'game1',profileId:'player1',manifestUrl:'/manifest'});await until(()=>a.manager.jobs.size===0);
+ const b=setup({persistence:a.persistence});enableOPFS(b,opfs,async()=>({quota:10,usage:10}));
+ try{await b.manager.init();await until(()=>b.manager.snapshot().entries[0]?.complete);assert.equal(b.clients[0].downloaded,0);}
+ finally{await b.manager.pauseAll();}
+});
+test('unsupported storage and OPFS initialization failure never create an empty replacement registry',async()=>{
+ const h=setup();delete h.env.showDirectoryPicker;await h.manager.init();assert.equal(h.manager.snapshot().directory.error,'unsupported');await assert.rejects(add(h.manager),{code:'unsupported'});assert.equal(await h.persistence.load(),null);
+ const denied=setup();denied.env.navigator.storage={getDirectory:async()=>{throw Object.assign(new Error(),{name:'QuotaExceededError'});}};await denied.manager.init();assert.equal(denied.manager.snapshot().directory.error,'quota');assert.equal(await denied.persistence.load(),null);
+});
+test('switching directories preserves old files and metadata and selecting the original reuses its owner',async()=>{
+ const h=setup(),externalA=h.directory,externalB=new Directory('second');enableOPFS(h);await h.manager.chooseDirectory();
+ await h.manager.ensureFile(fixture(),{gameId:'game1',profileId:'player1',manifestUrl:'/manifest'});await until(()=>h.manager.jobs.size===0);const owner=h.manager.state.owner;
+ const final=externalA.dirs.get('RetroOne').dirs.get('rom-'+fixture().info_hash).files.get('demo.gba');
+ h.env.showDirectoryPicker=async()=>externalB;await h.manager.chooseDirectory();assert.equal(h.manager.state.storage_kind,'external');assert.equal(final.bytes.length,10);assert.equal(h.manager.entries.size,0);
+ h.env.showDirectoryPicker=async()=>externalA;await h.manager.chooseDirectory();assert.equal(h.manager.state.owner,owner);assert.equal(h.manager.entries.size,1);assert.equal(externalA.dirs.size,1);
+ try{await h.manager.ensureFile(fixture(),{gameId:'game1',profileId:'player2',manifestUrl:'/manifest'});assert.equal(h.clients.at(-1).downloaded,0);assert.equal(externalA.removed.length,0);assert.equal(externalB.removed.length,0);}
+ finally{await h.manager.pauseAll();}
+});
+test('deleted owned OPFS root can be restored without touching unrelated files; bad existing marker is blocked',async()=>{
+ const a=setup(),opfs=enableOPFS(a);await a.manager.ensureFile(fixture(),{gameId:'game1',profileId:'player1',manifestUrl:'/manifest'});await until(()=>a.manager.jobs.size===0);
+ const name=a.manager.state.subdirectory;opfs.dirs.delete(name);opfs.files.set('untouched.txt',{bytes:new Uint8Array([4]),mtime:1});
+ const b=setup({persistence:a.persistence});enableOPFS(b,opfs);await b.manager.init();await until(()=>b.manager.snapshot().entries[0]?.complete);assert.equal(b.clients[0].downloaded,10);assert.ok(opfs.files.has('untouched.txt'));await until(()=>b.manager.jobs.size===0);
+ const marker=opfs.dirs.get(name).files.get('.retroone-owner.json');marker.bytes=new TextEncoder().encode(JSON.stringify({version:1,owner:'someone-else'}));
+ const c=setup({persistence:a.persistence});enableOPFS(c,opfs);await c.manager.init();assert.equal(c.manager.snapshot().directory.error,'ownership');assert.equal(c.clients.length,0);assert.equal(opfs.dirs.size,1);assert.equal(JSON.parse(new TextDecoder().decode(marker.bytes)).owner,'someone-else');
+});
+
+
+test('a stale tab returning to the same owner cannot erase intervening location archives',async()=>{
+ const a=setup();await a.manager.chooseDirectory();
+ const b=setup({directory:a.directory,persistence:a.persistence,locks:a.locks});await b.manager.init();
+ const other=new Directory('other');b.env.showDirectoryPicker=async()=>other;await b.manager.chooseDirectory();
+ b.env.showDirectoryPicker=async()=>a.directory;await b.manager.chooseDirectory();assert.equal(b.manager.state.owner,a.manager.state.owner);
+ a.manager.entries.set('kept',{id:'kept',paused:true});await a.manager.persist();
+ assert.ok((await a.persistence.load()).previous_locations.some(location=>location.directory===other));
+});
+
+
+test('selecting the current directory again leaves its active sharing task and verified file intact',async()=>{
+ const h=setup({sharing:true});try{
+  await h.manager.chooseDirectory();await add(h.manager);await until(()=>h.manager.snapshot().entries[0]?.complete);
+  const job=[...h.manager.jobs.values()][0];await h.manager.chooseDirectory();assert.equal([...h.manager.jobs.values()][0],job);assert.equal(job.abort.signal.aborted,false);assert.equal(h.clients[0].destroyed,false);assert.equal(h.clients.length,1);
+ }finally{await h.manager.pauseAll();}
+});
+
+
+test('useBrowserStorage restores archived OPFS and returning to external restores its exact file without copying',async()=>{
+ const h=setup(),external=h.directory,opfs=enableOPFS(h);
+ const args={gameId:'game1',profileId:'player1',manifestUrl:'/manifest',allowP2P:false};
+ try{
+  await h.manager.ensureFile(fixture(),args);await until(()=>h.manager.jobs.size===0);const opfsOwner=h.manager.state.owner;
+  const opfsFile=opfs.dirs.get(h.manager.state.subdirectory).dirs.get('rom-'+fixture().info_hash).files.get('demo.gba');
+  await h.manager.chooseDirectory();await h.manager.ensureFile(fixture(),args);await until(()=>h.manager.jobs.size===0);const externalOwner=h.manager.state.owner;
+  const externalFile=external.dirs.get('RetroOne').dirs.get('rom-'+fixture().info_hash).files.get('demo.gba');
+  const result=await h.manager.useBrowserStorage();assert.equal(result.directory.storage_kind,'opfs');assert.equal(result.directory.can_use_browser_storage,true);assert.equal(h.manager.state.owner,opfsOwner);
+  await h.manager.ensureFile(fixture(),args);await until(()=>h.manager.jobs.size===0);assert.equal(h.clients.at(-1).downloaded,0);
+  await h.manager.chooseDirectory();assert.equal(h.manager.state.owner,externalOwner);await h.manager.ensureFile(fixture(),args);await until(()=>h.manager.jobs.size===0);assert.equal(h.clients.at(-1).downloaded,0);
+  assert.equal(opfsFile,opfs.dirs.get('retroone-rom-library').dirs.get('rom-'+fixture().info_hash).files.get('demo.gba'));
+  assert.equal(externalFile,external.dirs.get('RetroOne').dirs.get('rom-'+fixture().info_hash).files.get('demo.gba'));assert.equal(opfs.removed.length,0);assert.equal(external.removed.length,0);
+ }finally{await h.manager.pauseAll();}
+});
+test('useBrowserStorage creates a location for a legacy external-only registry and keeps that registry archived',async()=>{
+ const h=setup();await h.manager.chooseDirectory();const oldOwner=h.manager.state.owner;const opfs=enableOPFS(h);
+ await h.manager.useBrowserStorage();assert.equal(h.manager.state.storage_kind,'opfs');assert.equal(opfs.dirs.size,1);assert.ok(h.manager.state.previous_locations.some(value=>value.owner===oldOwner));
+ const owner=h.manager.state.owner;await h.manager.useBrowserStorage();assert.equal(h.manager.state.owner,owner);assert.equal(opfs.dirs.size,1);
+});
+test('useBrowserStorage fails with existing codes and does not change the external registry when unsupported or denied',async()=>{
+ const h=setup();await h.manager.chooseDirectory();const owner=h.manager.state.owner;
+ await assert.rejects(h.manager.useBrowserStorage(),{code:'unsupported'});assert.equal((await h.persistence.load()).owner,owner);
+ h.env.navigator.storage={getDirectory:async()=>{throw Object.assign(new Error(),{name:'QuotaExceededError'});}};
+ await assert.rejects(h.manager.useBrowserStorage(),{code:'quota'});assert.equal((await h.persistence.load()).owner,owner);assert.equal(h.manager.state.storage_kind,'external');
+});
+
+
+test('real DOMException numeric legacy codes map to stable quota and permission errors',async()=>{
+ for(const [name,code] of [['QuotaExceededError','quota'],['SecurityError','permission']]){
+  const h=setup();h.env.navigator.storage={getDirectory:async()=>{throw new DOMException('browser storage unavailable',name);}};
+  await h.manager.init();assert.equal(h.manager.snapshot().directory.error,code);assert.equal(h.manager.snapshot().directory.temporary_fallback,false);
+ }
+});
+test('switching location settles a launch waiting for metadata and removes its listener',async()=>{
+ let began;const started=new Promise(resolve=>began=resolve);const h=setup({fetch:async(_,{signal})=>{began();return new Promise((resolve,reject)=>signal.addEventListener('abort',()=>reject(new DOMException('Aborted','AbortError')),{once:true}));}});
+ await h.manager.chooseDirectory();const outcome=h.manager.ensureFile(fixture(),{gameId:'game1',profileId:'player1',manifestUrl:'/manifest'}).then(()=>({resolved:true}),error=>({code:error.code}));
+ await started;await tick();h.env.showDirectoryPicker=async()=>new Directory('replacement');await h.manager.chooseDirectory();
+ assert.deepEqual(await outcome,{code:'directory-changed'});assert.equal(h.manager.jobs.size,0);assert.equal(h.manager.listeners.size,0);
+});
+test('an explicit location switch can adopt another tabs location after stopping the stale owner job',async()=>{
+ const a=setup({sharing:true});await a.manager.chooseDirectory();await a.manager.ensureFile(fixture(),{gameId:'game1',profileId:'player1',manifestUrl:'/manifest'});
+ const oldRoot=a.manager.root,b=setup({directory:a.directory,persistence:a.persistence,locks:a.locks});await b.manager.init();const second=new Directory('second');b.env.showDirectoryPicker=async()=>second;await b.manager.chooseDirectory();
+ a.env.showDirectoryPicker=async()=>second;await a.manager.chooseDirectory();assert.equal(a.manager.state.owner,b.manager.state.owner);assert.equal(a.manager.state.directory,second);assert.equal(a.clients[0].destroyed,true);assert.ok(oldRoot.dirs.get('rom-'+fixture().info_hash).files.has('demo.gba'));assert.equal(a.manager.jobs.size,0);
+});
+test('reselecting the same directory does not cancel a launch awaiting metadata',async()=>{
+ let response;const h=setup({fetch:()=>new Promise(resolve=>response=resolve)});await h.manager.chooseDirectory();
+ const pending=h.manager.ensureFile(fixture(),{gameId:'game1',profileId:'player1',manifestUrl:'/manifest'});await until(()=>Boolean(response));await h.manager.chooseDirectory();
+ response({ok:true,status:200,json:async()=>fixture()});assert.equal((await pending).size,10);await h.manager.pauseAll();
+});
+test('missing persistence capability permits temporary small-ROM loading only without an existing external record',async()=>{
+ const empty=setup();delete empty.options;delete empty.env.showDirectoryPicker;empty.manager.options={};delete empty.env.indexedDB;
+ await empty.manager.init();assert.equal(empty.manager.snapshot().directory.temporary_fallback,true);assert.equal(empty.manager.snapshot().directory.error,'unsupported');
+ const old=setup();await old.manager.chooseDirectory();old.directory.permission='prompt';
+ const locked=setup({persistence:old.persistence});locked.manager.options={};locked.manager.database=async()=>old.persistence;delete locked.env.navigator.locks;
+ await locked.manager.init();assert.equal(locked.manager.snapshot().directory.storage_kind,'external');assert.equal(locked.manager.snapshot().directory.temporary_fallback,false);
+ const unreadable=setup();unreadable.manager.options={};delete unreadable.env.navigator.locks;unreadable.manager.database=async()=>({load:async()=>{throw new DOMException('blocked','SecurityError');}});
+ await unreadable.manager.init();assert.equal(unreadable.manager.snapshot().directory.temporary_fallback,false);assert.equal(unreadable.manager.snapshot().directory.error,'permission');
+});
+
+
+test('returning to an authorized cached location re-verifies automatically instead of waiting for permission',async()=>{
+ const h=setup({sharing:false});enableOPFS(h);await h.manager.ensureFile(fixture(),{gameId:'game1',profileId:'player1',manifestUrl:'/manifest',allowP2P:false});await until(()=>h.manager.jobs.size===0);
+ await h.manager.chooseDirectory();const returned=await h.manager.useBrowserStorage();assert.equal(returned.directory.permission,'granted');assert.notEqual(returned.entries[0].status,'permission');
+ await until(()=>h.manager.snapshot().entries[0].complete);assert.equal(h.clients.at(-1).downloaded,0);assert.equal(h.manager.snapshot().entries[0].status,'ready');await h.manager.pauseAll();
+});
+test('switching storage pauses its current job without turning automatic resume intent into a manual pause',async()=>{
+ const h=setup({sharing:true});enableOPFS(h);await h.manager.ensureFile(fixture(),{gameId:'game1',profileId:'player1',manifestUrl:'/manifest',allowP2P:true});
+ assert.equal(h.manager.jobs.size,1);await h.manager.chooseDirectory();await h.manager.useBrowserStorage();await until(()=>h.manager.snapshot().entries[0].complete);
+ assert.equal(h.manager.snapshot().entries[0].paused,false);assert.equal(h.clients.at(-1).downloaded,0);assert.equal(h.manager.snapshot().entries[0].status,'sharing');await h.manager.pauseAll();
+});
+test('returning to a location preserves a users manual pause and does not start verification or sharing',async()=>{
+ const h=setup({sharing:true});enableOPFS(h);await h.manager.ensureFile(fixture(),{gameId:'game1',profileId:'player1',manifestUrl:'/manifest'});
+ await h.manager.pause(h.manager.snapshot().entries[0].id);const clientCount=h.clients.length;await h.manager.chooseDirectory();await h.manager.useBrowserStorage();await tick();
+ assert.equal(h.manager.snapshot().entries[0].paused,true);assert.equal(h.manager.snapshot().entries[0].status,'paused');assert.equal(h.manager.snapshot().entries[0].cachedComplete,true);assert.equal(h.manager.jobs.size,0);assert.equal(h.clients.length,clientCount);
 });

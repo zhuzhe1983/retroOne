@@ -443,10 +443,22 @@
   }
   function downloadProblemMessage(problem) {
     const code = typeof problem === 'string' ? problem : problem?.code;
-    const messages = {unsupported: '当前浏览器不支持设备目录下载。', permission: '目录访问已失效，请点击“重新授权”。', ownership: '无法确认目录归属，请选择新的下载目录。', 'revision-changed': '服务器上的游戏文件已更新，请重新下载。', 'directory-changed': '另一页面已更换缓存目录，请刷新后重试。', quota: '设备存储空间不足，请释放空间后继续。', invalid: '下载信息无效，请刷新游戏详情后重试。', component: '下载组件未能载入，请检查网络后重试。', network: '连接服务器失败，请检查网络后继续。', mismatch: '文件校验未通过，请重新下载。', modified: '设备上的文件已变化，需要重新校验。', busy: '另一页面正在使用这个文件，关闭对应任务后重试。', download: '下载未完成，请检查网络和目录权限后继续。', 'not-found': '找不到这个下载任务，请重新添加。', cancelled: '操作已取消。'};
+    const messages = {unsupported: '当前浏览器无法保留游戏文件，请选择可用目录或使用云游戏。', permission: '目录访问已失效，请点击“重新授权”。', ownership: '无法确认目录归属，请选择新的下载目录。', 'revision-changed': '服务器上的游戏文件已更新，请重新下载。', 'directory-changed': '另一页面已更换缓存目录，请刷新后重试。', 'location-limit': '已保存的缓存位置过多，请重新选择之前使用过的目录。', quota: '设备存储空间不足，请释放空间后继续。', invalid: '下载信息无效，请刷新游戏详情后重试。', component: '下载组件未能载入，请检查网络后重试。', network: '连接服务器失败，请检查网络后继续。', mismatch: '文件校验未通过，请重新下载。', modified: '设备上的文件已变化，需要重新校验。', busy: '另一页面正在使用这个文件，关闭对应任务后重试。', download: '下载未完成，请检查网络和目录权限后继续。', 'not-found': '找不到这个下载任务，请重新添加。', cancelled: '操作已取消。'};
     return Object.hasOwn(messages, code) ? t(messages[code]) : typeof problem === 'string' ? diagnostic(problem) : errorMessage(problem);
   }
   function downloadDirectoryReady(snapshot = state.downloadSnapshot) { return snapshot?.directory?.supported === true && snapshot.directory.permission === 'granted'; }
+  function downloadStoragePresentation(directory, managerReady = true) {
+    const browser = directory.storage_kind === 'opfs', ready = directory.permission === 'granted';
+    const title = browser ? t('浏览器缓存') : directory.name || t('尚未选择目录');
+    let note;
+    if (!managerReady) note = t('下载组件尚未就绪，请刷新页面后重试。');
+    else if (directory.error && directory.error !== 'permission') note = downloadProblemMessage(directory.error);
+    else if (ready && browser) note = t('自动保留下载，同一浏览器的玩家共用。清除网站数据会删除缓存；浏览器也可能在空间不足时回收。');
+    else if (ready) note = t('已授权 · 文件保留在这个目录');
+    else if (directory.name) note = t('需要重新授权，才能读取文件、继续下载或分享。');
+    else note = t('当前浏览器无法保留游戏文件，请选择可用目录或使用云游戏。');
+    return {title, note, browser, ready};
+  }
   function downloadEntryStatus(entry) {
     const labels = {downloading: '正在下载', checking: '正在校验', verifying: '正在校验', queued: '等待下载', paused: entry.complete ? '分享已暂停' : '下载已暂停', sharing: '正在分享', seeding: '正在分享', complete: '已下载', ready: '已下载', error: '需要处理', permission: '等待目录授权', busy: '其他页面正在使用'};
     return t(labels[entry.status] || (entry.complete ? '已下载' : '等待下载'));
@@ -482,11 +494,15 @@
     const snapshot = state.downloadSnapshot, directory = snapshot?.directory || {}, manager = window.RetroRomLibrary;
     loadDownloadSupport();
     const supported = directory.supported === true, ready = downloadDirectoryReady(snapshot);
-    $('download-directory-title').textContent = directory.name || t('尚未选择目录');
-    $('download-directory-note').textContent = !manager ? t('下载组件尚未就绪，请刷新页面后重试。') : !supported ? directory.reason || (!window.isSecureContext ? t('需要 HTTPS 或本机安全地址，才能选择下载目录。') : t('此浏览器不支持选择并持续访问设备目录。请使用支持此功能的桌面版 Chrome 或 Edge。')) : ready ? t('已授权 · 文件保留在这个目录') : directory.name ? t('需要重新授权，才能读取文件、继续下载或分享。') : t('选择专门保存游戏的目录；不会自动下载到浏览器内存。');
+    const storage = downloadStoragePresentation(directory, Boolean(manager));
+    $('download-directory-title').textContent = storage.title;
+    $('download-directory-note').textContent = storage.note;
+    $('choose-download-directory').hidden = directory.can_choose_directory === false;
     $('choose-download-directory').disabled = !supported || state.downloadBusy;
-    $('choose-download-directory').textContent = t(directory.name ? '更换目录' : '选择目录');
-    $('reconnect-download-directory').hidden = !supported || !directory.name || ready;
+    $('choose-download-directory').textContent = t(directory.name && !storage.browser ? '更换目录' : '选择目录');
+    $('use-browser-storage').hidden = storage.browser || !directory.can_use_browser_storage;
+    $('use-browser-storage').disabled = state.downloadBusy;
+    $('reconnect-download-directory').hidden = !supported || storage.browser || !directory.name || ready;
     $('reconnect-download-directory').disabled = state.downloadBusy;
     $('download-sharing-toggle').disabled = !manager;
     $('download-sharing-toggle').setAttribute('aria-checked', String(state.browserP2P));
@@ -606,18 +622,35 @@
     else if (state.downloadFromSelf) { showSelf(); $('self-download-settings').focus(); }
     else if (state.downloadReturn?.isConnected) state.downloadReturn.focus({preventScroll: true});
   }
-  async function chooseDownloadDirectory(reconnect = false) {
+  async function chooseDownloadDirectory(reconnect = false, browserStorage = false) {
     const manager = window.RetroRomLibrary;
     if (!manager || state.downloadBusy) return;
     // Invoke the picker/requestPermission synchronously inside this click turn.
     // No capability fetch or initialization may consume the user gesture first.
     state.downloadBusy = true;
     try {
-      const choosing = reconnect ? manager.reconnect() : manager.chooseDirectory();
+      const choosing = browserStorage ? manager.useBrowserStorage() : reconnect ? manager.reconnect() : manager.chooseDirectory();
       renderDownloads(); await choosing; receiveDownloadSnapshot(manager.snapshot());
-      if (downloadDirectoryReady()) { downloadMessage(); await flushPendingDownload(); }
+      if (downloadDirectoryReady()) { downloadMessage(); await flushPendingDownload(); resumeBrowserDownload(); }
     } catch (error) { if (error.name !== 'AbortError') downloadMessage(downloadProblemMessage(error), true); }
     finally { state.downloadBusy = false; renderDownloads(); }
+  }
+  function resumeBrowserDownload() {
+    if (state.playMode !== 'browser') return;
+    try {
+      const frame = $('game-frame')?.contentWindow, config = frame?.RetroRomTransferConfig;
+      if (!config || config.profileId !== state.profile?.id || config.gameId !== state.playGameId) return;
+      const transfer = frame.RetroRomTransfer?.snapshot();
+      if (transfer?.phase !== 'error' || !['folder', 'persistent', 'quota'].includes(transfer.error)) return;
+      closeDownloads();
+      frame.RetroRomTransfer.start(config);
+    } catch { /* A replaced frame cannot resume a different player's launch. */ }
+  }
+  function handleRomTransferError(data) {
+    if (state.playMode !== 'browser' || data.profileId !== state.profile?.id || data.gameId !== state.playGameId) return;
+    const codes = {folder: 'permission', persistent: 'unsupported', quota: 'quota'};
+    if (!Object.hasOwn(codes, data.code)) return;
+    showDownloads(); downloadMessage(downloadProblemMessage(codes[data.code]), true);
   }
   async function flushPendingDownload() {
     const pending = state.downloadPending;
@@ -1597,7 +1630,7 @@
     if (note) note.hidden = !state.launching;
     const defaultReason = $('game-detail').querySelector('.detail-reason');
     if (defaultReason) defaultReason.hidden = selected?.id !== 'auto';
-    holder.innerHTML = `<label for="launch-mode">${escapeHTML(t('启动方式'))}</label><select id="launch-mode" aria-describedby="launch-mode-note" ${state.launching ? 'disabled' : ''}>${options.map(option => `<option value="${escapeHTML(option.id)}" ${option.id === state.launchChoice ? 'selected' : ''} ${option.available ? '' : 'disabled'}>${escapeHTML(launchOptionLabel(option.id))}${option.available ? '' : ` · ${escapeHTML(t('不可用'))}`}</option>`).join('')}</select><div id="launch-mode-note" class="launch-mode-note" role="status">${record?.loading ? escapeHTML(t('正在读取可用启动方式…')) : record?.error ? `${escapeHTML(t('暂时无法读取实验选项，仍可按原方式启动。'))} <button type="button" class="text-button" id="retry-launch-options">${escapeHTML(t('重试'))}</button>` : experimental ? `<p>${escapeHTML(t('需下载完整 ROM：{size}，之后在浏览器运行。', {size: formatSize(selected.size_bytes)}))}</p><p>${escapeHTML(t('运行时内存占用可能为 ROM 的数倍，建议使用内存充足的电脑；手机优先选云游戏。'))}</p><p>${escapeHTML(t(game.platform === 'psp' ? 'PSP 游戏内存档会与同一玩家的云端进度同步；请先结束该游戏的云会话。需要观战时，请选云游戏。' : '浏览器与云端存档分开；需要家人或智能体观战时，请选云游戏。'))}</p>` : escapeHTML(selected?.id === 'stream' ? t('服务器运行，无需下载 ROM；支持家人观战。') : t('沿用自动规则：符合条件的小 ROM 在浏览器运行，其余使用云游戏。'))}</div>${advanced}${unavailable.length ? `<details class="launch-unavailable"><summary>${escapeHTML(t('查看不可用选项的原因'))}</summary><ul>${unavailable.map(option => `<li><strong>${escapeHTML(launchOptionLabel(option.id))}</strong><span>${escapeHTML(option.reason ? diagnostic(option.reason) : t('当前运行环境不支持此方式。'))}</span></li>`).join('')}</ul></details>` : ''}`;
+    holder.innerHTML = `<label for="launch-mode">${escapeHTML(t('启动方式'))}</label><select id="launch-mode" aria-describedby="launch-mode-note" ${state.launching ? 'disabled' : ''}>${options.map(option => `<option value="${escapeHTML(option.id)}" ${option.id === state.launchChoice ? 'selected' : ''} ${option.available ? '' : 'disabled'}>${escapeHTML(launchOptionLabel(option.id))}${option.available ? '' : ` · ${escapeHTML(t('不可用'))}`}</option>`).join('')}</select><div id="launch-mode-note" class="launch-mode-note" role="status">${record?.loading ? escapeHTML(t('正在读取可用启动方式…')) : record?.error ? `${escapeHTML(t('暂时无法读取实验选项，仍可按原方式启动。'))} <button type="button" class="text-button" id="retry-launch-options">${escapeHTML(t('重试'))}</button>` : experimental ? `<p>${escapeHTML(t('需下载完整 ROM：{size}，之后在浏览器运行。', {size: formatSize(selected.size_bytes)}))}</p><p>${escapeHTML(t(game.platform === '3ds' ? '3DS 浏览器核心性能有限，部分游戏在高性能电脑上仍会掉帧、声音断续；日常游玩建议选择云游戏。' : '运行时内存占用可能为 ROM 的数倍，建议使用内存充足的电脑；手机优先选云游戏。'))}</p><p>${escapeHTML(t(game.platform === 'psp' ? 'PSP 游戏内存档会与同一玩家的云端进度同步；请先结束该游戏的云会话。需要观战时，请选云游戏。' : '浏览器与云端存档分开；需要家人或智能体观战时，请选云游戏。'))}</p>` : escapeHTML(selected?.id === 'stream' ? t('服务器运行，无需下载 ROM；支持家人观战。') : t('沿用自动规则：符合条件的小 ROM 在浏览器运行，其余使用云游戏。'))}</div>${advanced}${unavailable.length ? `<details class="launch-unavailable"><summary>${escapeHTML(t('查看不可用选项的原因'))}</summary><ul>${unavailable.map(option => `<li><strong>${escapeHTML(launchOptionLabel(option.id))}</strong><span>${escapeHTML(option.reason ? diagnostic(option.reason) : t('当前运行环境不支持此方式。'))}</span></li>`).join('')}</ul></details>` : ''}`;
     $('launch-mode').addEventListener('change', event => {
       const option = mergeBrowserLaunchOptions(currentLaunchOptions(game), state.browserP2P).find(item => item.id === event.target.value && item.available);
       if (!option) return;
@@ -2444,6 +2477,7 @@
   $('downloads-dialog').addEventListener('close', syncModalBody);
   $('choose-download-directory').addEventListener('click', () => chooseDownloadDirectory());
   $('reconnect-download-directory').addEventListener('click', () => chooseDownloadDirectory(true));
+  $('use-browser-storage').addEventListener('click', () => chooseDownloadDirectory(false, true));
   $('download-sharing-toggle').addEventListener('click', () => { setBrowserP2PPreference(!state.browserP2P); if (state.detailOpen && state.selected) renderLaunchChoices(state.selected); });
   $('download-entries').addEventListener('click', event => { const button = event.target.closest('[data-download-action]'); if (button && !button.disabled) downloadEntryAction(button.dataset.downloadId, button.dataset.downloadAction); });
   $('close-display').addEventListener('click', closeDisplaySettings);
@@ -2579,6 +2613,7 @@
   $('play-dialog').addEventListener('cancel', (event) => { event.preventDefault(); if (window.RetroMobilePlayer?.isMenuOpen()) window.RetroMobilePlayer.setMenu(false); else closePlayer(); });
   window.addEventListener('message', (event) => {
     if (event.origin !== location.origin || event.source !== $('game-frame')?.contentWindow) return;
+    if (event.data?.type === 'retroone:rom-transfer-error') handleRomTransferError(event.data);
     if (event.data?.type === 'retroone:cloud-save' && state.playMode === 'browser' && event.data.profileId === state.profile?.id && event.data.gameId === state.playGameId) {
       const labels = {starting:'正在读取云存档…',syncing:'正在同步存档，请稍候…',synced:'云存档已同步 · 游戏内保存后自动上传',conflict:'存档版本冲突 · 请在游戏内处理',offline:'存档待上传 · 请保持页面打开',busy:'此游戏的存档正在其他会话使用',legacy:'发现旧浏览器存档 · 请确认后继续',unsupported:'当前游戏尚不支持云存档同步'};
       if (labels[event.data.status]) $('play-note').textContent = t(labels[event.data.status]);

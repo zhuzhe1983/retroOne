@@ -33,20 +33,56 @@
     });
     return result;
   }
-  const codeOf = problem => problem?.code || (problem?.name === 'AbortError' ? 'cancelled' : problem?.name === 'QuotaExceededError' ? 'quota' : problem?.name === 'NotAllowedError' || problem?.name === 'SecurityError' ? 'permission' : /verification|hash mismatch|missing required field|invalid (torrent|data)/i.test(problem?.message || '') ? 'mismatch' : 'download');
+  const codeOf = problem => typeof problem?.code === 'string' && problem.code ? problem.code : (problem?.name === 'AbortError' ? 'cancelled' : problem?.name === 'QuotaExceededError' ? 'quota' : problem?.name === 'NotSupportedError' ? 'unsupported' : problem?.name === 'NotAllowedError' || problem?.name === 'SecurityError' ? 'permission' : /verification|hash mismatch|missing required field|invalid (torrent|data)/i.test(problem?.message || '') ? 'mismatch' : 'download');
   class LibraryManager {
     constructor(env, options = {}) {
       this.env = env; this.options = options; this.db = null; this.state = null; this.root = null;
       this.entries = new Map(); this.jobs = new Map(); this.listeners = new Set(); this.closed = false;
-      this.permission = 'unselected'; this.sharing = true;
+      this.permission = 'unselected'; this.storageError = null; this.temporaryFallback = false; this.locationEpoch = 0; this.locationSwitching = false; this.sharing = true;
       try { this.sharing = env.localStorage?.getItem('retroone:browser-p2p') !== 'false'; } catch {}
       this.pendingSave = Promise.resolve(); this.initializing = null; this.savedEntries = new Map();
       this.onLeave = () => { this.closed = true; for (const job of this.jobs.values()) job.abort.abort(); };
       env.addEventListener?.('pagehide', this.onLeave);
       env.addEventListener?.('beforeunload', this.onLeave);
     }
-    supported() { return Boolean(this.env.isSecureContext && this.env.showDirectoryPicker && this.env.indexedDB && this.env.navigator?.locks); }
-    snapshot() { return {directory: {supported: this.supported(), name: this.state?.directory?.name || '', permission: this.permission}, sharing: this.sharing, entries: [...this.entries.values()].map(serializable)}; }
+    supported() { return Boolean(this.env.isSecureContext && this.env.indexedDB && this.env.navigator?.locks && (this.env.navigator.storage?.getDirectory || this.env.showDirectoryPicker)); }
+    snapshot() { return {directory: {supported: this.supported(), name: this.state?.directory?.name || '', permission: this.permission,
+      storage_kind: this.state ? this.state.storage_kind || 'external' : null, can_choose_directory: typeof this.env.showDirectoryPicker === 'function', can_use_browser_storage: Boolean(this.env.navigator?.storage?.getDirectory), temporary_fallback: this.temporaryFallback, error: this.storageError},
+      sharing: this.sharing, entries: [...this.entries.values()].map(serializable)}; }
+    stateLock(callback) {
+      return this.env.navigator?.locks ? this.env.navigator.locks.request('retroone-rom-library-state', {mode: 'exclusive'}, callback) : callback();
+    }
+    locationState(value) {
+      if (!value || !value.directory?.getDirectoryHandle || !/^[a-zA-Z0-9_-]{1,200}$/.test(value.owner || '') || !/^[a-zA-Z0-9_-]{1,200}$/.test(value.subdirectory || '') ||
+          value.storage_kind !== undefined && !['opfs', 'external'].includes(value.storage_kind) || value.entries !== undefined && !Array.isArray(value.entries)) throw fail('ownership');
+      return {...value, storage_kind: value.storage_kind || 'external', entries: value.entries || []};
+    }
+    adopt(value) {
+      this.state = this.locationState(value); this.root = null; this.entries.clear(); this.savedEntries.clear(); this.storageError = null; this.temporaryFallback = false;
+      for (const value of this.state.entries) {
+        this.savedEntries.set(value.id, JSON.stringify(value));
+        this.entries.set(value.id, {...value, cachedComplete: Boolean(value.cachedComplete || value.complete), complete: false, received: 0, http_bytes: 0, peer_bytes: 0, peers: 0, status: value.paused ? 'paused' : 'permission', error: null});
+      }
+    }
+    resumeUnpaused() {
+      for (const entry of this.entries.values()) {
+        if (entry.paused) { entry.status = 'paused'; continue; }
+        entry.status = entry.cachedComplete ? 'verifying' : 'queued';
+        this.resume(entry.id).catch(() => {});
+      }
+    }
+    async createLocation(directory, storage_kind) {
+      const owner = this.env.crypto.randomUUID(); let subdirectory = storage_kind === 'opfs' ? 'retroone-rom-library' : 'RetroOne';
+      try { await directory.getDirectoryHandle(subdirectory); subdirectory += `-${owner}`; }
+      catch (problem) { if (!missing(problem)) throw problem; }
+      const root = await directory.getDirectoryHandle(subdirectory, {create: true});
+      const marker = await root.getFileHandle('.retroone-owner.json', {create: true});
+      if (typeof marker.createWritable !== 'function') throw fail('unsupported');
+      const writer = await marker.createWritable();
+      try { await writer.write(JSON.stringify({version: 1, owner})); await writer.close(); }
+      catch (problem) { await writer.abort?.().catch(() => {}); throw problem; }
+      return {directory, storage_kind, subdirectory, owner, entries: []};
+    }
     subscribe(callback) { this.listeners.add(callback); callback(this.snapshot()); return () => this.listeners.delete(callback); }
     emit() { const value = this.snapshot(); for (const callback of this.listeners) { try { callback(value); } catch {} } }
     async database() {
@@ -74,7 +110,9 @@
           for (const entry of value.entries) {
             if (replaceDirectory || JSON.stringify(entry) !== this.savedEntries.get(entry.id)) merged.set(entry.id, entry);
           }
-          await database.save({...value, entries: [...merged.values()]});
+          // A second tab may have switched away and back to this same owner.
+          // Retain the newest location history instead of restoring our stale copy.
+          await database.save({...value, previous_locations: latest?.previous_locations || value.previous_locations || [], entries: [...merged.values()]});
           for (const entry of value.entries) this.savedEntries.set(entry.id, JSON.stringify(entry));
         };
         // Per-ROM locks protect bytes; this separate short lock prevents two tabs
@@ -87,16 +125,36 @@
     async init() {
       if (this.initializing) return this.initializing;
       this.initializing = (async () => {
-        if (!this.supported() && !this.options.persistence) { this.permission = 'unsupported'; this.emit(); return this.snapshot(); }
-        this.state = await (await this.database()).load() || null;
-        for (const value of this.state?.entries || []) {
-          this.savedEntries.set(value.id, JSON.stringify(value));
-          const entry = {...value, cachedComplete: Boolean(value.cachedComplete || value.complete), complete: false, received: 0, http_bytes: 0, peer_bytes: 0, peers: 0, status: value.paused ? 'paused' : 'permission', error: null};
-          this.entries.set(entry.id, entry);
-        }
-        if (this.state?.directory) {
-          this.permission = await this.state.directory.queryPermission({mode: 'readwrite'});
-          if (this.permission === 'granted') { await this.ownedRoot(); for (const entry of this.entries.values()) if (!entry.paused) this.resume(entry.id).catch(() => {}); }
+        try {
+          if (!this.supported() && !this.options.persistence) {
+            // Read existing metadata when possible even without write capability:
+            // an inaccessible external cache must not be mistaken for no cache.
+            const existing = this.env.indexedDB ? await (await this.database()).load() : null;
+            if (existing) this.adopt(existing);
+            else this.temporaryFallback = true;
+            throw fail('unsupported');
+          }
+          const database = await this.database();
+          // Check again inside the same short cross-tab lock used by metadata
+          // writes. Two fresh tabs must adopt one owner, never replace a library.
+          const value = await this.stateLock(async () => {
+            const existing = await database.load();
+            if (existing) return existing;
+            if (!this.env.navigator?.storage?.getDirectory) return null;
+            let created;
+            try { created = await this.createLocation(await this.env.navigator.storage.getDirectory(), 'opfs'); }
+            catch (problem) { if (codeOf(problem) === 'unsupported') this.temporaryFallback = true; throw problem; }
+            await database.save(created); return created;
+          });
+          if (!value) throw fail('unsupported');
+          this.adopt(value);
+          this.permission = this.state.storage_kind === 'opfs' ? 'granted' : await this.state.directory.queryPermission({mode: 'readwrite'});
+          if (this.permission === 'granted') {
+            await this.ownedRoot();
+            this.resumeUnpaused();
+          } else this.storageError = 'permission';
+        } catch (problem) {
+          this.storageError = codeOf(problem); this.permission = this.storageError === 'unsupported' ? 'unsupported' : 'error'; this.root = null;
         }
         this.emit(); return this.snapshot();
       })();
@@ -104,31 +162,86 @@
     }
     async ownedRoot() {
       if (!this.state || this.permission !== 'granted') throw fail('permission');
-      const root = await this.state.directory.getDirectoryHandle(this.state.subdirectory);
+      let root;
+      try { root = await this.state.directory.getDirectoryHandle(this.state.subdirectory); }
+      catch (problem) {
+        // A user may clear only OPFS files while leaving IndexedDB. Recreate our
+        // recorded root under the metadata lock, then re-verify/download bytes;
+        // never clear a still-present directory with an invalid owner marker.
+        if (!missing(problem) || this.state.storage_kind !== 'opfs') throw problem;
+        root = await this.stateLock(async () => {
+          const latest = await (await this.database()).load();
+          if (latest?.owner !== this.state.owner) throw fail('directory-changed');
+          let directory;
+          try { return await this.state.directory.getDirectoryHandle(this.state.subdirectory); }
+          catch (error) { if (!missing(error)) throw error; directory = await this.state.directory.getDirectoryHandle(this.state.subdirectory, {create: true}); }
+          const writer = await (await directory.getFileHandle('.retroone-owner.json', {create: true})).createWritable();
+          try { await writer.write(JSON.stringify({version: 1, owner: this.state.owner})); await writer.close(); }
+          catch (error) { await writer.abort?.().catch(() => {}); throw error; }
+          return directory;
+        });
+      }
       const marker = JSON.parse(await (await (await root.getFileHandle('.retroone-owner.json')).getFile()).text());
       if (marker.owner !== this.state.owner || marker.version !== 1) throw fail('ownership');
       this.root = root; return root;
     }
     async chooseDirectory() {
-      // Must be called directly from a click; invoke the picker before awaiting anything.
+      if (typeof this.env.showDirectoryPicker !== 'function') throw fail('unsupported');
+      // Invoke the picker in the click turn, before any await consumes its gesture.
       const selected = await this.env.showDirectoryPicker({id: 'retroone-rom-library', mode: 'readwrite', startIn: 'downloads'});
+      return this.selectLocation(selected, 'external');
+    }
+    async useBrowserStorage() {
+      if (!this.env.navigator?.storage?.getDirectory) throw fail('unsupported');
+      try { return await this.selectLocation(await this.env.navigator.storage.getDirectory(), 'opfs'); }
+      catch (problem) { throw fail(codeOf(problem)); }
+    }
+    async selectLocation(selected, storage_kind) {
       await this.init();
-      if (this.state?.directory && await selected.isSameEntry(this.state.directory)) { this.permission = 'granted'; await this.ownedRoot(); this.emit(); return this.snapshot(); }
-      await this.pauseAll();
-      const owner = this.env.crypto.randomUUID(); let subdirectory = 'RetroOne';
-      try { await selected.getDirectoryHandle(subdirectory); subdirectory = `RetroOne-${owner}`; }
-      catch (problem) { if (!missing(problem)) throw problem; }
-      const root = await selected.getDirectoryHandle(subdirectory, {create: true});
-      const marker = await root.getFileHandle('.retroone-owner.json', {create: true}), writer = await marker.createWritable();
-      await writer.write(JSON.stringify({version: 1, owner})); await writer.close();
-      this.state = {directory: selected, subdirectory, owner}; this.root = root; this.permission = 'granted'; this.entries.clear();
-      await this.persist(true); this.emit(); return this.snapshot();
+      if (this.locationSwitching) throw fail('busy');
+      this.locationSwitching = true;
+      try { return await this.activateLocation(selected, storage_kind); }
+      finally { this.locationSwitching = false; this.emit(); }
+    }
+    async activateLocation(selected, storage_kind) {
+      const database = await this.database();
+      if (this.state && await selected.isSameEntry(this.state.directory) && await this.stateLock(async () => (await database.load())?.owner === this.state.owner)) {
+        // Reauthorizing the active location must not pause existing downloads
+        // or sharing merely because the same folder was picked again.
+        this.permission = 'granted'; this.storageError = null; await this.ownedRoot();
+        this.resumeUnpaused();
+        this.emit(); return this.snapshot();
+      }
+      // Reject pending launches before jobs pause or entries change. A new
+      // location can contain the same game ID, but not the same verified File.
+      this.locationEpoch++; this.emit();
+      await this.pauseAll({allowStaleLocation: true, preserveIntent: true});
+      const value = await this.stateLock(async () => {
+        const latest = await database.load();
+        if (latest && await selected.isSameEntry(latest.directory)) return latest;
+        const locations = latest ? [...(latest.previous_locations || []), this.locationState(latest)] : [];
+        let chosen = -1;
+        for (let index = 0; index < locations.length; index++) if (await selected.isSameEntry(locations[index].directory)) { chosen = index; break; }
+        // Keep each prior owner and index so selecting a directory again can
+        // recover its files. No directory switches delete ROMs or user files.
+        if (chosen < 0 && locations.length >= 16) throw fail('location-limit');
+        const next = chosen < 0 ? await this.createLocation(selected, storage_kind) : locations.splice(chosen, 1)[0];
+        const previous_locations = locations.map(({previous_locations: _, ...location}) => location);
+        const saved = {...next, previous_locations}; await database.save(saved); return saved;
+      });
+      this.adopt(value); this.permission = 'granted';
+      try { await this.ownedRoot(); } catch (problem) { this.storageError = codeOf(problem); this.permission = 'error'; this.emit(); throw problem; }
+      this.resumeUnpaused(); this.emit(); return this.snapshot();
     }
     async reconnect() {
       if (!this.state?.directory) return this.chooseDirectory();
       // Explicit UI action only. init never calls requestPermission.
-      this.permission = await this.state.directory.requestPermission({mode: 'readwrite'});
-      if (this.permission === 'granted') { await this.ownedRoot(); for (const entry of this.entries.values()) if (!entry.paused) this.resume(entry.id).catch(() => {}); }
+      this.permission = this.state.storage_kind === 'opfs' ? 'granted' : await this.state.directory.requestPermission({mode: 'readwrite'});
+      this.storageError = this.permission === 'granted' ? null : 'permission';
+      if (this.permission === 'granted') {
+        try { await this.ownedRoot(); } catch (problem) { this.storageError = codeOf(problem); this.permission = 'error'; this.emit(); throw problem; }
+        this.resumeUnpaused();
+      }
       this.emit(); return this.snapshot();
     }
     async script(path, global) {
@@ -169,7 +282,9 @@
         .sort((a, b) => Number(this.jobs.has(b.id)) - Number(this.jobs.has(a.id)) || Number(b.complete) - Number(a.complete))[0];
     }
     async add({gameId, title, profileId, manifestUrl, allowP2P, revision, _ownerToken}) {
-      await this.init(); if (!this.root || this.permission !== 'granted') throw fail('permission');
+      await this.init(); if (this.locationSwitching) throw fail('directory-changed');
+      const locationEpoch = this.locationEpoch;
+      if (!this.root || this.permission !== 'granted') throw fail(this.storageError || 'permission');
       if (!/^[a-zA-Z0-9_-]{1,128}$/.test(gameId || '') || revision !== undefined && !/^[a-zA-Z0-9_-]{1,128}$/.test(revision)) throw fail('invalid'); localURL(manifestUrl, this.env);
       const base = `${profileId || 'default'}-${gameId}`;
       if (!/^[a-zA-Z0-9_-]{1,200}$/.test(base)) throw fail('invalid');
@@ -182,9 +297,11 @@
       // share one transfer, and only its creator may cancel that incomplete job.
       if (!this.jobs.has(entry.id) && !entry._starting) {
         entry._starting = true; entry._ownerToken = _ownerToken;
-        if (typeof allowP2P === 'boolean') entry._allowP2P = allowP2P;
+        if (typeof allowP2P === 'boolean') { entry._allowP2P = allowP2P; entry.allowP2P = allowP2P; }
       }
-      await this.persist(); await this.resume(entry.id); return serializable(entry);
+      await this.persist();
+      if (this.locationSwitching || locationEpoch !== this.locationEpoch) throw fail('directory-changed');
+      await this.resume(entry.id); return serializable(entry);
     }
     async entryDirectory(entry, manifest) {
       // Each revision has its own immutable namespace; changed ROMs cannot overwrite an old revision.
@@ -213,7 +330,7 @@
       if (previous?.abort.signal.aborted) await previous.done;
       else if (previous) return serializable(entry);
       if (this.permission !== 'granted' || !this.root) { entry.status = 'permission'; this.emit(); return serializable(entry); }
-      const job = {abort: new this.env.AbortController(), ownerToken: entry._ownerToken, manifest: refresh?.manifest || null, allowP2P: refresh ? refresh.allowP2P : entry._allowP2P !== false, client: null, store: null, timer: null, release: null, done: null};
+      const job = {abort: new this.env.AbortController(), ownerToken: entry._ownerToken, manifest: refresh?.manifest || null, allowP2P: refresh ? refresh.allowP2P : (entry._allowP2P ?? entry.allowP2P) !== false, client: null, store: null, timer: null, release: null, done: null};
       delete entry._allowP2P; delete entry._ownerToken; delete entry._starting; this.jobs.set(id, job); entry.paused = false; entry.complete = false; entry.status = 'queued'; entry.error = null; this.emit();
       job.done = this.run(entry, job).finally(async () => {
         if (this.jobs.get(id) !== job) return;
@@ -237,6 +354,13 @@
           const directory = await this.entryDirectory(entry, manifest);
           if (entry.revision && entry.revision !== manifest.revision) entry.cachedComplete = false;
           Object.assign(entry, {revision: manifest.revision, infoHash: manifest.info_hash.toLowerCase(), name: manifest.name, size: manifest.size, status: 'verifying', received: 0, http_bytes: 0, peer_bytes: 0, complete: false}); this.emit(); await this.persist();
+          if (this.state.storage_kind === 'opfs' && this.env.navigator.storage?.estimate) {
+            let stored = 0;
+            try { stored = Math.min(manifest.size, (await (await directory.getFileHandle(manifest.name)).getFile()).size); }
+            catch (problem) { if (!missing(problem)) throw problem; }
+            const estimate = await this.env.navigator.storage.estimate();
+            if (stored < manifest.size && Number.isFinite(estimate.quota) && Number.isFinite(estimate.usage) && estimate.quota - estimate.usage < (manifest.size - stored) * 1.15) throw fail('quota');
+          }
           await this.script(this.options.webtorrentUrl || '/vendor/webtorrent.min.js', 'WebTorrent');
           await this.script(this.options.storeUrl || '/rom-directory-store.js', 'RetroRomDirectoryStore');
           if (signal.aborted) throw aborted();
@@ -330,12 +454,23 @@
         entry.peers = 0; this.emit(); await this.persist().catch(() => {});
       }
     }
-    async pause(id) {
+    async pause(id, {preserveIntent = false} = {}) {
       const entry = this.entries.get(id); if (!entry) return;
+      const wasPaused = Boolean(entry.paused);
       entry.paused = true; delete entry._refreshGuard; const job = this.jobs.get(id); job?.abort.abort(); if (job?.done) await job.done;
+      if (preserveIntent) entry.paused = wasPaused;
       entry.status = 'paused'; entry.peers = 0; await this.persist(); this.emit(); return serializable(entry);
     }
-    async pauseAll() { await Promise.all([...this.jobs.keys()].map(id => this.pause(id))); }
+    async pauseAll({allowStaleLocation = false, preserveIntent = false} = {}) {
+      await Promise.all([...this.jobs.keys()].map(async id => {
+        try { await this.pause(id, {preserveIntent}); }
+        catch (problem) {
+          // An explicit switch may adopt the registry changed by another tab,
+          // after our old jobs have stopped. Never write that old owner back.
+          if (!allowStaleLocation || codeOf(problem) !== 'directory-changed') throw problem;
+        }
+      }));
+    }
     async setSharing(enabled) {
       this.sharing = Boolean(enabled); try { this.env.localStorage?.setItem('retroone:browser-p2p', String(this.sharing)); } catch {}
       const resume = [...this.entries.values()].filter(entry => !entry.paused).map(entry => entry.id);
@@ -359,13 +494,18 @@
     }
     async ensureFile(manifest, {gameId, title, profileId, manifestUrl, allowP2P, signal} = {}) {
       if (signal?.aborted) throw aborted(); await this.init();
-      const cached = await this.getFile({gameId, revision: manifest.revision}); if (signal?.aborted) throw aborted(); if (cached) return cached;
+      const locationEpoch = this.locationEpoch, owner = this.state?.owner;
+      const sameLocation = () => this.locationEpoch === locationEpoch && this.state?.owner === owner;
+      if (this.locationSwitching || !sameLocation()) throw fail('directory-changed');
+      const cached = await this.getFile({gameId, revision: manifest.revision});
+      if (signal?.aborted) throw aborted(); if (!sameLocation()) throw fail('directory-changed'); if (cached) return cached;
       if (!manifestUrl) {
         const source = manifest.download_url?.match(/^(.*\/api\/games\/[^/]+)\/browser-rom\//)?.[1];
         if (!source) throw fail('invalid'); manifestUrl = `${source}/download-manifest?transport=p2p`;
       }
       const ownerToken = Symbol('game launch transfer');
       const entry = await this.add({gameId, title, profileId, manifestUrl, allowP2P, revision: manifest.revision, _ownerToken: ownerToken});
+      if (!sameLocation()) throw fail('directory-changed');
       const ownedJob = this.jobs.get(entry.id);
       const ownsTransfer = ownedJob?.ownerToken === ownerToken;
       return new Promise((resolve, reject) => {
@@ -379,9 +519,16 @@
         };
         signal?.addEventListener('abort', cancel, {once: true});
         unsubscribe = this.subscribe(async snapshot => {
-          const current = snapshot.entries.find(value => value.id === entry.id); if (!current || finished) return;
+          if (finished) return;
+          if (!sameLocation()) { finish(fail('directory-changed')); return; }
+          const current = snapshot.entries.find(value => value.id === entry.id);
+          if (!current) { finish(fail('directory-changed')); return; }
           if (current.complete && current.revision !== manifest.revision) { finish(fail('mismatch')); return; }
-          if (current.complete) { const file = await this.getFile({gameId, revision: current.revision}); if (file) finish(null, file); }
+          if (current.complete) {
+            const file = await this.getFile({gameId, revision: current.revision});
+            if (!sameLocation()) finish(fail('directory-changed')); else if (file) finish(null, file);
+          }
+          else if (current.status === 'paused') finish(fail('cancelled'));
           else if (['error', 'permission', 'busy'].includes(current.status)) finish(fail(current.error || current.status));
         });
         if (finished) unsubscribe(); if (signal?.aborted) cancel();

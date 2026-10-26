@@ -93,7 +93,7 @@ function harness({transport='http',fetch,autoDone=true,disk=false,blobPending=fa
   };
   if(disk){env.navigator.storage={getDirectory:async()=>({}),estimate:async()=>({quota:1024*MiB,usage:0})};env.FileSystemFileHandle=function(){};env.FileSystemFileHandle.prototype.createWritable=function(){};}
   if(!loadBundles){env.WebTorrent=FakeWebTorrent;env.RetroRomChunkStore=FakeStore;env.RetroRomMemoryStore=FakeMemoryStore;}
-  const config={transport,manifestUrl:'/p/player2/api/games/abc/browser-manifest?transport=p2p',loaderUrl:'/emulatorjs/data/loader.js',webtorrentUrl:'/vendor/webtorrent.min.js',chunkStoreUrl:'/vendor/rom-chunk-store.js',locale:'en'};
+  const config={transport,temporary:true,manifestUrl:'/p/player2/api/games/abc/browser-manifest?transport=p2p',loaderUrl:'/emulatorjs/data/loader.js',webtorrentUrl:'/vendor/webtorrent.min.js',chunkStoreUrl:'/vendor/rom-chunk-store.js',locale:'en'};
   const controller=new DownloadController(config,env);
   return {env,controller,requests,scripts,clients,pending,listeners,timeouts,intervals,config,FakeStore,FakeMemoryStore};
 }
@@ -286,7 +286,7 @@ function attachLibrary(h, {known=true,permission='granted',ensure}={}) {
   const file=new File([new Uint8Array(64)],fixture().name),calls=[];
   const snapshot=()=>({directory:{permission},entries:known?[{gameId:'abc',size:64,received:64,status:'ready'}]:[]});
   const library={init:async()=>{},snapshot,subscribe(callback){callback(snapshot());return ()=>calls.push('unsubscribe');},async ensureFile(manifest,options){calls.push(options);return ensure?ensure(manifest,options):file;}};
-  h.env.parent={RetroRomLibrary:library};
+  h.env.parent={RetroRomLibrary:library};h.controller.config.temporary=false;
   Object.assign(h.controller.config,{gameId:'abc',profileId:'player2',title:'Generated demo',downloadManifestUrl:'/p/player2/api/games/abc/download-manifest'});
   return {file,calls,library};
 }
@@ -317,14 +317,25 @@ test('automatic browser launch populates the authorized shared directory on its 
   }
 });
 
-test('automatic launch without an authorized directory leaves the temporary upstream path explicit and does not claim disk reuse',async()=>{
-  for(const permission of ['unselected','prompt','denied','unsupported']){
-    const h=harness(),disk=attachLibrary(h,{permission});h.controller.config.cachedOnly=true;h.env.EJS_gameUrl='/p/player2/api/games/abc/rom/demo.nds';
-    try{
-      await h.controller.start();assert.equal(h.controller.phase,'running');assert.equal(h.requests.length,0);assert.equal(disk.calls.length,0);
-      assert.equal(h.env.EJS_gameUrl,'/p/player2/api/games/abc/rom/demo.nds');assert.equal(h.env.EJS_CacheLimit,undefined);assert.equal(h.env.EJS_cacheConfig,undefined);
-    }finally{h.controller.cancel(false);}
-  }
+test('automatic and explicit launches never silently download when the stored directory needs permission',async()=>{
+ for(const cachedOnly of [true,false])for(const permission of ['unselected','prompt','denied','unsupported']){
+  const h=harness({transport:'p2p'}),disk=attachLibrary(h,{permission}),messages=[];h.controller.config.cachedOnly=cachedOnly;h.env.parent.postMessage=(value,origin)=>messages.push({value,origin});
+  try{
+   await h.controller.start();assert.equal(h.controller.phase,'error');assert.equal(h.requests.length,0);assert.equal(disk.calls.length,0);assert.equal(h.scripts.length,0);assert.equal(h.clients.length,0);
+   const code=['prompt','denied'].includes(permission)?'folder':'persistent';assert.equal(h.controller.snapshot().error,code);
+   assert.deepEqual(messages,[{value:{type:'retroone:rom-transfer-error',code,gameId:'abc',profileId:'player2'},origin:'https://retro.example'}]);
+  }finally{h.controller.cancel(false);}
+ }
+});
+test('one-off temporary launch must be opted into and reports that it cannot reuse the file later',async()=>{
+ const h=harness();attachLibrary(h,{permission:'denied'});h.controller.config.temporary=true;
+ try{await h.controller.start();assert.equal(h.controller.phase,'running');assert.equal(h.controller.snapshot().temporary,true);assert.equal(h.controller.snapshot().http_bytes,64);}
+ finally{h.controller.cancel(false);}
+});
+test('persistent initialization quota failure never retries via the temporary HTTP path',async()=>{
+ const h=harness({transport:'p2p'});attachLibrary(h);h.env.parent.RetroRomLibrary.snapshot=()=>({directory:{permission:'error',error:'quota'}});
+ try{await h.controller.start();assert.equal(h.controller.snapshot().error,'quota');assert.equal(h.requests.length,0);assert.equal(h.clients.length,0);}
+ finally{h.controller.cancel(false);}
 });
 
 test('automatic and explicit cached ZIP launches normalize only their emulator view and preserve save identity',async()=>{
@@ -357,4 +368,37 @@ test('202 piece preparation polls without downloading early and cancellation cle
     await run;assert.equal(h.controller.phase,cancel?'cancelled':'running');assert.equal(h.requests.length,cancel?1:2);
     assert.equal(h.timeouts.size,0);h.controller.cancel(false);
   }
+});
+
+
+test('permission revoked during cache access reports folder and never falls back to a temporary download',async()=>{
+ const h=harness({transport:'p2p'});attachLibrary(h,{ensure:async()=>{throw Object.assign(new Error('revoked'),{code:'permission'});}});
+ try{await h.controller.start();assert.equal(h.controller.snapshot().error,'folder');assert.equal(h.requests.length,1);assert.equal(h.clients.length,0);assert.equal(h.scripts.length,0);}
+ finally{h.controller.cancel(false);}
+});
+
+
+test('automatic small-ROM startup retains the original EJS URL when storage is genuinely unavailable and visibly labels it temporary',async()=>{
+ const h=harness();const d=attachLibrary(h,{permission:'unsupported'});h.controller.config.cachedOnly=true;h.env.EJS_gameUrl='/original/small-rom';
+ d.library.snapshot=()=>({directory:{supported:false,permission:'unsupported',error:'unsupported',storage_kind:null,temporary_fallback:true},entries:[]});
+ try{await h.controller.start();assert.equal(h.controller.phase,'running');assert.equal(h.env.EJS_gameUrl,'/original/small-rom');assert.equal(h.requests.length,0);assert.equal(h.clients.length,0);assert.equal(h.controller.snapshot().temporary,true);assert.match(h.env.document.getElementById('rom-temporary-notice').textContent,/temporary download/);assert.equal(h.scripts.length,1);}
+ finally{h.controller.cancel(false);}
+});
+test('experimental or existing-external unsupported states never use automatic small-ROM fallback',async()=>{
+ for(const [cachedOnly,storage_kind,error] of [[false,null,'unsupported'],[true,'external','unsupported'],[true,null,'quota'],[true,null,'permission']]){
+  const h=harness();const d=attachLibrary(h,{permission:'unsupported'});h.controller.config.cachedOnly=cachedOnly;
+  d.library.snapshot=()=>({directory:{supported:false,permission:'unsupported',error,storage_kind,temporary_fallback:true},entries:[]});
+  try{await h.controller.start();assert.equal(h.controller.phase,'error');assert.equal(h.requests.length,0);assert.equal(h.scripts.length,0);}
+  finally{h.controller.cancel(false);}
+ }
+});
+
+
+test('temporary capability fallback is per launch and disappears after storage is restored',async()=>{
+ const h=harness();const d=attachLibrary(h);h.controller.config.cachedOnly=true;h.env.EJS_gameUrl='/original/small-rom';
+ let available=false;d.library.snapshot=()=>({directory:available?{permission:'granted'}:{permission:'unsupported',error:'unsupported',storage_kind:null,temporary_fallback:true},entries:[]});
+ try{
+  await h.controller.start();assert.equal(h.controller.snapshot().temporary,true);assert.equal(h.controller.config.temporary,false);
+  available=true;await h.controller.start();assert.equal(h.controller.phase,'running');assert.equal(h.controller.snapshot().temporary,false);assert.equal(h.env.EJS_gameUrl,d.file);assert.equal(h.env.document.getElementById('rom-temporary-notice').isConnected,false);
+ }finally{h.controller.cancel(false);}
 });

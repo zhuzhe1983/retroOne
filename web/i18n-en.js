@@ -1,5 +1,12 @@
 /* Interface translations only. Game metadata and server diagnostics retain their original text. */
 window.RetroI18n.add('en', {
+  "已保存的缓存位置过多，请重新选择之前使用过的目录。": "Too many storage locations are saved. Select a previously used folder.",
+  "3DS 浏览器核心性能有限，部分游戏在高性能电脑上仍会掉帧、声音断续；日常游玩建议选择云游戏。": "The browser 3DS core has performance limits: some games stutter or have broken audio even on powerful computers. Cloud play is recommended for regular play.",
+  "保存位置": "Storage location",
+  "浏览器缓存": "Browser cache",
+  "使用浏览器缓存": "Use browser cache",
+  "自动保留下载，同一浏览器的玩家共用。清除网站数据会删除缓存；浏览器也可能在空间不足时回收。": "Downloads are kept and shared by players in this browser. Clearing site data deletes this cache; the browser may also reclaim it when storage is low.",
+  "当前浏览器无法保留游戏文件，请选择可用目录或使用云游戏。": "This browser cannot keep game files. Choose an accessible folder or use cloud play.",
   "PSP 游戏内存档会与同一玩家的云端进度同步；请先结束该游戏的云会话。需要观战时，请选云游戏。": "PSP in-game saves sync with this player's cloud progress. End the cloud session for this game first. Choose cloud play for spectators.",
   "文件大小 {size} · 下载完成后可尝试浏览器运行": "File size {size} · Try browser play after downloading",
   "服务器上的游戏文件已更新，请重新下载。": "The game file on the server has changed. Download it again.",

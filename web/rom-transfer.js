@@ -17,6 +17,9 @@
     manifest: ['正在检查游戏文件…', 'Checking the game file…'],
     hashing: ['服务器正在准备文件分片…', 'The server is preparing file pieces…'],
     cached: ['正在读取这台设备上的游戏文件…', 'Reading the game file saved on this device…'],
+    persistent: ['当前浏览器无法使用持久游戏缓存。请选择可用的下载目录或云游戏；临时下载不会在下次启动复用。', 'Persistent game storage is unavailable. Choose an accessible download directory or cloud gaming. Temporary downloads are not reused next time.'],
+    temporaryLoading: ['当前浏览器无法保留游戏文件，本次临时加载。', 'This browser cannot retain game files. This launch uses a temporary download.'],
+    temporary: ['本次使用临时下载，退出后下次需要重新下载。', 'This is a temporary download. The next launch will download the file again.'],
     folder: ['请在“下载与分享”中重新授权缓存目录，文件仍会保留。', 'Grant access to your cache directory in Downloads & sharing. Your files are retained.'],
     busy: ['另一个标签页正在使用此缓存，请在该标签页启动游戏，或暂停分享后重试。', 'Another tab is using this cache. Play there, or pause sharing there and retry.'],
     download: ['正在下载完整 ROM', 'Downloading the complete ROM'],
@@ -54,10 +57,10 @@
   const abortError = () => Object.assign(new Error('Cancelled'), {name: 'AbortError'});
   function transferError(problem, fallback = 'network') {
     if (problem?.transferCode || problem?.name === 'AbortError') return problem;
-    if (['permission', 'ownership', 'directory-changed'].includes(problem?.code)) return error('folder');
+    if (['permission', 'ownership', 'directory-changed', 'location-limit'].includes(problem?.code)) return error('folder');
     if (problem?.code === 'busy') return error('busy');
     if (['modified', 'revision-changed', 'mismatch'].includes(problem?.code)) return error('mismatch');
-    if (['quota', 'invalid', 'component'].includes(problem?.code)) return error(problem.code);
+    if (['quota', 'invalid', 'component', 'cancelled'].includes(problem?.code)) return error(problem.code);
     if (problem?.name === 'QuotaExceededError') return error('quota');
     if (problem?.name === 'RangeError' || /out of memory|allocation failed|cannot allocate/i.test(problem?.message || '')) return error('memory');
     if (/failed verification|hash mismatch/i.test(problem?.message || '')) return error('mismatch');
@@ -220,7 +223,7 @@
     text(key) { return message(key, this.locale); }
     check(epoch) { if (this.unloaded || epoch !== this.epoch || this.abort?.signal.aborted) throw abortError(); }
     snapshot() { return {phase: this.phase, transport: this.config.transport, size: this.manifest?.size || 0,
-      received_bytes: this.received, ...this.stats.snapshot(), sharing: Boolean(this.client && this.phase === 'running')}; }
+      received_bytes: this.received, error: this.failure, temporary: this.config.temporary === true || this.temporaryFallback === true, ...this.stats.snapshot(), sharing: Boolean(this.client && this.phase === 'running')}; }
     render() {
       const doc = this.env.document, game = doc.getElementById('game');
       if (!game) throw error('invalid');
@@ -279,15 +282,31 @@
       // A sibling preserves the game's existing save-status text and controls.
       status.after(wrapper); this.sharing = {wrapper, label, button}; this.update();
     }
+    reportFailure(code) {
+      this.failure = code;
+      const detail = {type: 'retroone:rom-transfer-error', code, gameId: this.config.gameId || null, profileId: this.config.profileId || null};
+      try { if (this.env.parent && this.env.parent !== this.env) this.env.parent.postMessage(detail, new URL(this.env.location.href).origin); } catch {}
+    }
     async diskLibrary() {
-      // The library page owns long-lived downloads and sharing. Leaving the
-      // iframe must not close that manager or create a competing disk writer.
+      // A one-off transfer is opt-in only. Missing permission or storage must
+      // never silently turn a persistent download into another full download.
+      if (this.config.temporary === true) return null;
       let library;
-      try { library = this.env.parent?.RetroRomLibrary; } catch { /* Cross-origin parents are never used. */ }
+      try { library = this.env.parent?.RetroRomLibrary; } catch { /* Never use cross-origin storage. */ }
       library ||= this.env.RetroRomLibrary;
-      if (!library || !this.config.gameId) return null;
-      await library.init();
-      return library.snapshot().directory.permission === 'granted' ? library : null;
+      if (!library || !this.config.gameId) throw error('persistent');
+      try { await library.init(); } catch (problem) { throw transferError(problem, 'persistent'); }
+      const directory = library.snapshot().directory;
+      if (directory.permission === 'granted') return library;
+      // Preserve the small-ROM automatic path only when the manager has proved
+      // capability absence without a saved external location. Quota, denied
+      // access and uncertain metadata errors are never temporary fallbacks.
+      if (this.config.cachedOnly && directory.temporary_fallback === true && directory.error === 'unsupported' && !directory.storage_kind) {
+        this.temporaryFallback = true; return null;
+      }
+      if (directory.error === 'quota') throw error('quota');
+      if (['prompt', 'denied'].includes(directory.permission) || ['permission', 'ownership', 'directory-changed'].includes(directory.error)) throw error('folder');
+      throw error('persistent');
     }
     async fetchManifest(url, transport, epoch) {
       const address = new URL(sameOriginURL(url, this.env.location));
@@ -342,10 +361,18 @@
           new this.env.File([file], file.name, {type: file.type, lastModified: file.lastModified});
       } finally { unsubscribe?.(); }
     }
+    temporaryNotice() {
+      const doc = this.env.document, note = doc.createElement('span');
+      doc.getElementById('rom-temporary-notice')?.remove();
+      note.id = 'rom-temporary-notice'; note.setAttribute('role', 'status'); note.textContent = this.text('temporaryLoading');
+      note.style.cssText = 'display:inline-block;padding:4px 8px;color:#f7d18a;font:13px/1.5 system-ui';
+      const status = doc.getElementById('status'); if (status) status.after(note); else doc.body.append(note);
+    }
     async startCachedOrDefault() {
       this.cancel(false); if (this.unloaded) return;
       this.abort = new this.env.AbortController(); const epoch = this.epoch;
-      this.phase = 'preparing'; this.failure = null;
+      this.phase = 'preparing'; this.failure = null; this.temporaryFallback = false;
+      this.env.document.getElementById('rom-temporary-notice')?.remove();
       try {
         const library = await this.diskLibrary(); this.check(epoch);
         // Automatic browser launches must populate the same device library as
@@ -361,13 +388,15 @@
           this.env.EJS_CacheLimit = 0; this.env.EJS_cacheConfig = {enabled: false};
           this.env.document.getElementById('game').replaceChildren();
         }
+        if (!library && (this.temporaryFallback || this.config.temporary === true)) this.temporaryNotice();
         this.phase = 'loading';
         await loadScript(this.env, this.config.loaderUrl, this.abort.signal, 'emulator');
         this.check(epoch); this.phase = 'running';
       } catch (problem) {
         if (epoch !== this.epoch || this.unloaded) return;
         this.phase = 'error'; if (!this.ui?.panel.isConnected) this.render();
-        this.ui.title.textContent = this.text('failed'); this.ui.detail.textContent = this.text(this.failure || transferError(problem, 'invalid').transferCode || 'network');
+        this.reportFailure(this.failure || transferError(problem, 'invalid').transferCode || 'network');
+        this.ui.title.textContent = this.text('failed'); this.ui.detail.textContent = this.text(this.failure);
         this.ui.cancel.hidden = true; this.ui.retry.hidden = false;
       }
     }
@@ -379,6 +408,7 @@
       this.config.transport = transport; this.phase = 'preparing'; this.stats = createStats(); this.received = 0; this.manifest = null; this.failure = null;
       this.abort = new this.env.AbortController(); const epoch = this.epoch, signal = this.abort.signal;
       this.render(); let library;
+      if (this.config.temporary === true) this.ui.hint.textContent = `${this.text('temporary')} ${this.text('hint')}`;
       if (fallbackFrom) this.ui.hint.textContent = `${this.text('direct')} ${this.text('hint')}`;
       try {
         library = await this.diskLibrary(); this.check(epoch);
@@ -429,7 +459,7 @@
         if (retryDirect) {
           return this.start('http', code);
         }
-        this.phase = 'error';
+        this.phase = 'error'; this.reportFailure(code || 'network');
         if (!this.ui?.panel.isConnected) this.render();
         this.ui.title.textContent = this.text('failed');
         this.ui.detail.textContent = this.text(code || 'network');

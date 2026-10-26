@@ -17,7 +17,7 @@ function harness() {
     state:{profile:{id:'player1',base_path:'/p/player1'},profileEpoch:1,detailOpen:true,selected:game,downloadOptions:null,downloadBusy:false,
       downloadSnapshot:{directory:{supported:true,permission:'prompt',name:'Games'}},downloadPending:null,downloadEntryBusy:new Set()},
     api:url=>{calls.push(url);return new Promise((resolve,reject)=>pending.push({resolve,reject}));},
-    renderDownloadOption:()=>{},renderDownloads:()=>order.push('render'),showDownloads:()=>order.push('show'),downloadMessage:(...args)=>messages.push(args),
+    resumeBrowserDownload:()=>{},renderDownloadOption:()=>{},renderDownloads:()=>order.push('render'),showDownloads:()=>order.push('show'),downloadMessage:(...args)=>messages.push(args),
     receiveDownloadSnapshot:s=>ctx.state.downloadSnapshot=s,errorMessage:e=>e.message,t:s=>s,notify:(...args)=>messages.push(args),
     localURL:url=>typeof url==='string'&&url.startsWith('/p/player1/api/games/')?url:'',
     window:{RetroRomLibrary:{add:async arg=>added.push(arg),snapshot:()=>ctx.state.downloadSnapshot}},
@@ -175,4 +175,34 @@ test('games without browser support cannot start a new UI download even when the
   h.pending[0].resolve({available:true,browser_launchable:false,manifest_url:'/p/player1/api/games/large/download-manifest'});await read;
   h.ctx.state.downloadSnapshot.directory.permission='granted';await h.ctx.downloadGame(h.game);
   assert.equal(h.added.length,0);assert.equal(h.ctx.state.downloadPending,null);
+});
+
+
+test('storage presentation distinguishes automatic browser cache, external permission, and quota',()=>{
+  const ctx=vm.createContext({t:s=>s,downloadProblemMessage:s=>s});install(ctx,'downloadStoragePresentation');
+  const cached=ctx.downloadStoragePresentation({storage_kind:'opfs',permission:'granted'});
+  assert.equal(cached.title,'浏览器缓存'); assert.match(cached.note,/清除网站数据/); assert.doesNotMatch(cached.note,/重新授权/);
+  assert.match(ctx.downloadStoragePresentation({storage_kind:'external',name:'Games',permission:'prompt',error:'permission'}).note,/重新授权/);
+  assert.equal(ctx.downloadStoragePresentation({storage_kind:'opfs',permission:'error',error:'quota'}).note,'quota');
+});
+test('only the matching blocked browser launch opens cache authorization',()=>{
+  const shown=[],messages=[];
+  const ctx=vm.createContext({state:{playMode:'browser',profile:{id:'p1'},playGameId:'g'},showDownloads:()=>shown.push(1),downloadMessage:(...args)=>messages.push(args),downloadProblemMessage:s=>s});
+  install(ctx,'handleRomTransferError');
+  ctx.handleRomTransferError({profileId:'p2',gameId:'g',code:'folder'});
+  ctx.handleRomTransferError({profileId:'p1',gameId:'old',code:'folder'});
+  ctx.handleRomTransferError({profileId:'p1',gameId:'g',code:'network'});
+  assert.equal(shown.length,0);
+  ctx.handleRomTransferError({profileId:'p1',gameId:'g',code:'folder'});
+  assert.equal(shown.length,1); assert.deepEqual(messages,[['permission',true]]);
+});
+test('restoring storage resumes only the same blocked launch without reloading the iframe',()=>{
+  const calls=[],config={profileId:'p1',gameId:'g'};
+  const transfer={phase:'error',error:'folder'};
+  const frame={RetroRomTransferConfig:config,RetroRomTransfer:{snapshot:()=>transfer,start:c=>calls.push(c)}};
+  const ctx=vm.createContext({state:{playMode:'browser',profile:{id:'p1'},playGameId:'g'},$:()=>({contentWindow:frame}),closeDownloads:()=>calls.push('close')});
+  install(ctx,'resumeBrowserDownload'); ctx.resumeBrowserDownload();
+  assert.deepEqual(calls,['close',config]); calls.length=0;
+  transfer.phase='running'; ctx.resumeBrowserDownload(); assert.equal(calls.length,0);
+  transfer.phase='error';ctx.state.profile.id='p2';ctx.resumeBrowserDownload();assert.equal(calls.length,0);
 });

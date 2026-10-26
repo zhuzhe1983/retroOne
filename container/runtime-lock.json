@@ -212,10 +212,6 @@
     "url": "https://buildbot.libretro.com/assets/system/PPSSPP.zip",
     "sha256": "849c5a59ca02a0e65328e9716a4884fff23266d5010d5785fe5fa70e7744f4ed"
   },
-  "EmulatorJS-4.2.3.7z": {
-    "url": "https://github.com/EmulatorJS/EmulatorJS/releases/download/v4.2.3/4.2.3.7z",
-    "sha256": "07d451bc06fa3ad04ab30d9b94eb63ac34ad0babee52d60357b002bde8f3850b"
-  },
   "SDLPAL-3.0.2025.0616.AppImage": {
     "url": "https://github.com/sdlpal/sdlpal/releases/download/v3.0.2025.0616/SDLPal-366bc36-x86_64.AppImage",
     "sha256": "089796f9eddc032da280505fd2a2aca5f9f4d823a84499eb7693064d123dc5fe"

@@ -96,6 +96,60 @@
   function supportsDisk(env) {
     return Boolean(env.navigator?.storage?.getDirectory && env.FileSystemFileHandle?.prototype?.createWritable);
   }
+  async function normalizeZipForLaunch(file, normalizedName, env, signal) {
+    if (!normalizedName) return file;
+    if (typeof normalizedName !== 'string' || normalizedName.length > 200 || !/^[a-zA-Z0-9_-]+\.[a-zA-Z0-9]{1,8}$/.test(normalizedName) || !/\.zip$/i.test(file?.name || '')) throw error('invalid');
+    const check = () => { if (signal?.aborted) throw abortError(); };
+    const read = async (offset, length) => {
+      check();
+      if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(length) || offset < 0 || length < 0 || length > MiB || offset + length > file.size) throw error('invalid');
+      const bytes = new Uint8Array(await file.slice(offset, offset + length).arrayBuffer()); check();
+      if (bytes.length !== length) throw error('mismatch'); return bytes;
+    };
+    const view = bytes => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const tailOffset = Math.max(0, file.size - 65557), tail = await read(tailOffset, file.size - tailOffset), end = view(tail);
+    let endOffset = -1;
+    for (let index = tail.length - 22; index >= 0; index--) {
+      if (end.getUint32(index, true) === 0x06054b50 && index + 22 + end.getUint16(index + 20, true) === tail.length) { endOffset = index; break; }
+    }
+    if (endOffset < 0) throw error('invalid');
+    const count = end.getUint16(endOffset + 10, true), directorySize = end.getUint32(endOffset + 12, true), directoryOffset = end.getUint32(endOffset + 16, true);
+    if (end.getUint16(endOffset + 4, true) || end.getUint16(endOffset + 6, true) || count !== end.getUint16(endOffset + 8, true) || !count || count > 4096 || directorySize > MiB || directoryOffset + directorySize !== tailOffset + endOffset) throw error('invalid');
+    const directory = await read(directoryOffset, directorySize), records = view(directory), extension = normalizedName.slice(normalizedName.lastIndexOf('.')).toLowerCase();
+    let position = 0, selected = null;
+    for (let index = 0; index < count; index++) {
+      if (position + 46 > directory.length || records.getUint32(position, true) !== 0x02014b50) throw error('invalid');
+      const nameSize = records.getUint16(position + 28, true), extraSize = records.getUint16(position + 30, true), commentSize = records.getUint16(position + 32, true), next = position + 46 + nameSize + extraSize + commentSize;
+      if (!nameSize || next > directory.length || records.getUint16(position + 34, true)) throw error('invalid');
+      const name = directory.subarray(position + 46, position + 46 + nameSize);
+      const suffix = String.fromCharCode(...name.subarray(Math.max(0, name.length - extension.length))).toLowerCase();
+      if (suffix === extension) {
+        if (selected) throw error('invalid');
+        selected = {header: directory.slice(position, position + 46), name: name.slice()};
+      }
+      position = next;
+    }
+    if (position !== directory.length || !selected) throw error('invalid');
+    const record = view(selected.header), flags = record.getUint16(8, true), method = record.getUint16(10, true), crc = record.getUint32(16, true), packedSize = record.getUint32(20, true), size = record.getUint32(24, true), localOffset = record.getUint32(42, true), mode = record.getUint32(38, true) >>> 16;
+    // This is a launch-only filename view for a server-confirmed cartridge.
+    // ZIP64, encryption and non-regular entries are not silently transformed.
+    if (flags & ~0x080e || ![0, 8].includes(method) || !size || [packedSize, size, localOffset].includes(0xffffffff) || mode & 0xf000 && (mode & 0xf000) !== 0x8000 || method === 0 && packedSize !== size || localOffset + 30 > directoryOffset) throw error('invalid');
+    const localBytes = await read(localOffset, 30), local = view(localBytes), localNameSize = local.getUint16(26, true), dataOffset = localOffset + 30 + localNameSize + local.getUint16(28, true);
+    if (local.getUint32(0, true) !== 0x04034b50 || local.getUint16(6, true) !== flags || local.getUint16(8, true) !== method || localNameSize !== selected.name.length || dataOffset + packedSize > directoryOffset) throw error('invalid');
+    const localName = await read(localOffset + 30, localNameSize);
+    if (localName.some((byte, index) => byte !== selected.name[index]) || !(flags & 8) && (local.getUint32(14, true) !== crc || local.getUint32(18, true) !== packedSize || local.getUint32(22, true) !== size)) throw error('invalid');
+    const asciiName = Uint8Array.from(normalizedName, character => character.charCodeAt(0)), normalizedFlags = (flags & 6) | 0x800;
+    local.setUint16(4, 20, true); local.setUint16(6, normalizedFlags, true); local.setUint32(14, crc, true); local.setUint32(18, packedSize, true); local.setUint32(22, size, true); local.setUint16(26, asciiName.length, true); local.setUint16(28, 0, true);
+    record.setUint16(4, 20, true); record.setUint16(6, 20, true); record.setUint16(8, normalizedFlags, true); record.setUint16(28, asciiName.length, true); record.setUint16(30, 0, true); record.setUint16(32, 0, true); record.setUint16(34, 0, true); record.setUint32(42, 0, true);
+    const newDirectoryOffset = localBytes.length + asciiName.length + packedSize;
+    if (newDirectoryOffset >= 0xffffffff) throw error('invalid');
+    const endBytes = new Uint8Array(22), newEnd = view(endBytes);
+    newEnd.setUint32(0, 0x06054b50, true); newEnd.setUint16(8, 1, true); newEnd.setUint16(10, 1, true); newEnd.setUint32(12, selected.header.length + asciiName.length, true); newEnd.setUint32(16, newDirectoryOffset, true);
+    check();
+    // Only bounded ZIP metadata is read. The verified compressed bytes stay
+    // backed by the original File; no second ROM is written to the device.
+    return new env.File([localBytes, asciiName, file.slice(dataOffset, dataOffset + packedSize), selected.header, asciiName, endBytes], file.name, {type: file.type || 'application/zip', lastModified: file.lastModified});
+  }
   function clientEligibility(manifest, transport, capabilities) {
     if (manifest.requires_threads && (!capabilities.secure || !capabilities.threads)) return 'threads';
     if (manifest.requires_webgl2 && !capabilities.webgl2) return 'graphics';
@@ -294,12 +348,17 @@
       this.phase = 'preparing'; this.failure = null;
       try {
         const library = await this.diskLibrary(); this.check(epoch);
-        if (library?.snapshot().entries.some(entry => entry.gameId === this.config.gameId)) {
+        // Automatic browser launches must populate the same device library as
+        // explicit downloads. Checking for an existing entry here skipped the
+        // first launch entirely and left EmulatorJS downloading a player-scoped
+        // URL again after each profile switch.
+        if (library) {
           this.render();
           const manifest = await this.fetchManifest(this.config.downloadManifestUrl, 'http', epoch);
           this.manifest = manifest;
-          this.env.EJS_gameUrl = await this.diskFile(library, manifest, epoch);
-          this.env.EJS_CacheLimit = 0;
+          const file = await this.diskFile(library, manifest, epoch);
+          this.env.EJS_gameUrl = await normalizeZipForLaunch(file, this.config.normalizedRomName, this.env, this.abort.signal); this.check(epoch);
+          this.env.EJS_CacheLimit = 0; this.env.EJS_cacheConfig = {enabled: false};
           this.env.document.getElementById('game').replaceChildren();
         }
         this.phase = 'loading';
@@ -350,8 +409,9 @@
         this.check(epoch);
         if (!blob || blob.size !== manifest.size) throw error('mismatch');
         this.phase = 'loading'; this.ui.detail.textContent = this.text('loading'); this.ui.cancel.hidden = false;
-        this.env.EJS_gameUrl = library ? blob : new this.env.File([blob], manifest.name, {type: 'application/octet-stream'});
-        this.env.EJS_CacheLimit = 0; // Avoid another whole-ROM cache in EmulatorJS.
+        const file = library ? blob : new this.env.File([blob], manifest.name, {type: 'application/octet-stream'});
+        this.env.EJS_gameUrl = await normalizeZipForLaunch(file, this.config.normalizedRomName, this.env, signal);
+        this.env.EJS_CacheLimit = 0; this.env.EJS_cacheConfig = {enabled: false}; // Avoid another whole-ROM cache in EmulatorJS.
         this.check(epoch);
         this.env.document.getElementById('game').replaceChildren();
         await loadScript(this.env, this.config.loaderUrl, signal, 'emulator'); this.check(epoch);
@@ -474,7 +534,7 @@
     }
   }
   let active;
-  return {sameOriginURL, validateManifest, clientEligibility, webtorrentOptions, createStats, DownloadController,
+  return {sameOriginURL, validateManifest, clientEligibility, webtorrentOptions, createStats, normalizeZipForLaunch, DownloadController,
     start(config) { if (!root) throw new Error('Browser required'); active?.cancel(false); active = new DownloadController(config, root); return active.start(); },
     cancel() { active?.cancel(); }, stopSharing() { active?.stopSharing(); }, snapshot() { return active?.snapshot() || {phase: 'idle'}; },
   };

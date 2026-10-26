@@ -387,6 +387,15 @@ class GameConfigStore:
         with self.locked():
             document = self._read(game)
             identity, current_signature = self._snapshot(game)
+            definition = self.definitions.get(game.get('platform'), {})
+            if (browser_limit is not None and definition.get('browser_experimental_only') and
+                    game.get('browser_core') is None and
+                    document['generated']['defaults'].get('browser_core') is None):
+                # An explicitly validated newly available WASM core must work
+                # with old catalog/config rows without rewriting their identity,
+                # changing auto mode or bypassing stale-source/manual checks.
+                document = copy.deepcopy(document)
+                document['generated']['defaults']['browser_core'] = definition.get('browser_core')
             view = self._view(game, document, identity, current_signature, review, requested_mode,
                               browser_limit=browser_limit)
             failures = [issue for issue in view.get('issue_details', []) if issue['blocking']]

@@ -210,3 +210,180 @@ def test_stream_boot_versions_bridge_once_and_preserves_upstream_assets(tmp_path
     assert page.read_text() != first
     assert page.read_text().count('retroone-input.js') == 1
     assert upstream in page.read_text()
+
+
+from scripts import browser_runtime_assets as browser
+
+
+def browser_fixture(tmp_path):
+    source = tmp_path / 'source-data'; source.mkdir()
+    contents = {'loader.js': b'generated loader fixture', 'emulator.min.js': b'generated framework fixture',
+                'version.json': b'{"version":"fixture"}', 'cores/generated.data': b'generated core test bytes'}
+    files = []
+    for name, payload in contents.items():
+        target = source / name; target.parent.mkdir(parents=True, exist_ok=True); target.write_bytes(payload)
+        files.append({'path': name, 'url': 'https://cdn.emulatorjs.org/4.3.0-pre/data/' + name,
+                      'size': len(payload), 'sha256': hashlib.sha256(payload).hexdigest()})
+    document = {'schema_version': 1, 'version': '4.3.0-pre',
+                'source': 'https://cdn.emulatorjs.org/4.3.0-pre/data/', 'files': files}
+    lock = tmp_path / 'browser-lock.json'; lock.write_text(json.dumps(document))
+    return source, lock, document
+
+
+def test_browser_full_tree_activation_preserves_old_runtime_and_lock(tmp_path, monkeypatch):
+    source, lock, document = browser_fixture(tmp_path); original = lock.read_bytes()
+    vendor = tmp_path / 'vendor'; old = vendor / 'emulatorjs/data'; old.mkdir(parents=True)
+    (old / 'old-only.js').write_text('preserve this older runtime')
+    (source / 'unreviewed-private.txt').write_text('do not include')
+    monkeypatch.setattr(browser.subprocess, 'run', lambda *args, **kwargs: pytest.fail('offline attempted network'))
+    paths = browser.prepare_cache(vendor, original, offline=True, source=source)
+    result = browser.materialize(vendor, original, paths)
+    assert result['changed'] is True
+    assert (Path(result['backup']) / 'data/old-only.js').read_text() == 'preserve this older runtime'
+    assert not (old / 'old-only.js').exists() and not (old / 'unreviewed-private.txt').exists()
+    marker = json.loads((old / '.retroone-runtime.json').read_text())
+    assert marker == {'version': '4.3.0-pre', 'lock_sha256': hashlib.sha256(original).hexdigest()}
+    browser.verify_tree(old, document['files'], original)
+    assert browser.materialize(vendor, original, paths) == {'changed': False, 'backup': None}
+    assert lock.read_bytes() == original
+
+
+def test_browser_verify_only_can_check_source_without_writes_or_network(tmp_path, monkeypatch):
+    source, lock, _ = browser_fixture(tmp_path); vendor = tmp_path / 'never-created'
+    monkeypatch.setattr(browser.subprocess, 'run', lambda *args, **kwargs: pytest.fail('verify-only attempted network'))
+    paths = browser.prepare_cache(vendor, lock.read_bytes(), source=source, verify_only=True)
+    assert len(paths) == 4 and not vendor.exists()
+    with pytest.raises(ValueError, match='incomplete'):
+        browser.prepare_cache(vendor, lock.read_bytes(), verify_only=True)
+
+
+def test_browser_hash_failure_keeps_existing_runtime(tmp_path):
+    source, lock, _ = browser_fixture(tmp_path); vendor = tmp_path / 'vendor'
+    old = vendor / 'emulatorjs/data'; old.mkdir(parents=True); (old / 'loader.js').write_text('old')
+    (source / 'loader.js').write_text('wrong hash with wrong bytes')
+    with pytest.raises(ValueError): browser.prepare_cache(vendor, lock.read_bytes(), source=source)
+    assert (old / 'loader.js').read_text() == 'old'
+
+
+@pytest.mark.parametrize('field,value', [('path','../outside'), ('path','/absolute'), ('path','a\\b'),
+                                        ('url','https://example.invalid/loader.js'), ('sha256','latest'), ('size',True)])
+def test_browser_lock_rejects_untrusted_records(tmp_path, field, value):
+    _, _, document = browser_fixture(tmp_path); document['files'][0][field] = value
+    with pytest.raises(ValueError): browser.validate_lock(document)
+
+
+def test_browser_lock_rejects_duplicate_missing_and_unversioned_inventory(tmp_path):
+    _, _, document = browser_fixture(tmp_path)
+    document['files'].append(dict(document['files'][0]))
+    with pytest.raises(ValueError, match='Duplicate'): browser.validate_lock(document)
+    document['files'] = document['files'][1:-1]
+    with pytest.raises(ValueError, match='Incomplete'): browser.validate_lock(document)
+    document['version'] = 'latest'
+    with pytest.raises(ValueError, match='explicit'): browser.validate_lock(document)
+
+
+@pytest.mark.parametrize('kind', ['source', 'cache_parent', 'active_destination'])
+def test_browser_rejects_symlink_paths_without_touching_outside(tmp_path, kind):
+    source, lock, _ = browser_fixture(tmp_path); vendor = tmp_path / 'vendor'; vendor.mkdir()
+    outside = tmp_path / 'outside'; outside.mkdir(); marker = outside / 'keep'; marker.write_text('private')
+    if kind == 'source':
+        (source / 'loader.js').unlink(); (source / 'loader.js').symlink_to(marker)
+        with pytest.raises(ValueError, match='symlink'): browser.prepare_cache(vendor, lock.read_bytes(), source=source)
+    elif kind == 'cache_parent':
+        (vendor / 'runtime-downloads').symlink_to(outside, target_is_directory=True)
+        with pytest.raises(ValueError, match='symlink'): browser.prepare_cache(vendor, lock.read_bytes(), source=source)
+    else:
+        paths = browser.prepare_cache(vendor, lock.read_bytes(), source=source)
+        (vendor / 'emulatorjs').symlink_to(outside, target_is_directory=True)
+        with pytest.raises(ValueError, match='symlink'): browser.materialize(vendor, lock.read_bytes(), paths)
+    assert marker.read_text() == 'private' and list(outside.iterdir()) == [marker]
+
+
+def test_browser_activation_rolls_back_if_final_rename_fails(tmp_path, monkeypatch):
+    source, lock, _ = browser_fixture(tmp_path); vendor = tmp_path / 'vendor'
+    old = vendor / 'emulatorjs/data'; old.mkdir(parents=True); (old / 'loader.js').write_text('old complete version')
+    paths = browser.prepare_cache(vendor, lock.read_bytes(), source=source)
+    native = Path.rename
+    def failing(path, target):
+        if path.name.startswith('.emulatorjs.stage-'): raise OSError('simulated activation failure')
+        return native(path, target)
+    monkeypatch.setattr(Path, 'rename', failing)
+    with pytest.raises(OSError): browser.materialize(vendor, lock.read_bytes(), paths)
+    assert (old / 'loader.js').read_text() == 'old complete version'
+    assert not (vendor / '.browser-runtime-activation.json').exists()
+
+
+def test_browser_recovery_rejects_arbitrary_journal_paths(tmp_path):
+    vendor = tmp_path / 'vendor'; vendor.mkdir()
+    (vendor / '.browser-runtime-activation.json').write_text(json.dumps({'version':1,'stage':'../../private','backup':None}))
+    with pytest.raises(ValueError, match='journal'): browser.recover_activation(vendor)
+
+
+def test_private_bundle_roundtrip_includes_only_reviewed_browser_and_native_files(tmp_path):
+    vendor, _, entries, native_lock = fixture_cache(tmp_path)
+    source, browser_lock, document = browser_fixture(tmp_path)
+    paths = browser.prepare_cache(vendor, browser_lock.read_bytes(), source=source)
+    (vendor / 'personal-save.json').write_text('private fixture')
+    bundle = tmp_path / 'private-all.tar.gz'
+    runtime.create_bundle(bundle, native_lock, entries, vendor, browser_lock_path=browser_lock, browser_paths=paths)
+    with tarfile.open(bundle) as archive:
+        assert set(archive.getnames()) == {'runtime-lock.json','archives/demo_libretro.so.zip','browser-runtime-lock.json'} | {'browser/' + item['path'] for item in document['files']}
+    fresh = tmp_path / 'fresh'
+    runtime.restore_bundle(bundle, native_lock, entries, fresh, browser_lock_path=browser_lock)
+    restored = browser.prepare_cache(fresh, browser_lock.read_bytes(), offline=True)
+    assert len(restored) == 4
+    browser.materialize(fresh, browser_lock.read_bytes(), restored)
+    browser.verify_tree(fresh / 'emulatorjs/data', document['files'], browser_lock.read_bytes())
+    assert not (fresh / 'personal-save.json').exists()
+
+
+def test_browser_only_bundle_does_not_require_native_cache(tmp_path):
+    source, lock, document = browser_fixture(tmp_path); vendor = tmp_path / 'vendor'
+    paths = browser.prepare_cache(vendor, lock.read_bytes(), source=source)
+    bundle = tmp_path / 'browser-only.tar.gz'
+    runtime.create_bundle(bundle, tmp_path / 'absent-native-lock', {}, vendor, browser_lock_path=lock, browser_paths=paths)
+    fresh = tmp_path / 'fresh'
+    runtime.restore_bundle(bundle, tmp_path / 'absent-native-lock', {}, fresh, browser_lock_path=lock)
+    assert len(browser.prepare_cache(fresh, lock.read_bytes(), offline=True)) == 4
+    other_lock = tmp_path / 'different-browser-lock'; other_lock.write_text(lock.read_text() + '\n')
+    with pytest.raises(ValueError, match='another reviewed browser lock'):
+        runtime.restore_bundle(bundle, tmp_path / 'absent-native-lock', {}, fresh, browser_lock_path=other_lock)
+
+
+def test_repository_defaults_pin_full_43_inventory_without_old_42_download():
+    assert 'EmulatorJS-4.2.3.7z' not in runtime.records(json.loads(runtime.LOCK.read_text()))
+    document = json.loads(runtime.BROWSER_LOCK.read_text())
+    assert document['version'] == '4.3.0-pre'
+    assert len(browser.validate_lock(document)) == 290
+
+
+def test_browser_recovers_interrupted_old_directory_move(tmp_path):
+    vendor = tmp_path / 'vendor'; vendor.mkdir()
+    backup = vendor / 'runtime-backups' / ('emulatorjs-' + 'a' * 32)
+    backup.mkdir(parents=True); (backup / 'keep.js').write_text('previous complete version')
+    stage = vendor / '.emulatorjs.stage-interrupted'; stage.mkdir()
+    journal = vendor / '.browser-runtime-activation.json'
+    journal.write_text(json.dumps({'version': 1, 'stage': stage.name, 'backup': backup.name}))
+    with browser.installation_lock(vendor): browser.recover_activation(vendor)
+    assert (vendor / 'emulatorjs/keep.js').read_text() == 'previous complete version'
+    assert not backup.exists() and not journal.exists()
+    assert stage.exists()  # Interrupted material is retained, never merged into active files.
+
+
+def test_browser_cli_verify_only_does_not_read_native_lock_or_write_vendor(tmp_path, monkeypatch, capsys):
+    source, lock, _ = browser_fixture(tmp_path); vendor = tmp_path / 'not-created'
+    import sys
+    monkeypatch.setattr(sys, 'argv', ['fetch_runtime.py', '--browser-only', '--verify-only',
+        '--browser-lock', str(lock), '--lock', str(tmp_path / 'absent-native-lock'),
+        '--browser-source', str(source), '--vendor-root', str(vendor)])
+    monkeypatch.setattr(browser.subprocess, 'run', lambda *a, **k: pytest.fail('unexpected network'))
+    runtime.main()
+    result = json.loads(capsys.readouterr().out)
+    assert result['assets_verified'] == 0 and result['browser_files_verified'] == 4
+    assert result['materialized'] is False and not vendor.exists()
+
+
+@pytest.mark.parametrize('version', [None, 43, {}, []])
+def test_browser_lock_invalid_version_type_is_rejected(tmp_path, version):
+    _, _, document = browser_fixture(tmp_path); document['version'] = version
+    with pytest.raises(ValueError, match='explicit'): browser.validate_lock(document)

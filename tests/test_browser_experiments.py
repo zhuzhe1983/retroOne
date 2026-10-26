@@ -72,7 +72,7 @@ def environment(tmp_path, monkeypatch):
                 source.truncate(size)
         core = PLATFORMS[platform]['browser_core']
         if core:
-            (vendor / 'cores' / f'{core}{"-thread" if core == "ppsspp" else ""}-wasm.data').touch()
+            (vendor / 'cores' / f'{core}{"-thread" if core in {"ppsspp", "azahar"} else ""}-wasm.data').touch()
         if platform == 'psp':
             (vendor / 'cores/ppsspp-assets.zip').touch()
         for name in firmware:
@@ -163,6 +163,45 @@ def test_explicit_large_http_works_without_native_while_auto_and_old_route_keep_
     assert settings(page)['EJS_core'] == 'mupen64plus_next'
     assert 'RetroRomTransferConfig' in page.text and '/rom-transfer.js?' in page.text
     assert not app.state.catalog.get(game['id'])['browser_eligible']
+
+
+def test_3ds_explicit_launch_uses_versioned_complete_runtime_and_touch_settings(environment):
+    build, _, vendor, _ = environment
+    app, client, game, _ = build(platform='3ds', suffix='.cci', size=917 * MIB)
+    endpoint = '/api/games/' + game['id']
+    assert not game['browser_eligible']
+    assert client.post(endpoint + '/launch', json={'mode': 'auto'}).status_code == 409
+    options = {option['id']: option for option in client.get(endpoint + '/launch-options').json()['options']}
+    assert options['browser-p2p']['available']
+    assert options['browser-p2p']['requires_threads'] and options['browser-p2p']['requires_webgl2']
+    download = client.get(endpoint + '/download-options').json()
+    assert download['available'] and download['browser_launchable']
+    launched = client.post(endpoint + '/launch', json={'mode': 'browser-http'})
+    assert launched.status_code == 200, launched.text
+    page = client.get(local_url(launched.json()['play_url']))
+    config = settings(page)
+    assert config['EJS_core'] == 'azahar'
+    assert re.fullmatch('/p/player1/emulatorjs/[0-9a-f]{20}/data/', config['EJS_pathtodata'])
+    assert config['EJS_defaultOptions']['citra_touch_touchscreen'] == 'enabled'
+    assert config['EJS_defaultOptions']['lockMouse'] == 'disabled'
+    assert config['EJS_defaultOptions']['keyboardInput'] == 'disabled'
+    assert config['EJS_cacheConfig'] == {'enabled': False}
+    assert '/emulatorjs-compat.js?' in page.text
+    loader = client.get(local_url(config['EJS_pathtodata']) + 'loader.js')
+    assert loader.status_code == 200 and loader.text == '// fixture'
+    assert client.get(local_url(config['EJS_pathtodata']) + 'cores/azahar-thread-wasm.data').status_code == 200
+    (vendor / 'cores/azahar-thread-wasm.data').unlink()
+    assert not client.get(endpoint + '/download-options').json()['browser_launchable']
+    assert client.post(endpoint + '/launch', json={'mode': 'browser-http'}).status_code == 409
+
+
+def test_3ds_cia_download_does_not_claim_browser_compatibility(environment):
+    build, _, _, _ = environment
+    _, client, game, _ = build(platform='3ds', suffix='.cia', size=2 * MIB)
+    endpoint = '/api/games/' + game['id']
+    option = client.get(endpoint + '/download-options').json()
+    assert option['available'] and not option['browser_launchable']
+    assert client.post(endpoint + '/launch', json={'mode': 'browser-http'}).status_code == 403
 
 
 def test_manifest_head_range_revision_and_filename_validation(environment):
@@ -492,3 +531,38 @@ def test_api_reports_bad_ice_configuration_while_http_still_launches(environment
         assert 'not-an-ice-server.test' not in response.text
     assert client.post(endpoint + '/launch', json={'mode': 'browser-http'}).status_code == 200
     assert client.get(endpoint + '/browser-manifest?transport=http').status_code == 200
+
+
+def transfer_settings(response):
+    assert response.status_code == 200, response.text
+    return json.loads(re.search(r'window\.RetroRomTransferConfig=(\{.*?\});', response.text).group(1))
+
+
+def test_auto_single_cartridge_zip_sets_ascii_launch_view_name(environment):
+    build, *_ = environment
+    app, client, game, path = build(platform='gba', suffix='.zip', size=1024)
+    with zipfile.ZipFile(path, 'w') as archive:
+        archive.writestr('中文游戏.GBA', b'synthetic cartridge')
+        archive.writestr('readme.txt', b'non-game note')
+    app.state.catalog.scan()
+    result = transfer_settings(client.get('/play/' + game['id']))
+    assert result['normalizedRomName'] == game['id'] + '.gba'
+
+
+def test_explicit_large_zip_normalization_only_reads_directory(environment, monkeypatch):
+    build, *_ = environment
+    app, client, game, path = build(platform='gba', suffix='.zip', size=1024)
+    with zipfile.ZipFile(path, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr('目录/中文游戏.GBA', b'x' * (21 * MIB))
+    app.state.catalog.scan()
+    def no_extract(*args, **kwargs):
+        raise AssertionError('explicit launch must not unpack the ROM')
+    monkeypatch.setattr(zipfile.ZipFile, 'open', no_extract)
+    result = transfer_settings(client.get('/play/' + game['id'] + '?experimental=true'))
+    assert result['normalizedRomName'] == game['id'] + '.gba'
+
+
+def test_standalone_rom_has_no_zip_launch_normalization(environment):
+    build, *_ = environment
+    _, client, game, _ = build(size=1024)
+    assert 'normalizedRomName' not in transfer_settings(client.get('/play/' + game['id'] + '?experimental=true'))

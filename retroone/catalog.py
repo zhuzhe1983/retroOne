@@ -679,7 +679,7 @@ class Catalog:
         if hint and definition.get('arcade'):
             core = hint if hint in {'fbneo', 'fbalpha2012', 'mame2003_plus', 'mame2003'} else None
         # Loose disc sets require native launch; only self-contained payloads go to WASM.
-        eligible = bool(core and len(files) == 1 and size <= BROWSER_LIMIT and not unknown_unpacked and unpacked <= BROWSER_LIMIT and not blocked_reason and paths[0].suffix.lower() not in DISC_LINKS)
+        eligible = bool(core and not definition.get('browser_experimental_only') and len(files) == 1 and size <= BROWSER_LIMIT and not unknown_unpacked and unpacked <= BROWSER_LIMIT and not blocked_reason and paths[0].suffix.lower() not in DISC_LINKS)
         mode = 'browser' if eligible else ('stream' if definition and not blocked_reason else 'unavailable')
         reason = blocked_reason or ('在浏览器本地运行' if eligible else ('解压后超过 20 MiB，使用服务器运行' if unpacked > BROWSER_LIMIT else '使用服务器模拟器运行'))
         engine_hint = None

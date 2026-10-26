@@ -432,3 +432,13 @@ def test_scan_records_bindings_without_writing_readonly_rom_sentinel(tmp_path):
     manifest(root, [dict(path='library/nes/FC', original_path='library/nes/new/FC')])
     assert Catalog(root, tmp_path / 'profile').scan()['errors'] == 0
     assert not (root / '.retroone/library-layout.required').exists()
+
+
+def test_small_3ds_remains_cloud_by_default_even_with_new_browser_core(tmp_path, monkeypatch):
+    monkeypatch.setenv('RETROONE_LIBRARY_DATA_ROOT', str(tmp_path / 'shared'))
+    root = tmp_path / 'roms'
+    write(root, 'library/3ds/generated.cci', b'synthetic 3DS cartridge')
+    games = list(Catalog(root, tmp_path / 'profile').discover())
+    assert len(games) == 1
+    assert games[0]['browser_core'] == 'azahar'
+    assert games[0]['browser_eligible'] is False and games[0]['mode'] == 'stream'

@@ -32,9 +32,10 @@ from .interface_settings import InterfaceLocale, InterfaceSettings, InterfaceSet
 from .library_settings import LibrarySettings, LibrarySettingsError, LibrarySort, SortDirection
 from .i18n import emulator_locale, player_messages, resolve_locale, text as translated_text
 from .pwa import register_pwa
-from .browser_runtime import BrowserRuntime, BrowserRuntimeError
+from .browser_runtime import BrowserRuntime, BrowserRuntimeError, CARTRIDGES
 from .torrent_distribution import IceConfigurationError, TorrentDistribution, revision as rom_revision
 from .safe_rom_response import SafeRomResponse
+from .cloud_saves import CloudSaveStore, CloudSaveError, MAX_BODY as MAX_CLOUD_SAVE_BODY
 
 ROOT = Path(__file__).resolve().parent.parent
 MAX_SAVE_SIZE = 32 * 1024 * 1024
@@ -64,6 +65,16 @@ class LaunchBody(BaseModel):
     replace_session_id: str | None = Field(default=None, min_length=1, max_length=128)
     network_room_id: UUID | None = None
     device_id: UUID | None = None
+
+
+class CloudLeaseBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    client_id: UUID
+
+
+class CloudTokenBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    lease_id: UUID
 
 
 class StopBody(BaseModel):
@@ -175,6 +186,7 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
     display_settings = DisplaySettings(config_root)
     interface_settings = InterfaceSettings(config_root)
     library_settings = LibrarySettings(config_root)
+    cloud_saves = CloudSaveStore(config_root)
     worker_gateway = WorkerGateway(os.getenv('RETROONE_COORDINATOR_URL', 'http://retroone:3000'))
 
     def url(path: str) -> str:
@@ -477,6 +489,7 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
     app.state.interface_settings = interface_settings
     app.state.library_settings = library_settings
     app.state.browser_runtime = browser_runtime
+    app.state.cloud_saves = cloud_saves
 
     @app.exception_handler(BrowserRuntimeError)
     async def browser_runtime_error(request: Request, error: BrowserRuntimeError):
@@ -788,9 +801,11 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
         options = []
         for mode in ('auto', 'stream'):
             reason = None
+            requires_threads = False
             try:
                 resolved = resolved_game(game, mode)
                 if resolved['mode'] == 'browser':
+                    requires_threads = resolved.get('browser_core') in {'ppsspp', 'azahar', 'dosbox_pure'}
                     browser_rom(resolved)
                     if platform_definitions().get(game['platform'], {}).get('requires_bios') and not bios_for(game['platform']):
                         raise HTTPException(409, '浏览器模拟器所需 BIOS 尚未齐全')
@@ -801,7 +816,7 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
                         raise HTTPException(409, engine.get('reason') or '服务端尚未配置该平台模拟器')
             except HTTPException as error:
                 reason = str(error.detail)
-            options.append({'id': mode, 'available': reason is None, 'reason': reason, 'requires_threads': False, 'size_bytes': game.get('size')})
+            options.append({'id': mode, 'available': reason is None, 'reason': reason, 'requires_threads': requires_threads, 'size_bytes': game.get('size')})
         experimental = browser_runtime.inspect(game)
         if experimental['available']:
             try:
@@ -918,7 +933,7 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
         if requested == 'browser':
             if not experimental:
                 browser_rom(game)
-            if not (browser_data / 'loader.js').is_file():
+            if not (browser_runtime.runtime_data(game) / 'loader.js').is_file():
                 raise HTTPException(503, '浏览器模拟器资源尚未安装')
             if platform_definitions().get(game['platform'], {}).get('requires_bios') and not bios_for(game['platform']):
                 raise HTTPException(409, '游戏需要 BIOS；已保留游戏，待配置对应固件')
@@ -948,6 +963,7 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
                     return {'mode': 'stream', 'play_url': url('/stream/'), 'session_id': identifier, 'session': public_session(active), 'profile_id': profile_id}
                 if room_id or not replacement or replacement != identifier:
                     session_conflict(active)
+            cloud_saves.assert_native_available(game)
             # Preferences are a server-owned snapshot for a new session only.
             # Read before ending a confirmed old session so corrupt preferences
             # cannot turn an otherwise valid switch into an avoidable stop.
@@ -1057,6 +1073,66 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
             raise HTTPException(404, '未找到对应 BIOS')
         return FileResponse(path, media_type='application/octet-stream')
 
+    @app.exception_handler(CloudSaveError)
+    async def cloud_save_error(request, error):
+        return JSONResponse(status_code=error.status_code,
+            content={'detail': {'code': error.code, 'message': str(error)}},
+            headers={'Cache-Control': 'private, no-store'})
+
+    def cloud_game(game_id):
+        game = game_or_404(game_id)
+        active = runner.status()
+        if active and active.get('game_id') == game_id:
+            raise CloudSaveError('native_active', 'Close this game in the cloud before syncing browser saves')
+        return game
+
+    @app.get('/api/games/{game_id}/cloud-save')
+    def cloud_save_status(game_id: str):
+        result = cloud_saves.status(game_or_404(game_id))
+        active = runner.status()
+        result['native_active'] = bool(active and active.get('game_id') == game_id)
+        return JSONResponse(result, headers={'Cache-Control': 'private, no-store'})
+
+    @app.post('/api/games/{game_id}/cloud-save/lease')
+    def cloud_save_lease(game_id: str, body: CloudLeaseBody):
+        with runtime_lock:
+            result = cloud_saves.acquire(cloud_game(game_id), body.client_id)
+        return JSONResponse(result, headers={'Cache-Control': 'private, no-store'})
+
+    @app.post('/api/games/{game_id}/cloud-save/heartbeat')
+    def cloud_save_heartbeat(game_id: str, body: CloudTokenBody):
+        with runtime_lock:
+            result = cloud_saves.heartbeat(cloud_game(game_id), body.lease_id)
+        return JSONResponse(result, headers={'Cache-Control': 'private, no-store'})
+
+    @app.post('/api/games/{game_id}/cloud-save/release')
+    def cloud_save_release(game_id: str, body: CloudTokenBody):
+        return cloud_saves.release(game_or_404(game_id), body.lease_id)
+
+    @app.put('/api/games/{game_id}/cloud-save')
+    async def cloud_save_upload(game_id: str, request: Request):
+        data = bytearray()
+        async for chunk in request.stream():
+            if len(data) + len(chunk) > MAX_CLOUD_SAVE_BODY:
+                raise CloudSaveError('too_large', 'Cloud save request exceeds its limit', 413)
+            data.extend(chunk)
+        try:
+            body = json.loads(data)
+            if not isinstance(body, dict) or set(body) != {'lease_id', 'base_revision', 'files'}:
+                raise ValueError()
+            if not isinstance(body['lease_id'], str):
+                raise ValueError()
+            token = UUID(body['lease_id'])
+        except (ValueError, TypeError, KeyError):
+            raise CloudSaveError('invalid_snapshot', 'Invalid cloud save request', 422)
+        # SQLite and disk operations must not block the ASGI event loop.
+        from starlette.concurrency import run_in_threadpool
+        def update():
+            with runtime_lock:
+                return cloud_saves.upload(cloud_game(game_id), token, body['base_revision'], body['files'])
+        result = await run_in_threadpool(update)
+        return JSONResponse(result, headers={'Cache-Control': 'private, no-store'})
+
     def save_path(game_id: str) -> Path:
         game_or_404(game_id)
         return config_root / 'browser-saves' / f'{game_id}.state'
@@ -1098,10 +1174,25 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
         else:
             game = resolved_game(game_or_404(game_id), 'browser')
             path = browser_rom(game)
-        if not (browser_data / 'loader.js').is_file():
+        if not (browser_runtime.runtime_data(game) / 'loader.js').is_file():
             raise HTTPException(503, messages['browser_resources_missing'])
+        original_browser_path = path
+        normalized_rom_name = None
         if not experimental:
             path = browser_payload(game, path)
+            if original_browser_path.suffix.lower() == '.zip' and path.suffix.lower() != '.zip':
+                normalized_rom_name = path.name
+        elif path.suffix.lower() == '.zip' and game['platform'] in CARTRIDGES:
+            # experiment_game already bounded and validated the ZIP directory;
+            # inspect names only, never extract or impose the automatic 20 MiB limit.
+            try:
+                with zipfile.ZipFile(path) as archive:
+                    entries = [entry for entry in archive.infolist() if not entry.is_dir()
+                               and Path(entry.filename).suffix.lower() in CARTRIDGES[game['platform']]]
+                    if len(entries) == 1:
+                        normalized_rom_name = game_id + Path(entries[0].filename).suffix.lower()
+            except (OSError, ValueError, zipfile.BadZipFile):
+                raise HTTPException(409, '游戏压缩包已改变，请重新加载')
         bios_path = experiment_bios(game) if experimental else bios_for(game['platform'])
         if platform_definitions().get(game['platform'], {}).get('requires_bios') and not bios_path:
             raise HTTPException(409, messages['browser_bios_missing'])
@@ -1110,13 +1201,17 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
         save_title = game.get('_save_title', game['title'])
         storage_game_name = save_title if profile_id == 'player1' else f"{profile_id}_{game_id}_{save_title}"
         settings = {'EJS_player': '#game', 'EJS_core': game['browser_core'], 'EJS_gameUrl': url(f'/api/games/{game_id}/rom/{quote(path.name)}'),
-                    'EJS_pathtodata': url('/emulatorjs/data/'), 'EJS_gameName': storage_game_name, 'EJS_gameID': int(game_id[:12], 16),
+                    'EJS_pathtodata': url(browser_runtime.runtime_url(game)), 'EJS_gameName': storage_game_name, 'EJS_gameID': int(game_id[:12], 16),
                     'EJS_defaultControls': DEFAULT_CONTROLS, 'EJS_language': emulator_locale(locale), 'EJS_color': '#64d9f3', 'EJS_backgroundColor': '#0b1424',
                     'EJS_startOnLoaded': False, 'EJS_startButtonName': messages['start_game'], 'EJS_defaultOptions': {'save-state-location': 'download'}}
         if bios_path:
             settings['EJS_biosUrl'] = url(f'/api/games/{game_id}/bios') + ('?experimental=true' if experimental else '')
         if experimental:
             settings['EJS_CacheLimit'] = 0
+            settings['EJS_cacheConfig'] = {'enabled': False}
+        if game['platform'] == '3ds':
+            settings['EJS_defaultOptions'].update({'citra_touch_touchscreen': 'enabled', 'citra_mouse_touchscreen': 'enabled',
+                'citra_resolution_factor': '1', 'citra_layout_option': 'default', 'lockMouse': 'disabled', 'keyboardInput': 'disabled'})
         if restore and save_path(game_id).is_file():
             settings['EJS_loadStateURL'] = url(f'/api/games/{game_id}/save-state')
         settings_json = json.dumps(settings, ensure_ascii=False).replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
@@ -1124,30 +1219,44 @@ def create_app(rom_root: Path | None = None, config_root: Path | None = None, *,
         title = html.escape(game['title'])
         home_url, play_url, save_url = url('/'), url(f'/play/{game_id}'), url(f'/api/games/{game_id}/save-state')
         restore_url = play_url + ('?experimental=true&transport=' + transport + '&restore=true' if experimental else '?restore=true')
-        storage_namespace = '' if profile_id == 'player1' else f'RetroOne-{profile_id}-'
+        legacy_storage_namespace = '' if profile_id == 'player1' else f'RetroOne-{profile_id}-'
+        storage_namespace = f'RetroOne-{profile_id}-{game_id}-' if game['platform'] == 'psp' else legacy_storage_namespace
         bridge = ROOT / 'web' / 'emulator-input.js'
         bridge_version = hashlib.sha256(bridge.read_bytes()).hexdigest()[:16] if bridge.is_file() else 'pending'
         config = {'transport': transport, 'cachedOnly': not experimental, 'gameId': game_id,
                   'profileId': profile_id, 'title': game['title'],
                   'manifestUrl': url(f'/api/games/{game_id}/browser-manifest') + '?transport=' + transport,
                   'downloadManifestUrl': url(f'/api/games/{game_id}/download-manifest') + '?transport=p2p',
-                  'loaderUrl': url('/emulatorjs/data/loader.js'), 'webtorrentUrl': url('/vendor/webtorrent.min.js'),
+                  'loaderUrl': url(browser_runtime.runtime_url(game) + 'loader.js'), 'webtorrentUrl': url('/vendor/webtorrent.min.js'),
                   'chunkStoreUrl': url('/vendor/rom-chunk-store.js'), 'locale': locale}
+        if normalized_rom_name:
+            config['normalizedRomName'] = normalized_rom_name
         runtime_script = '<script>window.RetroRomTransferConfig=' + json.dumps(config).replace('<', '\\u003c') + ';</script>'
-        for filename in ('rom-directory-store.js', 'rom-library.js', 'rom-transfer.js'):
+        if game['platform'] == 'psp':
+            cloud_config = {'gameId': game_id, 'profileId': profile_id, 'locale': locale,
+                'url': url(f'/api/games/{game_id}/cloud-save'),
+                'legacyDatabase': legacy_storage_namespace + '/data/saves',
+                'database': storage_namespace + '/data/saves'}
+            cloud_script = ROOT / 'web/cloud-save-sync.js'
+            cloud_version = hashlib.sha256(cloud_script.read_bytes()).hexdigest()[:16] if cloud_script.is_file() else 'pending'
+            runtime_script = ('<script>window.RetroCloudSaveConfig=' + json.dumps(cloud_config).replace('<', '\\u003c') + ';</script>'
+                + f'<script src="{url("/cloud-save-sync.js")}?v={cloud_version}"></script>' + runtime_script)
+
+        for filename in ('emulatorjs-compat.js', 'rom-directory-store.js', 'rom-library.js', 'rom-transfer.js'):
             script = ROOT / 'web' / filename
             version = hashlib.sha256(script.read_bytes()).hexdigest()[:16] if script.is_file() else 'pending'
             runtime_script += f'<script src="{url("/" + filename)}?v={version}"></script>'
         document = f'''<!doctype html><html lang="{locale}"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>{title} · RetroOne</title><link rel="icon" href="{url('/favicon.svg')}" type="image/svg+xml">
 <style>html,body{{margin:0;background:#08111e;color:#deedf7;font:14px system-ui;height:100%;width:100%;min-height:0}}body{{display:flex;flex-direction:column}}header{{display:flex;gap:8px 12px;align-items:center;padding:8px 12px;flex-wrap:wrap;flex-shrink:0}}a{{color:#7de5f8;text-decoration:none}}h1{{font-size:16px;font-weight:500;margin:0}}#game{{flex:1;min-height:0;position:relative;overflow:hidden}}footer{{padding:6px 12px;color:#9dacc2;font-size:12px;flex-shrink:0}}button{{background:#162a42;color:#deedf7;border:1px solid #31506d;border-radius:5px;padding:6px 9px;cursor:pointer}}#status{{color:#c4d3e3}}@media(max-height:480px){{footer{{display:none}}header{{font-size:12px;padding:4px 8px}}}}</style>
-<header><a class="back-link" href="{home_url}" onclick="leave();return false">← {html.escape(messages['back_library'])}</a><h1>{title}</h1><a href="{html.escape(restore_url)}">{html.escape(messages['load_server_save'])}</a><a href="{save_url}">{html.escape(messages['export_server_save'])}</a><label><button onclick="document.getElementById('save-upload').click()">{html.escape(messages['upload_existing_save'])}</button><input hidden type="file" id="save-upload" accept=".state"></label><span id="status"></span></header>
+<header><a class="back-link" href="{home_url}" onclick="leave();return false">← {html.escape(messages['back_library'])}</a><h1>{title}</h1><a href="{html.escape(restore_url)}" onclick="navigatePlayer(this.href);return false">{html.escape(messages['load_server_save'])}</a><a href="{save_url}" download>{html.escape(messages['export_server_save'])}</a><label><button onclick="document.getElementById('save-upload').click()">{html.escape(messages['upload_existing_save'])}</button><input hidden type="file" id="save-upload" accept=".state"></label><span id="status"></span></header>
 <div id="game"></div><footer>{html.escape(messages['controls_help'])}</footer>
 <script>
 // IDBFS uses a fixed /data/saves database upstream. Scope only personal data;
 // read-only ROM, BIOS and core caches remain shared. This override is iframe-local.
 const storageNamespace={json.dumps(storage_namespace)};
-if(storageNamespace&&window.indexedDB){{const idb=window.indexedDB;const nativeOpen=idb.open.bind(idb);const nativeDelete=idb.deleteDatabase.bind(idb);const personalName=name=>['/data/saves','EmulatorJS-states'].includes(String(name))?storageNamespace+name:name;idb.open=(name,...args)=>nativeOpen(personalName(name),...args);idb.deleteDatabase=(name,...args)=>nativeDelete(personalName(name),...args);}}
-Object.assign(window,{settings_json});window.EJS_threads=window.crossOriginIsolated;function leave(){{if(parent!==window)parent.postMessage({{type:'retroone:exit'}},location.origin);else location.href='{home_url}'}}window.EJS_onExit=leave;if(parent!==window){{document.querySelector('.back-link').hidden=true;document.querySelector('h1').hidden=true;}}
+const stateStorageNamespace={json.dumps(legacy_storage_namespace)};
+if(storageNamespace&&window.indexedDB){{const idb=window.indexedDB;const nativeOpen=idb.open.bind(idb);const nativeDelete=idb.deleteDatabase.bind(idb);const personalName=name=>String(name)==='/data/saves'?storageNamespace+name:String(name)==='EmulatorJS-states'?stateStorageNamespace+name:name;idb.open=(name,...args)=>nativeOpen(personalName(name),...args);idb.deleteDatabase=(name,...args)=>nativeDelete(personalName(name),...args);}}
+Object.assign(window,{settings_json});window.EJS_threads=window.crossOriginIsolated;async function navigatePlayer(destination){{const sync=window.RetroCloudSaveSync;if(sync?.prepareExit){{try{{const result=await sync.prepareExit();if(result?.safeToExit!==true)return false}}catch{{return false}}}}location.href=destination;return true}}function leave(){{if(parent!==window)parent.postMessage({{type:'retroone:exit'}},location.origin);else navigatePlayer('{home_url}')}}window.EJS_onExit=leave;if(parent!==window){{document.querySelector('.back-link').hidden=true;document.querySelector('h1').hidden=true;}}
 const status=document.getElementById('status');const messages={messages_json};
 async function backupState(blob){{const response=await fetch('{save_url}',{{method:'PUT',body:blob}});if(!response.ok)throw Error((await response.json()).detail);status.textContent=messages.save_backed_up}}
 window.EJS_onSaveState=async(event)=>{{if(!event||!event.state){{status.textContent=messages.save_invalid;return}}const blob=new Blob([event.state],{{type:'application/octet-stream'}});const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download='{game_id}.state';link.click();setTimeout(()=>URL.revokeObjectURL(url),10000);try{{await backupState(blob)}}catch(error){{status.textContent=messages.save_downloaded_backup_failed+error.message}}}};
@@ -1158,6 +1267,13 @@ document.getElementById('save-upload').addEventListener('change',async(e)=>{{con
     # Only bundled application/vendor files are static mounts. ROMs are never mounted.
     if browser_data.is_dir():
         app.mount('/emulatorjs/data', StaticFiles(directory=browser_data), name='emulatorjs')
+    mounted_runtime_urls = set()
+    for platform in ('nes', '3ds'):
+        data = browser_runtime.runtime_data({'platform': platform})
+        route = browser_runtime.runtime_url({'platform': platform}).rstrip('/')
+        if data.is_dir() and route not in mounted_runtime_urls:
+            app.mount(route, StaticFiles(directory=data), name='emulatorjs-' + platform)
+            mounted_runtime_urls.add(route)
     web_root = ROOT / 'web'
     if web_root.is_dir():
         register_pwa(app, web_root)

@@ -1,4 +1,4 @@
-/* Same-origin parent controls for pinned EmulatorJS 4.2.3. No ROM/save/config changes. */
+/* Same-origin parent controls for pinned EmulatorJS. No ROM/save/config changes. */
 (() => {
   const origin = window.location.origin;
   // Canonical libretro/SDL pad positions (B/A/Y/X). Upstream physical/keyboard

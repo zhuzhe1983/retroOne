@@ -1,5 +1,7 @@
 /* Interface translations only. Game metadata and server diagnostics retain their original text. */
 window.RetroI18n.add('en', {
+  "PSP 游戏内存档会与同一玩家的云端进度同步；请先结束该游戏的云会话。需要观战时，请选云游戏。": "PSP in-game saves sync with this player's cloud progress. End the cloud session for this game first. Choose cloud play for spectators.",
+  "文件大小 {size} · 下载完成后可尝试浏览器运行": "File size {size} · Try browser play after downloading",
   "服务器上的游戏文件已更新，请重新下载。": "The game file on the server has changed. Download it again.",
   "另一页面已更换缓存目录，请刷新后重试。": "Another page changed the cache folder. Refresh and try again.",
   "已下载到此设备 · 分享已暂停": "Downloaded on this device · sharing paused",
@@ -673,5 +675,25 @@ window.RetroI18n.add('en', {
   "方向键": "D-pad",
   "按平台自动选择": "Automatic by platform",
   "投币": "COIN",
-  "浏览器未允许系统全屏，已使用沉浸布局；仍可通过菜单返回。": "The browser did not allow system fullscreen. Immersive layout is active; use this menu to return."
+  "浏览器未允许系统全屏，已使用沉浸布局；仍可通过菜单返回。": "The browser did not allow system fullscreen. Immersive layout is active; use this menu to return.",
+  "下载管理": "Download manager",
+  "继续浏览": "Keep browsing",
+  "{count} 个下载 · {percent}%": "{count} downloads · {percent}%",
+  "{count} 个任务待处理": "{count} tasks need attention",
+  "{count} 个文件": "{count} files",
+  "切换游戏库、详情或玩其他游戏，下载都会继续。关闭或刷新网页会暂停，回来后可恢复。": "Downloads continue while browsing the library, viewing details, or playing another game. Closing or reloading the page pauses them; they can resume when you return.",
+  "正在同步存档，请稍候…": "Syncing saves. Please wait…",
+  "云存档尚未同步，请先在游戏中的同步提示里处理后再退出。": "Cloud saves are not synced yet. Resolve the sync message inside the game before leaving.",
+  "正在读取云存档…": "Loading cloud saves…",
+  "云存档已同步 · 游戏内保存后自动上传": "Cloud saves synced · In-game saves upload automatically",
+  "存档版本冲突 · 请在游戏内处理": "Save conflict · Resolve it inside the game",
+  "存档待上传 · 请保持页面打开": "Saves waiting to upload · Keep this page open",
+  "此游戏的存档正在其他会话使用": "Another session is using this game’s saves",
+  "发现旧浏览器存档 · 请确认后继续": "Legacy browser saves found · Confirm to continue",
+  "当前游戏尚不支持云存档同步": "Cloud save sync is not supported for this game yet",
+  "可下载与分享 · 暂不支持浏览器运行": "Download and share · Browser play is not available yet",
+  "支持浏览器运行 · 实际表现取决于当前设备": "Browser play available · Performance depends on this device",
+  "下载完成不代表可在浏览器运行；可在游戏详情查看支持情况。": "A completed download does not guarantee browser play. Check the game details for support.",
+  "文件大小 {size} · 可下载与分享，暂不支持浏览器运行": "File size {size} · Available to download and share, but not to play in the browser yet"
+
 });

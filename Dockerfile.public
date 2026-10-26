@@ -62,6 +62,7 @@ COPY scripts/consolidate_library.py /opt/retroone/scripts/consolidate_library.py
 COPY scripts/audit_switch_packages.py scripts/enrich_store_metadata.py /opt/retroone/scripts/
 COPY web/ /opt/retroone/web/
 COPY container/runtime-lock.json /opt/retroone/runtime-lock.json
+COPY container/browser-runtime-lock.json /opt/retroone/browser-runtime-lock.json
 COPY container/nginx.conf /opt/retroone/nginx.template.conf
 COPY container/configure-nginx.py /opt/retroone/configure-nginx.py
 COPY container/provisioner.py /opt/retroone/provisioner.py

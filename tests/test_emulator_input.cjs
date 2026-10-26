@@ -23,7 +23,12 @@ function harness(initialManager=true) {
   window.location={origin:'https://retroone.test'};window.parent={postMessage:(data,origin)=>messages.push({data,origin})};
   document.documentElement=new Target();document.head=new Target();document.hidden=false;document.createElement=()=>new Target();document.getElementById=id=>elements.get(id)||null;
   const context=vm.createContext({window,document,console,performance:{now:()=>now},setInterval:(fn,ms)=>timers.push({fn,ms,next:now+ms})});
-  if(hasPinned)vm.runInContext(fs.readFileSync(managerPath,'utf8'),context);
+  if(hasPinned){
+    // 4.3 exports the same class from an ES module; expose that class only in
+    // this VM fixture so the actual upstream input implementation is exercised.
+    const managerSource=fs.readFileSync(managerPath,'utf8').replace(/export\s*\{\s*EJS_GameManager\s*\};?\s*$/, 'window.EJS_GameManager = EJS_GameManager;');
+    vm.runInContext(managerSource,context);
+  }
   function makeManager(){
     const gm=hasPinned?Object.create(window.EJS_GameManager.prototype):{simulateInput(player,index,value){this.functions.simulateInput(player,index,value);},getVideoDimensions(){return 4/3;}};
     gm.EJS={isNetplay:false,settings:{},displayMessage(){},localization:value=>value};

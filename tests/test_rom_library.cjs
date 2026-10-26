@@ -48,6 +48,22 @@ test('selected directory is owned, download is disk backed, completed file is re
  }finally{await h.manager.pauseAll();}
 });
 
+test('completed ROM is shared across player URL prefixes without another manifest, writer, or download',async()=>{
+ const requests=[],h=setup({fetch:async url=>{requests.push(url);return {ok:true,status:200,json:async()=>fixture()};}});
+ try{
+  await h.manager.chooseDirectory();
+  const first=await h.manager.ensureFile(fixture(),{gameId:'game1',profileId:'player1',manifestUrl:'/p/player1/api/games/game1/download-manifest'});
+  await until(()=>h.manager.jobs.size===0);
+  const writes=h.directory.dirs.get('RetroOne').dirs.get('rom-'+fixture().info_hash).writes.length;
+  const next=await h.manager.ensureFile({...fixture(),download_url:'/p/player2/api/games/game1/download-rom/demo.gba'},{gameId:'game1',profileId:'player2',manifestUrl:'/p/player2/api/games/game1/download-manifest'});
+  assert.equal(next.size,first.size);assert.equal(next.lastModified,first.lastModified);
+  assert.equal(h.clients.length,1);assert.equal(h.clients[0].downloaded,10);assert.equal(requests.length,1);
+  assert.equal(h.manager.snapshot().entries.length,1);
+  assert.equal(h.directory.dirs.get('RetroOne').dirs.size,1);
+  assert.equal(h.directory.dirs.get('RetroOne').dirs.get('rom-'+fixture().info_hash).writes.length,writes);
+ }finally{await h.manager.pauseAll();}
+});
+
 test('reopening re-verifies completed bytes and does not download or rewrite intact cache',async()=>{
  const first=setup();await first.manager.chooseDirectory();await add(first.manager);await until(()=>first.manager.snapshot().entries[0]?.complete);await until(()=>first.manager.jobs.size===0);
  const owned=first.directory.dirs.get('RetroOne').dirs.get('rom-'+fixture().info_hash),writes=owned.writes.length;

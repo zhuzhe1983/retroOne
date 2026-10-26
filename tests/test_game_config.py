@@ -271,3 +271,28 @@ def test_experiments_preserve_config_dependency_and_resource_guards(setup, probl
     with pytest.raises(GameConfigError) as error:
         store.resolve(game, 'browser', review, browser_limit=64 * 1024**2)
     assert error.value.code == code
+
+
+def test_new_3ds_core_is_ephemeral_for_explicit_experiment_only(setup):
+    store, game, source = setup
+    game = dict(game, platform='3ds', native_core='azahar', browser_core=None,
+                browser_eligible=False, mode='stream')
+    store.generate(game)
+    before = store.get(game)
+    default = store.resolve(game)
+    assert default['mode'] == 'stream' and default['browser_core'] is None
+    with pytest.raises(GameConfigError):
+        store.resolve(game, 'browser')
+    explicit = store.resolve(game, 'browser', browser_limit=0)
+    assert explicit['mode'] == 'browser' and explicit['browser_core'] == 'azahar'
+    assert explicit['_game_config']['core'] == 'azahar'
+    assert store.get(game) == before and game['browser_core'] is None
+    assert store.resolve(game)['mode'] == 'stream'
+    store.update_overrides(game, {'disabled': True})
+    with pytest.raises(GameConfigError):
+        store.resolve(game, 'browser', browser_limit=0)
+    store.update_overrides(game, {'disabled': None})
+    source.write_bytes(b'changed source')
+    with pytest.raises(GameConfigError) as error:
+        store.resolve(game, 'browser', browser_limit=0)
+    assert error.value.code == 'stale_config'

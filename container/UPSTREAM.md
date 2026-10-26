@@ -10,7 +10,7 @@ No game ROM, BIOS, proprietary firmware, or key is included in the Docker image.
 | Pixelflux | https://github.com/selkies-project/pixelflux | 2.1.0 bundled in base | MPL-2.0 |
 | RetroArch | https://github.com/libretro/RetroArch | Debian trixie packaged version, recorded by `dpkg-query` | GPL-3.0 |
 | Libretro cores | https://buildbot.libretro.com/nightly/linux/x86_64/latest/ | Individual SHA256 in `runtime-lock.json`; preserve vendor cache because upstream nightly URLs rotate | Per-core upstream license, including noncommercial restrictions on some older arcade cores |
-| EmulatorJS | https://github.com/EmulatorJS/EmulatorJS | 4.2.3 stable release + SHA256 lock | GPL-3.0 |
+| EmulatorJS (private build only) | https://github.com/EmulatorJS/EmulatorJS and https://cdn.emulatorjs.org/4.3.0-pre/data/ | 4.3.0-pre; all 290 files individually pinned in `browser-runtime-lock.json` | GPL-3.0 frontend; bundled cores retain their individual licenses |
 | PCSX2 | https://github.com/PCSX2/pcsx2 | 2.8.2 official AppImage + SHA256 lock | GPL-3.0 |
 | SDLPAL | https://github.com/sdlpal/sdlpal | 3.0.2025.0616 official AppImage + SHA256 lock | GPL-3.0 |
 | Azahar libretro | https://github.com/azahar-emu/azahar | 2126.2 official release + SHA256 lock | GPL-2.0+ |
@@ -26,6 +26,20 @@ captured on 2026-10-19. A changed upstream nightly file fails verification; upda
 requires explicitly reviewing and changing the lock. Installed Debian packages are recorded
 at `/opt/retroone/runtime-packages.tsv` inside the image. Keep the cache or built image for
 reproducible restoration. Package versions should be exported with the acceptance report.
+
+The browser runtime is a pre-release, not a stable 4.3.0 release. The reviewed CDN
+directory contains 290 files (269,894,825 bytes); a versioned URL does not replace
+the SHA256 checks. Upstream `version.json` still reports 4.2.3, while
+`src/consts.js` and the running instance identify 4.3.0-pre. These upstream bytes
+are preserved. `fetch_runtime.py` prepares the complete pinned browser tree
+directly, without downloading the previous 4.2.3 archive first. It writes only
+its own `.retroone-runtime.json` marker with the version and browser-lock SHA256.
+Activation verifies the exact tree, retains the previous installation under
+`vendor/runtime-backups/`, and never merges old and new files. The marker also
+allows the application to use a distinct asset URL for each reviewed runtime.
+`--browser-only`, `--native-only`, `--browser-source`, offline verification and
+scoped private backups are described in [releasing.md](../docs/releasing.md).
+Neither browser binaries nor private backups are included in public releases.
 
 The service targets 60 streamed frames per second at 1280×720 or 1920×1080 using VAAPI on Intel,
 while preserving each game's original simulation/audio timing. This is not a guarantee

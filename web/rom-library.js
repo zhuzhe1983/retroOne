@@ -1,4 +1,4 @@
-/* Persistent, directory-backed browser ROM library. No ROM or directory leaves this browser. */
+/* Directory-backed ROM library. Directory handles stay here; verified ROM pieces may be shared by P2P. */
 (function (root, factory) {
   const api = factory(root);
   if (typeof module === 'object' && module.exports) module.exports = api;

@@ -25,14 +25,16 @@ RETROONE_IMAGE=ghcr.io/zhuzhe1983/retroone:v0.1.0
 
 ## 完整运行环境仅在本地准备
 
-现有 `Dockerfile` 保留完整本地构建方式，Switch 使用的固定 Eden 来源及构建步骤见 [Switch 运行环境](switch-runtime.md)。需要 Python 3.11、curl、7-Zip（命令为 `7z` 或 `7zz`）及 Docker；先准备运行文件，再构建：
+现有 `Dockerfile` 保留完整本地构建方式，Switch 使用的固定 Eden 来源及构建步骤见 [Switch 运行环境](switch-runtime.md)。需要 Python 3.11、curl 及 Docker；只有恢复旧版 EmulatorJS 7z 归档时才额外需要 7-Zip（`7z` 或 `7zz`）。先准备运行文件，再构建：
 
 ```sh
 python3 scripts/fetch_runtime.py
 docker build --platform linux/amd64 -f Dockerfile -t retroone:local .
 ```
 
-准备脚本读取 `container/runtime-lock.json`，逐个校验下载归档和核心二进制的 SHA256，正常运行不会改写锁文件。部分历史核心来自上游可变的 `/latest/` 地址；如果上游文件已经更新，首次下载会因哈希不符失败。此时应恢复对应的已审查私有缓存，或单独审查、测试新的上游版本后更新锁文件；不要删除哈希检查，也不要把“最新版”自动写回锁文件。公开 CI 不依赖这些可变地址。
+准备脚本分别读取 `container/runtime-lock.json`（原生模拟器）和 `container/browser-runtime-lock.json`（浏览器运行包），逐个校验大小及 SHA256，正常运行不会改写锁文件。浏览器包默认是官方 **4.3.0-pre 预发布版**，完整锁定 290 个文件；直接准备这一版本，不先下载 4.2.3 再覆盖。上游该目录的 `version.json` 仍写着 4.2.3，而 `src/consts.js` 和实际运行实例标识为 4.3.0-pre；项目保留原始字节，不修改上游版本文件。官方版本目录也可能变化，哈希不符时会停止。
+
+部分历史原生核心来自上游可变的 `/latest/` 地址；如果上游文件已经更新，首次下载会因哈希不符失败。此时应恢复对应的已审查私有缓存，或单独审查、测试新的上游版本后更新锁文件；不要删除哈希检查，也不要把“最新版”自动写回锁文件。公开 CI 不依赖这些下载地址。
 
 已有缓存可在离线模式下校验、解包：
 
@@ -41,14 +43,27 @@ python3 scripts/fetch_runtime.py --verify-only
 python3 scripts/fetch_runtime.py --offline
 ```
 
-为了在自己的机器间恢复已验证版本，可生成只包含锁定运行归档的本地备份。此备份不会收集 ROM 或用户配置，**仍仅用于私有存储，不要上传到 GitHub Release 或公共镜像仓库**：
+只更新浏览器环境时加 `--browser-only`，不读取或修改原生核心。已有完整官方 `data/` 目录可作为离线来源；只复制锁文件列出的资源，额外文件不会进入安装树：
+
+```sh
+python3 scripts/fetch_runtime.py --browser-only
+python3 scripts/fetch_runtime.py --browser-only --offline \
+  --browser-source /private/emulatorjs-4.3.0-pre/data
+python3 scripts/fetch_runtime.py --browser-only --verify-only
+```
+
+下载最多并发 4 个文件，临时文件通过校验后才进入缓存；缓存位于 `vendor/runtime-downloads/browser/<锁文件SHA256>/`，中断后可继续。安装先构建、校验完整新树，再替换 `vendor/emulatorjs`，不会把新旧核心合并。旧目录完整保留在命令输出的 `browser_activation.backup` 路径，通常为 `vendor/runtime-backups/emulatorjs-<标识>`。切换过程有独占锁和恢复记录；若异常中断导致活动目录缺失，再次运行会先恢复旧目录。新包的 `data/.retroone-runtime.json` 记录版本和锁文件哈希，供服务区分浏览器缓存版本。
+
+准备脚本只管理本地构建材料，不会更新正在运行的容器。回滚时应先等玩家退出，保留当前 `vendor/emulatorjs` 作为另一份备份，再将输出记录的旧目录移回原位，并重建、部署对应版本；不要在活跃播放器使用的挂载目录内直接换包。
+
+为了在自己的机器间恢复已验证版本，可生成只包含锁定原生归档、浏览器资源及两份锁文件的本地备份。此备份不会收集 ROM 或用户配置，**仍仅用于私有存储，不要上传到 GitHub Release 或公共镜像仓库**：
 
 ```sh
 python3 scripts/fetch_runtime.py --verify-only --create-bundle /private/backups/retroone-runtime.tar.gz
 python3 scripts/fetch_runtime.py --offline --from-bundle /private/backups/retroone-runtime.tar.gz
 ```
 
-备份旁会生成 `.sha256` 文件；恢复时还会逐项检查锁文件一致性、成员名称和归档内容哈希。`--vendor-root /absolute/path` 可用于在独立目录验证恢复结果。完整镜像随后从 `vendor/` 复制这些运行文件，**不会复制你的 ROM、固件、密钥或存档**；实际游戏内容仍通过只读 `/roms` 挂载提供。
+备份旁会生成 `.sha256` 文件；恢复时还会逐项检查锁文件一致性、成员名称和内容哈希。制作浏览器专用备份时加 `--browser-only`，恢复时也必须使用同一参数；`--native-only` 同理。历史备份需要当时对应的锁文件：使用 `--native-only --lock /private/old-runtime-lock.json` 恢复旧归档，不会将旧 4.2 包误认成新的完整运行包。`--vendor-root /absolute/path` 可用于在独立目录验证恢复结果。完整镜像随后从 `vendor/` 复制当前运行文件，历史备份和下载缓存不进入构建上下文，**你的 ROM、固件、密钥或存档也不会进入镜像**；实际游戏内容仍通过只读 `/roms` 挂载提供。
 
 完整核心集合的许可并不统一。例如 [Snes9x 的许可证](https://github.com/snes9xgit/snes9x/blob/master/LICENSE) 限定非商业使用和分发，[Genesis Plus GX 的许可证](https://github.com/libretro/Genesis-Plus-GX/blob/master/LICENSE.txt) 也对商业用途、修改版本源码及声明保留提出条件。因此项目不把整套缓存视为可任意再分发的统一软件包；以后若要公开某个运行核心，应逐项核对对应版本的许可证、源码与声明要求。本项目源码的许可选择也不代表第三方组件许可。
 

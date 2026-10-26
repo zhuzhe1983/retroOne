@@ -28,3 +28,6 @@ docs
 .env*
 vendor/runtime-downloads
 vendor/azahar
+
+vendor/runtime-backups
+vendor/.emulatorjs.stage-*

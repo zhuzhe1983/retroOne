@@ -1,0 +1,1755 @@
+{
+  "schema_version": 1,
+  "upstream": "EmulatorJS",
+  "version": "4.3.0-pre",
+  "release_channel": "prerelease",
+  "source": "https://cdn.emulatorjs.org/4.3.0-pre/data/",
+  "distribution": "private-local-only",
+  "notes": [
+    "Reviewed full official version directory; bytes are SHA256 pinned even if the CDN changes.",
+    "Upstream version.json still says 4.2.3; preserved verbatim. src/consts.js and runtime identify 4.3.0-pre.",
+    "File inventory includes all previously installed cores; this does not prove game compatibility."
+  ],
+  "files": [
+    {
+      "path": "compression/README.md",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/compression/README.md",
+      "size": 189,
+      "sha256": "c01bf373463b6eac94ce2db8f6102010c104683bd70203e9b1343865693d1db5"
+    },
+    {
+      "path": "compression/extract7z.js",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/compression/extract7z.js",
+      "size": 280155,
+      "sha256": "4ac9933b995a516cb6b3ca4027db860278372a20c21c405d93ceb1998498853a"
+    },
+    {
+      "path": "compression/extractzip.js",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/compression/extractzip.js",
+      "size": 196199,
+      "sha256": "3cc825428724213acd43d30552a78008e0869b2326de17dee240dbff9ee2f629"
+    },
+    {
+      "path": "compression/libunrar.js",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/compression/libunrar.js",
+      "size": 66684,
+      "sha256": "bc35b98ec95020ec047f4762de3e66629741eee3826022195498d2a1e0fc102c"
+    },
+    {
+      "path": "compression/libunrar.wasm",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/compression/libunrar.wasm",
+      "size": 173799,
+      "sha256": "e4ea9bd0b13a9767916b424469e30205f47f267ecd9125ed56fb9ff0b9bc1b58"
+    },
+    {
+      "path": "cores/81-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/81-legacy-wasm.data",
+      "size": 737102,
+      "sha256": "8b63445e36103123239df9ef411272f64fbb2ea5e81ee4eaaacb97272439a4e4"
+    },
+    {
+      "path": "cores/81-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/81-thread-legacy-wasm.data",
+      "size": 751753,
+      "sha256": "285a2ca1a40b7af5aaa42b76d7df8fd15ae77a786cb17dcbd53504dd8bcdac8b"
+    },
+    {
+      "path": "cores/81-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/81-thread-wasm.data",
+      "size": 751536,
+      "sha256": "28aac0a640f71577be065d3fbefab99f2367b4997984f6c5b971e5335047d709"
+    },
+    {
+      "path": "cores/81-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/81-wasm.data",
+      "size": 736726,
+      "sha256": "4b4d39dd67c5bfff79aa988c1fe92e1cac5df91daadd4779e283d27cda3b0ac1"
+    },
+    {
+      "path": "cores/README.md",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/README.md",
+      "size": 426,
+      "sha256": "ab1b26254f19fb31d3023eafee38b282f7e4d7e34e7a58318900c8e68b165c01"
+    },
+    {
+      "path": "cores/a5200-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/a5200-legacy-wasm.data",
+      "size": 738077,
+      "sha256": "ce9bc62fdfabbe8962be5eea7b4ce408757481d036dce48b17ab311631523478"
+    },
+    {
+      "path": "cores/a5200-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/a5200-thread-legacy-wasm.data",
+      "size": 752369,
+      "sha256": "3b5b83fa35ac1df54866c6d463bdc626b539685a106da2c619f4736723104ee9"
+    },
+    {
+      "path": "cores/a5200-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/a5200-thread-wasm.data",
+      "size": 753365,
+      "sha256": "b6ab8f8366b0fea9e5196422b6ec42716e4563757378da5de6292e77ea802e7e"
+    },
+    {
+      "path": "cores/a5200-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/a5200-wasm.data",
+      "size": 738440,
+      "sha256": "bd8fab9f72233eed236d8cd17ed397a3ff9e461414a180ad45226de58b21c8d1"
+    },
+    {
+      "path": "cores/azahar-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/azahar-thread-wasm.data",
+      "size": 3985011,
+      "sha256": "d90696e6ea68c4fc00ef147411ad399962777f07b6c7e73d5537da0eaffc2e3b"
+    },
+    {
+      "path": "cores/beetle_vb-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/beetle_vb-legacy-wasm.data",
+      "size": 715339,
+      "sha256": "6c515fc751774a4cd276b0fa4add9c90bb968cfa98f5917c9194daaf0e3a92e4"
+    },
+    {
+      "path": "cores/beetle_vb-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/beetle_vb-thread-legacy-wasm.data",
+      "size": 729255,
+      "sha256": "9d26c0ae36724692d7bb766675104cbd8c4729fed8c9f55a1707b51019e5a73c"
+    },
+    {
+      "path": "cores/beetle_vb-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/beetle_vb-thread-wasm.data",
+      "size": 730803,
+      "sha256": "2de962666b5ef5ee214d1c3330f75be68cd1826600804c123e296b62be9024a5"
+    },
+    {
+      "path": "cores/beetle_vb-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/beetle_vb-wasm.data",
+      "size": 716329,
+      "sha256": "aab36a69c098b667e6dc2490ffcf593d652c30f254ade524eebe227d4d8f0e1f"
+    },
+    {
+      "path": "cores/cap32-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/cap32-legacy-wasm.data",
+      "size": 870575,
+      "sha256": "9f8a6b9fd6ded252c4ab3d2a5c0a8acb588894bc6d5772bbba24caebb0e78b03"
+    },
+    {
+      "path": "cores/cap32-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/cap32-thread-legacy-wasm.data",
+      "size": 887318,
+      "sha256": "9e0706c62cc392a72bf71e57a74abea03b2e0d78fb4f846e49c90a6921b56379"
+    },
+    {
+      "path": "cores/cap32-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/cap32-thread-wasm.data",
+      "size": 888071,
+      "sha256": "a3b068a7445b72f02ad872a3fc3d3de7ded0c4b096ddc7a3d7af98367eb5da22"
+    },
+    {
+      "path": "cores/cap32-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/cap32-wasm.data",
+      "size": 870245,
+      "sha256": "fce6ce4177a8f227ea71a517d41dd18714bc20537652fda8c3cdf7c63b218e01"
+    },
+    {
+      "path": "cores/core-README.md",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/core-README.md",
+      "size": 506,
+      "sha256": "0da6cf6bc0921ee57e2048a50167c4885272ddfcec84e81d6cd6815e1fc7b7d2"
+    },
+    {
+      "path": "cores/cores.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/cores.json",
+      "size": 29462,
+      "sha256": "6241c545f547f92184f0dee27d32404d77cc0f1e32a03547cbd0a88c7cb5fe75"
+    },
+    {
+      "path": "cores/crocods-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/crocods-legacy-wasm.data",
+      "size": 827996,
+      "sha256": "9dc3e625fe500d77eaf4df6f68897b1efcbcb328d2cbfa642173cc2c3695ece4"
+    },
+    {
+      "path": "cores/crocods-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/crocods-thread-legacy-wasm.data",
+      "size": 843024,
+      "sha256": "ba0243aa9d9260b70bc02ba177faa622f4e5fd9f77bf3aa65683d7352b8b1cdc"
+    },
+    {
+      "path": "cores/crocods-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/crocods-thread-wasm.data",
+      "size": 843538,
+      "sha256": "d50b8ef4ca7f3933878e6315a253156afe021e3fe43e2c2f3ef1f497407a7615"
+    },
+    {
+      "path": "cores/crocods-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/crocods-wasm.data",
+      "size": 828664,
+      "sha256": "ea7b4de02edceaba97e471c79ede0b6ab2acdced2646f373569995a3128e1eb8"
+    },
+    {
+      "path": "cores/desmume-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/desmume-legacy-wasm.data",
+      "size": 955057,
+      "sha256": "97ab277b7fef49e213810358f6f91ac5d9efa7894e3bc94d23ad972ddca2a652"
+    },
+    {
+      "path": "cores/desmume-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/desmume-thread-legacy-wasm.data",
+      "size": 969152,
+      "sha256": "9099a8e8d45b3f0d56f004e28655f76e2dd5b4e8fc3258ee06695973e9751edd"
+    },
+    {
+      "path": "cores/desmume-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/desmume-thread-wasm.data",
+      "size": 970799,
+      "sha256": "d81f2572531e8d6a0c52bc1a667cd9b0e19827bad6aa86d739d933acef8be494"
+    },
+    {
+      "path": "cores/desmume-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/desmume-wasm.data",
+      "size": 955928,
+      "sha256": "3639312c3a8f924b0ca283fed1011439075383d3c3856f7b41052b0fde1ee864"
+    },
+    {
+      "path": "cores/desmume2015-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/desmume2015-legacy-wasm.data",
+      "size": 860452,
+      "sha256": "b2bbb508b475894be0940ff19cd2bf4768045536252d283f90aa4289042b5639"
+    },
+    {
+      "path": "cores/desmume2015-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/desmume2015-thread-legacy-wasm.data",
+      "size": 872787,
+      "sha256": "8b07dc8fce9ee5a5cef8f907e8fed5b0139c5590f597b012c50d4d33430ebd8c"
+    },
+    {
+      "path": "cores/desmume2015-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/desmume2015-thread-wasm.data",
+      "size": 874473,
+      "sha256": "fd9fc53b29d8fc13cab7b8091b3cad683d897e8ea434decd968584bcbe0ca378"
+    },
+    {
+      "path": "cores/desmume2015-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/desmume2015-wasm.data",
+      "size": 859004,
+      "sha256": "2887ca8409298a72fae6beaf031348dd6c77a91647426c68ffcf916bd0989b90"
+    },
+    {
+      "path": "cores/dosbox_pure-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/dosbox_pure-thread-legacy-wasm.data",
+      "size": 1827411,
+      "sha256": "12c236b1fead1f331e3193366618eba0ac540bd69f4abd8961492d559e4583f4"
+    },
+    {
+      "path": "cores/dosbox_pure-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/dosbox_pure-thread-wasm.data",
+      "size": 1827779,
+      "sha256": "89b0e89b03ced9ba07c5fe27bc789fd0f42bd5378b399f93befa2edc3571a70a"
+    },
+    {
+      "path": "cores/fbalpha2012_cps1-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/fbalpha2012_cps1-legacy-wasm.data",
+      "size": 859008,
+      "sha256": "dbf8e0cd01e55938104b9c0678a87ad88fe308d68be8847b9fbd3ddb163caeea"
+    },
+    {
+      "path": "cores/fbalpha2012_cps1-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/fbalpha2012_cps1-thread-legacy-wasm.data",
+      "size": 884981,
+      "sha256": "602e1c2ae13850467465e3135529f61e5039410e99985ce1278466be4e5e9c29"
+    },
+    {
+      "path": "cores/fbalpha2012_cps1-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/fbalpha2012_cps1-thread-wasm.data",
+      "size": 886722,
+      "sha256": "2c71785cacfb9d75eb6017a8d1eb0c3d6c4d9cf52744ec0a842c07ccab34e9e2"
+    },
+    {
+      "path": "cores/fbalpha2012_cps1-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/fbalpha2012_cps1-wasm.data",
+      "size": 860255,
+      "sha256": "1ebf5baa3a37c3cad473477bc3d906093e502f44af75454f58791fe5fd2687ac"
+    },
+    {
+      "path": "cores/fbalpha2012_cps2-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/fbalpha2012_cps2-legacy-wasm.data",
+      "size": 823286,
+      "sha256": "20b86da08593f0a8774cbd44206dd5583fd98ca771f3b1ce1de6eeacb3507b1a"
+    },
+    {
+      "path": "cores/fbalpha2012_cps2-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/fbalpha2012_cps2-thread-legacy-wasm.data",
+      "size": 843747,
+      "sha256": "4b4599e6218b239b67194c25d204c19662986b402758643540d35c9087df46ff"
+    },
+    {
+      "path": "cores/fbalpha2012_cps2-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/fbalpha2012_cps2-thread-wasm.data",
+      "size": 845651,
+      "sha256": "b41ea8cbe408a480f30b0ceac958af1a2fa8501a7104b93b977ec2fc2aee9da1"
+    },
+    {
+      "path": "cores/fbalpha2012_cps2-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/fbalpha2012_cps2-wasm.data",
+      "size": 823550,
+      "sha256": "59ae25121a88d2ad46c832f7aa93fef436542d9e1ca37eb37c5e3ab8025b69be"
+    },
+    {
+      "path": "cores/fbneo-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/fbneo-legacy-wasm.data",
+      "size": 7684297,
+      "sha256": "776a4fa7b03acb771b4bc2341cd157c3b87ec9fefad9883bf9d8947b654d587d"
+    },
+    {
+      "path": "cores/fbneo-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/fbneo-thread-legacy-wasm.data",
+      "size": 7533510,
+      "sha256": "945cc4762a93d134f6f74bd4eba23e0ff7eaa062f331b2e9aba52af93c6e8fd8"
+    },
+    {
+      "path": "cores/fbneo-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/fbneo-thread-wasm.data",
+      "size": 7533855,
+      "sha256": "b2a9b949f080257c673b5bbce6a7f2320e6ddcb0c3cb5c33cce310500ac81bf0"
+    },
+    {
+      "path": "cores/fbneo-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/fbneo-wasm.data",
+      "size": 7682399,
+      "sha256": "b28f8f48cbf68a3e428037de47ed796710f5ad561e9daa282c08c4e2c4c42014"
+    },
+    {
+      "path": "cores/fceumm-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/fceumm-legacy-wasm.data",
+      "size": 895872,
+      "sha256": "839e324bf96a9b3d46e6b2af385d7d4ab302abe8460a9731b94924f289041f15"
+    },
+    {
+      "path": "cores/fceumm-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/fceumm-thread-legacy-wasm.data",
+      "size": 910197,
+      "sha256": "065b11283d22eb3bcf0ef71f7772899759e8ffafd5b2e6b33d69249b3cb99139"
+    },
+    {
+      "path": "cores/fceumm-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/fceumm-thread-wasm.data",
+      "size": 910677,
+      "sha256": "2aabdd4c2f0e9af0b160311700b9d3806bfd28d1e73691bc9d5d0532ee1ee3aa"
+    },
+    {
+      "path": "cores/fceumm-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/fceumm-wasm.data",
+      "size": 896662,
+      "sha256": "ea7b9e5b899e13c463feac73470a13b9afa621083d38671f0c91928a9dcbea22"
+    },
+    {
+      "path": "cores/fuse-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/fuse-legacy-wasm.data",
+      "size": 1026598,
+      "sha256": "59de5237b7eab8d8c1ddacbacd9324eda39eac99c86b0a0d8ffb8ffb137f27c8"
+    },
+    {
+      "path": "cores/fuse-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/fuse-thread-legacy-wasm.data",
+      "size": 1042813,
+      "sha256": "3d12a6fdb00af678048cef5a75ef2506dd36c83967881547d1acd38b439b7ae6"
+    },
+    {
+      "path": "cores/fuse-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/fuse-thread-wasm.data",
+      "size": 1042597,
+      "sha256": "03a6fa725533caf29f32e0efe80d98d385d66132bd84cd1b191329597c23180c"
+    },
+    {
+      "path": "cores/fuse-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/fuse-wasm.data",
+      "size": 1026485,
+      "sha256": "66d30c44493f15a467329e3822b84a55f715c9bad42fa373b71739c2980b6dae"
+    },
+    {
+      "path": "cores/gambatte-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/gambatte-legacy-wasm.data",
+      "size": 824880,
+      "sha256": "977f9cc11c9a93b1ae3b81d6a9da2ef65c49fb7eb6f0854f778ae0f7154dc567"
+    },
+    {
+      "path": "cores/gambatte-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/gambatte-thread-legacy-wasm.data",
+      "size": 839988,
+      "sha256": "5a8fcb9948e78f337aaf371c098cc01c074c9c101378b0cb6bf3f7dfc171f5b6"
+    },
+    {
+      "path": "cores/gambatte-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/gambatte-thread-wasm.data",
+      "size": 840752,
+      "sha256": "e97102975e75e29b4dc5d794f322fdf6a8c31b48842fde9034a6773de286e8cd"
+    },
+    {
+      "path": "cores/gambatte-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/gambatte-wasm.data",
+      "size": 825041,
+      "sha256": "55234878bb35d82c35e97d5ab19b8ca56a7b168ce5058a40c1d65e62ce5f37e5"
+    },
+    {
+      "path": "cores/gearcoleco-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/gearcoleco-legacy-wasm.data",
+      "size": 745428,
+      "sha256": "c589e80a35c9b81aff4a1dd868c8496098853754f067338912efc6904df81e9d"
+    },
+    {
+      "path": "cores/gearcoleco-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/gearcoleco-thread-legacy-wasm.data",
+      "size": 759814,
+      "sha256": "cc5563e0a3d40712772433a4cf4dcd26f854f93eeacb07280a68b4ace40b441e"
+    },
+    {
+      "path": "cores/gearcoleco-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/gearcoleco-thread-wasm.data",
+      "size": 760984,
+      "sha256": "f6b8e949948e1f67109ec670ac51b89c3c30d47c1526cb489904070e6d4ae4ce"
+    },
+    {
+      "path": "cores/gearcoleco-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/gearcoleco-wasm.data",
+      "size": 745367,
+      "sha256": "e3f030c30e6819b17c79d4a508d33f1ff1a1fd001da962923bedbbfc84bfbdf1"
+    },
+    {
+      "path": "cores/genesis_plus_gx-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/genesis_plus_gx-legacy-wasm.data",
+      "size": 1065733,
+      "sha256": "6fe307227ac386c32e50d1af2c3b6b873f47c2825822433424b6f77f1b4a7b08"
+    },
+    {
+      "path": "cores/genesis_plus_gx-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/genesis_plus_gx-thread-legacy-wasm.data",
+      "size": 1083955,
+      "sha256": "3cb88248e6c1ad6d064cfb8082da223936b11ceaa3ca2a2b5b97d0cdeff3669f"
+    },
+    {
+      "path": "cores/genesis_plus_gx-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/genesis_plus_gx-thread-wasm.data",
+      "size": 1084359,
+      "sha256": "5106066c9fd3abe82b9ff366e72994bf3a02a7343c6eb50fe7ba5513f23380c7"
+    },
+    {
+      "path": "cores/genesis_plus_gx-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/genesis_plus_gx-wasm.data",
+      "size": 1065507,
+      "sha256": "644ccdd431e56bb820c0974b2e0ac5b35c950216f6983069fbce342bd0d37b9e"
+    },
+    {
+      "path": "cores/handy-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/handy-legacy-wasm.data",
+      "size": 718292,
+      "sha256": "2c26fc88935aed69f1344b57591de7ad64f28863758f2e6f7ab777e5f154fe62"
+    },
+    {
+      "path": "cores/handy-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/handy-thread-legacy-wasm.data",
+      "size": 734115,
+      "sha256": "0dfe017897b50b42a87b1d0daf23ec4c81a95ffde07a705584a8287fe860636b"
+    },
+    {
+      "path": "cores/handy-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/handy-thread-wasm.data",
+      "size": 734684,
+      "sha256": "4ff72b1161c264db11b93baefc6b6851e8f1c855148e23afc9a5764f6c1c0595"
+    },
+    {
+      "path": "cores/handy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/handy-wasm.data",
+      "size": 718561,
+      "sha256": "36d34b0c843a5cadfe47e72d768153a9a2fb9ecea59d9f43c93781b634c18188"
+    },
+    {
+      "path": "cores/mame2003-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/mame2003-legacy-wasm.data",
+      "size": 4462453,
+      "sha256": "0453e8b854aa7c6f638d904f2d545e49b689ecae4ae459426b665bc95e75efe9"
+    },
+    {
+      "path": "cores/mame2003-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/mame2003-thread-legacy-wasm.data",
+      "size": 4336963,
+      "sha256": "d0886b0e0790ae9b5eb5bc3fb02711a2acd32ea80a26382702a139cab5559af8"
+    },
+    {
+      "path": "cores/mame2003-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/mame2003-thread-wasm.data",
+      "size": 4337713,
+      "sha256": "a1adc7cbfa49d2ad2db1f0bee991587d3e66d96f52bd3d8a3974b838f8bed646"
+    },
+    {
+      "path": "cores/mame2003-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/mame2003-wasm.data",
+      "size": 4461815,
+      "sha256": "5c1e8f6c4ff67f7069851e1dd798a608f438236f2677171126746a3891bccc74"
+    },
+    {
+      "path": "cores/mame2003_plus-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/mame2003_plus-legacy-wasm.data",
+      "size": 4797217,
+      "sha256": "b23f602ad7b2a4ec5ae44f99b20bcbed9a7292e1b08d176afdbcf11d3632831d"
+    },
+    {
+      "path": "cores/mame2003_plus-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/mame2003_plus-thread-legacy-wasm.data",
+      "size": 4659217,
+      "sha256": "d71573a5f62607e7804871ea7c31de62b429a779f151457a2571098c77eed687"
+    },
+    {
+      "path": "cores/mame2003_plus-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/mame2003_plus-thread-wasm.data",
+      "size": 4659738,
+      "sha256": "3ac50b0633e9ec8701c29f70e6462e46f2cb1220f16f13abe7888d9558d308a6"
+    },
+    {
+      "path": "cores/mame2003_plus-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/mame2003_plus-wasm.data",
+      "size": 4798485,
+      "sha256": "786de3ca355a8cb199c44d285100a71530209fee42a45027f6a262c3adeca354"
+    },
+    {
+      "path": "cores/mednafen_ngp-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/mednafen_ngp-legacy-wasm.data",
+      "size": 723431,
+      "sha256": "158c15baabf4f10228c12dd4ec00f3f0e36518527602c2996bb07b9514c0d255"
+    },
+    {
+      "path": "cores/mednafen_ngp-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/mednafen_ngp-thread-legacy-wasm.data",
+      "size": 737600,
+      "sha256": "025037de24bdb43e26c039a7b882c7e465d91f724dcaa395511e5d4f34de2fe0"
+    },
+    {
+      "path": "cores/mednafen_ngp-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/mednafen_ngp-thread-wasm.data",
+      "size": 738363,
+      "sha256": "925aa08a94a6e9fe82a01ac24bfa5c103103caf84cab23c3e98d845b0fc31062"
+    },
+    {
+      "path": "cores/mednafen_ngp-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/mednafen_ngp-wasm.data",
+      "size": 723627,
+      "sha256": "c68d9f9cf0eae04b4ee0eb45d3d6b9d9f4bd88eeaf8e325d79b65f2b6fe84cec"
+    },
+    {
+      "path": "cores/mednafen_pce-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/mednafen_pce-legacy-wasm.data",
+      "size": 835206,
+      "sha256": "e11fefe03afbe4cf175dcaef727ad0aabfea3151ce38a4e906327cda7d67ec6d"
+    },
+    {
+      "path": "cores/mednafen_pce-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/mednafen_pce-thread-legacy-wasm.data",
+      "size": 853075,
+      "sha256": "9c5ad5d22f7cfab185ec711dc5cf938b341ecb27e643195a0757145286eeb904"
+    },
+    {
+      "path": "cores/mednafen_pce-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/mednafen_pce-thread-wasm.data",
+      "size": 854038,
+      "sha256": "e5f6af219dceba15eff981e1b293787e62d61b50cf9c33a0a41dcf49e4715b67"
+    },
+    {
+      "path": "cores/mednafen_pce-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/mednafen_pce-wasm.data",
+      "size": 836393,
+      "sha256": "faa9defe7dedc9f84852d78eda394ea56c19e25ee12f51870ea12e54b649ccc4"
+    },
+    {
+      "path": "cores/mednafen_pcfx-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/mednafen_pcfx-legacy-wasm.data",
+      "size": 799012,
+      "sha256": "a916a1e62b0756798ed940b12f5361c2986497a173f38ab9c8db6dfd4aa96277"
+    },
+    {
+      "path": "cores/mednafen_pcfx-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/mednafen_pcfx-thread-legacy-wasm.data",
+      "size": 814123,
+      "sha256": "ea3c70a1ba69493785a26e802ae5d00d29fb0031e4a7fe9220d4594c8a40916a"
+    },
+    {
+      "path": "cores/mednafen_pcfx-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/mednafen_pcfx-thread-wasm.data",
+      "size": 814076,
+      "sha256": "202af2453f9bdbee150396bb94e1b65ec4824243a24007608beedc46886fc21d"
+    },
+    {
+      "path": "cores/mednafen_pcfx-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/mednafen_pcfx-wasm.data",
+      "size": 799314,
+      "sha256": "4ff19494e1d2fa9b7821265ff149cbbea49dfe56fd1d2d51d059ab27e88f9a64"
+    },
+    {
+      "path": "cores/mednafen_psx_hw-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/mednafen_psx_hw-legacy-wasm.data",
+      "size": 1008649,
+      "sha256": "583d350e3647dd1587c68d1e00e113c1254a3de083311b1b2590154b41279db1"
+    },
+    {
+      "path": "cores/mednafen_psx_hw-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/mednafen_psx_hw-thread-legacy-wasm.data",
+      "size": 1028048,
+      "sha256": "3d59bb136eda98e746f3263395ad90afb8d4b337bbabf534e17e3be6af522f6f"
+    },
+    {
+      "path": "cores/mednafen_psx_hw-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/mednafen_psx_hw-thread-wasm.data",
+      "size": 1028308,
+      "sha256": "d6eb37ebb74a4e40b9567152e88c84fad7801027059f746ab7b541082b965140"
+    },
+    {
+      "path": "cores/mednafen_psx_hw-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/mednafen_psx_hw-wasm.data",
+      "size": 1009223,
+      "sha256": "d77084b5106e0799d04f16cdd6a76f233453c2e86c747d3c2ee37fd82b92f487"
+    },
+    {
+      "path": "cores/mednafen_wswan-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/mednafen_wswan-legacy-wasm.data",
+      "size": 734039,
+      "sha256": "242deda430da86e454e7283e4e6d9cb59a255f899d42feaccb377b5346ad6d40"
+    },
+    {
+      "path": "cores/mednafen_wswan-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/mednafen_wswan-thread-legacy-wasm.data",
+      "size": 749028,
+      "sha256": "1e8fd1ddfcc6167601909b15c9a5676ac5b0d737d77e5a85827f2d87fed382d6"
+    },
+    {
+      "path": "cores/mednafen_wswan-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/mednafen_wswan-thread-wasm.data",
+      "size": 749533,
+      "sha256": "eb9c60552549d44d3ce744e09961d3f2e1f18e4d7e6b8182f93f488416ec3a06"
+    },
+    {
+      "path": "cores/mednafen_wswan-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/mednafen_wswan-wasm.data",
+      "size": 734536,
+      "sha256": "c2985aa4dc1241834e3452fb421bc91dfa9d0fe2e9babe87df6313088d80120e"
+    },
+    {
+      "path": "cores/melonds-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/melonds-legacy-wasm.data",
+      "size": 1012575,
+      "sha256": "3cb010a8a9a8de2ac8b8e9c6e7e1a93e9e966cad4874d86888b2259d178865ad"
+    },
+    {
+      "path": "cores/melonds-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/melonds-thread-legacy-wasm.data",
+      "size": 1027305,
+      "sha256": "54db3235c9ac9bb8f88040150fa4adfae5caeae8210a63679a083ab6180f5c6c"
+    },
+    {
+      "path": "cores/melonds-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/melonds-thread-wasm.data",
+      "size": 1028782,
+      "sha256": "cbef64efe754057b187a0be6fc30d6cfb6d160ce9037970cf9faadf567e721d7"
+    },
+    {
+      "path": "cores/melonds-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/melonds-wasm.data",
+      "size": 1013239,
+      "sha256": "d9b31ad45aec4c11f6c1a38042cd7517812ce18719426bde0b1684bdc541dbc9"
+    },
+    {
+      "path": "cores/mgba-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/mgba-legacy-wasm.data",
+      "size": 887711,
+      "sha256": "f8ee363836f56a18a6ca4d779f0d38dd30035f8e51fa5c07ccd6987d63471d3f"
+    },
+    {
+      "path": "cores/mgba-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/mgba-thread-legacy-wasm.data",
+      "size": 902756,
+      "sha256": "a9114a78af40b0b15103c5d77a443fe1ec0cf1eeacdbc2af7017b8ae630d1b78"
+    },
+    {
+      "path": "cores/mgba-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/mgba-thread-wasm.data",
+      "size": 903368,
+      "sha256": "b73c24319b97038926ab6a8d29f4b0c5f7faac8e5abb2d285721ce98a69900bd"
+    },
+    {
+      "path": "cores/mgba-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/mgba-wasm.data",
+      "size": 888632,
+      "sha256": "d52b01c78349a0fb21a4f74e7908ea2c2faf36a40c54b13260420029b019d616"
+    },
+    {
+      "path": "cores/mupen64plus_next-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/mupen64plus_next-legacy-wasm.data",
+      "size": 1469272,
+      "sha256": "1a5950941e49af4a718f4ad8c9431e71be846b3da76a37f9016183450030b624"
+    },
+    {
+      "path": "cores/mupen64plus_next-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/mupen64plus_next-thread-legacy-wasm.data",
+      "size": 1545694,
+      "sha256": "ecf36027181d7b2af2dbf6e83169159888cc9542435083fabc5caec262bd5e12"
+    },
+    {
+      "path": "cores/mupen64plus_next-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/mupen64plus_next-thread-wasm.data",
+      "size": 1547096,
+      "sha256": "6f5a7c5ca45325cc14001553f42160f413781b78beee11ea04eeae85398da5ce"
+    },
+    {
+      "path": "cores/mupen64plus_next-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/mupen64plus_next-wasm.data",
+      "size": 1470164,
+      "sha256": "abf546e38b5683344a4e941980dd501fbc4a5bd6710c142c27acd3e096bfe92d"
+    },
+    {
+      "path": "cores/nestopia-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/nestopia-legacy-wasm.data",
+      "size": 1025666,
+      "sha256": "c58d5f477449ecf0a6294c8f9c953208c17eeb9878f3278dea68e2513ca282bc"
+    },
+    {
+      "path": "cores/nestopia-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/nestopia-thread-legacy-wasm.data",
+      "size": 1043733,
+      "sha256": "78c1246ba06c0aaacc7f4377fc3758415aa0e6ae7af58975b7f85f1ff4d530dc"
+    },
+    {
+      "path": "cores/nestopia-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/nestopia-thread-wasm.data",
+      "size": 1044030,
+      "sha256": "1c0f9d8263002749d5d039b834ff29d7c77438531098bf2cec02198563053f79"
+    },
+    {
+      "path": "cores/nestopia-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/nestopia-wasm.data",
+      "size": 1026320,
+      "sha256": "a581e23770a53eb018767977c677e87fe37567dfc007a964e660e7d7b2b4d7ff"
+    },
+    {
+      "path": "cores/opera-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/opera-legacy-wasm.data",
+      "size": 711973,
+      "sha256": "300312d71641af76caac3e7713edd2282a9b4b1ef919fdb0dbaf95eb7a2e0c9f"
+    },
+    {
+      "path": "cores/opera-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/opera-thread-legacy-wasm.data",
+      "size": 727649,
+      "sha256": "4d7004cca3a4d26b0db2731a64be4f8f613c9ddccd414aadd69647bbc9a7a640"
+    },
+    {
+      "path": "cores/opera-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/opera-thread-wasm.data",
+      "size": 728192,
+      "sha256": "3ff51643ddfe62019e894e8ea5c9d5f83ab4f42fef1838eed3fc0985b4abd3d8"
+    },
+    {
+      "path": "cores/opera-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/opera-wasm.data",
+      "size": 712603,
+      "sha256": "b1451716aafefec8c71caed24707191c841eb566398a9b2973c3d23362f3864d"
+    },
+    {
+      "path": "cores/package.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/package.json",
+      "size": 2693,
+      "sha256": "b4e81cbe374449913936d219957c1c2ef5c4248741ad984f5dc1e32dbc95a617"
+    },
+    {
+      "path": "cores/parallel_n64-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/parallel_n64-legacy-wasm.data",
+      "size": 871224,
+      "sha256": "67568bd0d38367110f9e915f804e218b449951aa16c11ab2dbb16643ed4d27cb"
+    },
+    {
+      "path": "cores/parallel_n64-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/parallel_n64-thread-legacy-wasm.data",
+      "size": 885304,
+      "sha256": "d544fbd11e975b652a1692727cde1f550ff6478291db22706f4c5e840b835ac9"
+    },
+    {
+      "path": "cores/parallel_n64-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/parallel_n64-thread-wasm.data",
+      "size": 885152,
+      "sha256": "fdd051f0ac28689132198cf1f7b21b8442938192cf9afb9dd2a2b78eea5950ef"
+    },
+    {
+      "path": "cores/parallel_n64-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/parallel_n64-wasm.data",
+      "size": 870416,
+      "sha256": "20f7567ba17ff6e6172b8dbb32c2e60071f83bb026424aa809c419514e53405f"
+    },
+    {
+      "path": "cores/pcsx_rearmed-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/pcsx_rearmed-legacy-wasm.data",
+      "size": 878857,
+      "sha256": "1b796967730997276611c85a87b00ba914ef81d3325922585bb4cb584edbbbd5"
+    },
+    {
+      "path": "cores/pcsx_rearmed-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/pcsx_rearmed-thread-legacy-wasm.data",
+      "size": 893656,
+      "sha256": "16612d5c9d20c603415c65ab499025717c4439ce61f21245d942615daa78acd6"
+    },
+    {
+      "path": "cores/pcsx_rearmed-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/pcsx_rearmed-thread-wasm.data",
+      "size": 894090,
+      "sha256": "75d367659a641630bda815141705407964e12b346071fe4dc24a34238dba1521"
+    },
+    {
+      "path": "cores/pcsx_rearmed-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/pcsx_rearmed-wasm.data",
+      "size": 879309,
+      "sha256": "92073b7c9a1b523bf3dd315c0178e209389b6bac823e04e9c3329b785f1d2a97"
+    },
+    {
+      "path": "cores/picodrive-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/picodrive-legacy-wasm.data",
+      "size": 932280,
+      "sha256": "fc890234d8fabf5d8e7272e45e6831e5a7dfbf7c6fce18b76f1aad4b3a7e0f2c"
+    },
+    {
+      "path": "cores/picodrive-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/picodrive-thread-legacy-wasm.data",
+      "size": 947067,
+      "sha256": "bda5bc94e41195be9c2c1c0897777d040e7d949a56d1191ae05b0e1544e810da"
+    },
+    {
+      "path": "cores/picodrive-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/picodrive-thread-wasm.data",
+      "size": 946946,
+      "sha256": "badd9bb2500a1ddfb5ac8fe9f70990ed4784519cbce92101fb7bff6d5862b611"
+    },
+    {
+      "path": "cores/picodrive-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/picodrive-wasm.data",
+      "size": 930962,
+      "sha256": "9a7e742a6c4034261af4962a7cbf4fdaf85501fe460b8f2064a2214088436dc3"
+    },
+    {
+      "path": "cores/ppsspp-assets.zip",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/ppsspp-assets.zip",
+      "size": 11851529,
+      "sha256": "360f2a62b4bbb3e1e29f7afbce4d635ad1f225b821b011792dcde32af410d393"
+    },
+    {
+      "path": "cores/ppsspp-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/ppsspp-thread-wasm.data",
+      "size": 4548468,
+      "sha256": "b75f51aa9c66bfb20c3b056b0dc5f9246516648786d0f0e73d636f224ff9080f"
+    },
+    {
+      "path": "cores/prboom-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/prboom-legacy-wasm.data",
+      "size": 916536,
+      "sha256": "a0ee3abf292ae6d2e3acd3b09a314f7bb2c4000921d0a74b0d941e5047a8c3e4"
+    },
+    {
+      "path": "cores/prboom-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/prboom-thread-legacy-wasm.data",
+      "size": 927615,
+      "sha256": "f473100d98363585ff6300a36d24232a232aa6d9b3e5fe5d8c47935047068a38"
+    },
+    {
+      "path": "cores/prboom-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/prboom-thread-wasm.data",
+      "size": 927592,
+      "sha256": "28044c5b1c7df1e89d28a5a02bc244f67b3ed75041d98a8a1e3b5ea5d5bbb964"
+    },
+    {
+      "path": "cores/prboom-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/prboom-wasm.data",
+      "size": 916535,
+      "sha256": "4569d040bf3b6c475b19b3b030a41196b0d1ba5973a4506e5b8b9cb28f7a4d98"
+    },
+    {
+      "path": "cores/prosystem-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/prosystem-legacy-wasm.data",
+      "size": 712676,
+      "sha256": "ab58ec86c6ee575cdfd8af328b321536c25171eb3b549bbfc9ff0f761b654e8f"
+    },
+    {
+      "path": "cores/prosystem-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/prosystem-thread-legacy-wasm.data",
+      "size": 728332,
+      "sha256": "4158a120c1704de666dabcdca80f7049e4620ffa79a514278589b76ec0f66adb"
+    },
+    {
+      "path": "cores/prosystem-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/prosystem-thread-wasm.data",
+      "size": 729096,
+      "sha256": "c0cc64c13017ca6f792493a85380ea484e9cc384df58f9e43dfa019198ab1bb2"
+    },
+    {
+      "path": "cores/prosystem-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/prosystem-wasm.data",
+      "size": 712632,
+      "sha256": "7ae8e58e47e36b48003f8a403b6b3db70a9df911c654b66b4b9c7853aaccf640"
+    },
+    {
+      "path": "cores/puae-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/puae-legacy-wasm.data",
+      "size": 3466184,
+      "sha256": "99d3c5176c995a6ce1cd6d8b7917a94eaa1a7fd47242fd3e031d0509b4a5c80c"
+    },
+    {
+      "path": "cores/puae-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/puae-thread-legacy-wasm.data",
+      "size": 3444717,
+      "sha256": "325fc5b5867eab2945a9373742015b0818e48955bf27b83599508d2f773775cf"
+    },
+    {
+      "path": "cores/puae-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/puae-thread-wasm.data",
+      "size": 3454188,
+      "sha256": "825727376dbb7fc6ab71720c4b5f433474803ba1d1e4e97c0aa54de4de193729"
+    },
+    {
+      "path": "cores/puae-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/puae-wasm.data",
+      "size": 3466473,
+      "sha256": "7d944685df7ba0c579e4d804660c4d7dc8821886d59d4927763eae5b4a61b5cf"
+    },
+    {
+      "path": "cores/reports/81.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/81.json",
+      "size": 116,
+      "sha256": "6d8ccf60b3321ae1ef7219d84adb8103d32b30fdfda9cf59e406169b7f688738"
+    },
+    {
+      "path": "cores/reports/a5200.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/a5200.json",
+      "size": 119,
+      "sha256": "fb59e5cfc8b737ae5efbc6d8e4403972af38ac02aa41b087da70fb1eee7dd53c"
+    },
+    {
+      "path": "cores/reports/azahar.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/azahar.json",
+      "size": 212,
+      "sha256": "ae7e1038a2d98910c8bc12accf6f6aa7823233697da9e0bf47cde17e18a48d40"
+    },
+    {
+      "path": "cores/reports/beetle_vb.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/beetle_vb.json",
+      "size": 123,
+      "sha256": "959d25f42d9ffa9ee110a0d87322ae009835844b9fd660a932bc7988f766e8ce"
+    },
+    {
+      "path": "cores/reports/cap32.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/cap32.json",
+      "size": 119,
+      "sha256": "7e6e190d8c656f25b5678c70122439ca0e72b209d7d91ea18865cbec71c35cbe"
+    },
+    {
+      "path": "cores/reports/crocods.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/crocods.json",
+      "size": 121,
+      "sha256": "7e1632fe0dd36e5ec592bbfc42e3a8cfb995e6d33170da067c255669dd7cf1e8"
+    },
+    {
+      "path": "cores/reports/desmume.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/desmume.json",
+      "size": 167,
+      "sha256": "b1e80840671143480b457889753d8e9b7f7553cea8b948eda039305da8a49502"
+    },
+    {
+      "path": "cores/reports/desmume2015.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/desmume2015.json",
+      "size": 171,
+      "sha256": "c378a55a6cc8e60027603d5382ef19b41b9bd538aa638c906042c05415e13af0"
+    },
+    {
+      "path": "cores/reports/dosbox_pure.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/dosbox_pure.json",
+      "size": 193,
+      "sha256": "062138590f62c48934e79298784153a1dcb6377e7e1ffc8f96582cb67d9238e2"
+    },
+    {
+      "path": "cores/reports/fbalpha2012_cps1.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/fbalpha2012_cps1.json",
+      "size": 130,
+      "sha256": "5a7ce5ce0603fb1d7c2ca60b8aa3bc3d6e3f999d5496e57fb635b82c83336b2f"
+    },
+    {
+      "path": "cores/reports/fbalpha2012_cps2.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/fbalpha2012_cps2.json",
+      "size": 130,
+      "sha256": "f62c65c60ceecf93f64ccb0256d5c6238b0ad7284a65c9c249f55d3d12653c82"
+    },
+    {
+      "path": "cores/reports/fbneo.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/fbneo.json",
+      "size": 119,
+      "sha256": "f23c487275270b74d6532297de66cb043e11c96180f6017628dc3a4fd054bc6f"
+    },
+    {
+      "path": "cores/reports/fceumm.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/fceumm.json",
+      "size": 120,
+      "sha256": "e082ff9bf4cf0b42cdf5d204d301c3fbe106e3dcae551b0aadb1e47236ce0cc7"
+    },
+    {
+      "path": "cores/reports/fuse.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/fuse.json",
+      "size": 118,
+      "sha256": "743b01300b22712419d4861771ca684dd52dbdcbf0312a051c17c6d2c0720724"
+    },
+    {
+      "path": "cores/reports/gambatte.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/gambatte.json",
+      "size": 122,
+      "sha256": "1c7eb8974b366410c4c0976c5747fd630f5c52fcb63b04156280b970309df4f0"
+    },
+    {
+      "path": "cores/reports/gearcoleco.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/gearcoleco.json",
+      "size": 124,
+      "sha256": "0f4b39b8d3754ff836f668482468285a74d748e4a2de00403a154e7ae0cc63c9"
+    },
+    {
+      "path": "cores/reports/genesis_plus_gx.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/genesis_plus_gx.json",
+      "size": 129,
+      "sha256": "dfb2c1790c4ff50ff11ee8c14352dca1f05cb3d1f0c9c397ecd05e876b434394"
+    },
+    {
+      "path": "cores/reports/handy.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/handy.json",
+      "size": 119,
+      "sha256": "a5ca3b7af65b6f4e3092afcc0391791bc5a69d21100741b2251989e31672e8d4"
+    },
+    {
+      "path": "cores/reports/mame2003.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/mame2003.json",
+      "size": 263,
+      "sha256": "6fb8383b69b9f0783e2904f1637f4ba502870460c59812b47d8fa82a94290ac6"
+    },
+    {
+      "path": "cores/reports/mame2003_plus.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/mame2003_plus.json",
+      "size": 127,
+      "sha256": "68e83cd0f73c2d2c27da8c11ce3c6a35487772044f352a3aff123f1023701dae"
+    },
+    {
+      "path": "cores/reports/mednafen_ngp.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/mednafen_ngp.json",
+      "size": 126,
+      "sha256": "8b1f3fb4352126bc4a311f6b26113e387ff4313b5e6228f282702c1b6d0e7cef"
+    },
+    {
+      "path": "cores/reports/mednafen_pce.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/mednafen_pce.json",
+      "size": 223,
+      "sha256": "4b9c705556f0c7e9a15d38ebc102048ef755b39e33c2b06d5d80458e7670815b"
+    },
+    {
+      "path": "cores/reports/mednafen_pcfx.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/mednafen_pcfx.json",
+      "size": 127,
+      "sha256": "2049b0bf2e5553be6eddbe1bdcb318bc458db34feb49e435a9a1fa73bad00ea8"
+    },
+    {
+      "path": "cores/reports/mednafen_psx_hw.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/mednafen_psx_hw.json",
+      "size": 152,
+      "sha256": "eba08b2171c37ccb0c4737ee1eac8596ec80f93620ba80ad1c7bc4fca1ccf697"
+    },
+    {
+      "path": "cores/reports/mednafen_wswan.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/mednafen_wswan.json",
+      "size": 128,
+      "sha256": "cc8b542ad8a921ff78eea2e4561c4fa69d0f377dd4474c555f68cc3eaab3ce13"
+    },
+    {
+      "path": "cores/reports/melonds.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/melonds.json",
+      "size": 167,
+      "sha256": "4f9a024850fed593a3085d4597f72f5b330ebe3e72498b231c02e7f820c354bc"
+    },
+    {
+      "path": "cores/reports/mgba.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/mgba.json",
+      "size": 118,
+      "sha256": "a9ef446a828c0d6a4897e882bc63c9da1f70a3228049e2f316a98fb3d2ed206b"
+    },
+    {
+      "path": "cores/reports/mupen64plus_next.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/mupen64plus_next.json",
+      "size": 153,
+      "sha256": "a9d3f9837dfe9e69e7b3a9516e3e00a1daee440c34854f13acf5cccaec18d838"
+    },
+    {
+      "path": "cores/reports/nestopia.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/nestopia.json",
+      "size": 122,
+      "sha256": "5a5cc1c781077db38240695035dfb12ea3faba01aa43f795267872c20cf99ec2"
+    },
+    {
+      "path": "cores/reports/opera.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/opera.json",
+      "size": 119,
+      "sha256": "e057841cddbb65f178aea11c703317d2cd45d97cf80de8b666022f3272ae318f"
+    },
+    {
+      "path": "cores/reports/parallel_n64.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/parallel_n64.json",
+      "size": 126,
+      "sha256": "c38ed4a1c4711602b6d6e370e70d000b629011efa5a498bb3c08d1f32d0a4cd3"
+    },
+    {
+      "path": "cores/reports/pcsx_rearmed.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/pcsx_rearmed.json",
+      "size": 149,
+      "sha256": "326f9ccfebbf1917c954afd5189d7daad7c44942a1bfd297c9a243be382263a6"
+    },
+    {
+      "path": "cores/reports/picodrive.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/picodrive.json",
+      "size": 123,
+      "sha256": "fca79fd0aee1db06a68f65f69aa6caaab4e7b5cb6580045306efee035afa855e"
+    },
+    {
+      "path": "cores/reports/ppsspp.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/ppsspp.json",
+      "size": 167,
+      "sha256": "5fb06b2ebe0ea33818d1af9b713e60a93b6b8c83eae266316dfc2d6aa5cffca1"
+    },
+    {
+      "path": "cores/reports/prboom.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/prboom.json",
+      "size": 120,
+      "sha256": "454fe38a9789cb47765049cf4b2ccdccc7c7acd6fdb578495ee86fa2d53e8587"
+    },
+    {
+      "path": "cores/reports/prosystem.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/prosystem.json",
+      "size": 123,
+      "sha256": "004a530f270f34a188a70ab6780f5ecfaaab421b9e768edc85739b77f6675bc5"
+    },
+    {
+      "path": "cores/reports/puae.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/puae.json",
+      "size": 141,
+      "sha256": "8911f53f4e557227837bead0e1a005902eb93fbf8fcd563c7a29304692f88a83"
+    },
+    {
+      "path": "cores/reports/same_cdi.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/same_cdi.json",
+      "size": 122,
+      "sha256": "a2dd5724e1a3f33164326f8a8da51be3ebea733e4180a98222ea4542ba4dc321"
+    },
+    {
+      "path": "cores/reports/smsplus.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/smsplus.json",
+      "size": 121,
+      "sha256": "0c22d164eb477cb9627a65c88cef36fca7b9db528f732bb7920b1be134756613"
+    },
+    {
+      "path": "cores/reports/snes9x.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/snes9x.json",
+      "size": 120,
+      "sha256": "413df00e23c3e131e17034890977a05bce4cb7ebfd370eca379bd35cdd52882e"
+    },
+    {
+      "path": "cores/reports/stella2014.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/stella2014.json",
+      "size": 124,
+      "sha256": "ea0d378d310045e0c54402249395e6c3f4e77930a97322468f92970693932f1f"
+    },
+    {
+      "path": "cores/reports/vice_x128.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/vice_x128.json",
+      "size": 146,
+      "sha256": "ef32a40b00a66dc968dea0bdb8d76ffa42b26975f5bbe434ce6155a1e78fc0e7"
+    },
+    {
+      "path": "cores/reports/vice_x64.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/vice_x64.json",
+      "size": 145,
+      "sha256": "8cb73ad8fe21d9d7a753b906504a5c89b20c1f333ae750520119480899e85a2a"
+    },
+    {
+      "path": "cores/reports/vice_x64sc.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/vice_x64sc.json",
+      "size": 147,
+      "sha256": "72e51633a74b4bd7ccb813cc0a83978fb65f0086c504c6e6c9f3e086ab6f91ea"
+    },
+    {
+      "path": "cores/reports/vice_xpet.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/vice_xpet.json",
+      "size": 123,
+      "sha256": "94a06d09511549310acf90247d5ce4345cc597e9c5bace1d4d752d7d53cb8625"
+    },
+    {
+      "path": "cores/reports/vice_xplus4.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/vice_xplus4.json",
+      "size": 125,
+      "sha256": "b8f01bb5aa85e7ce1e71b1a9e44ac61892fa3ed9bcd3bf58674649ad2be41c9f"
+    },
+    {
+      "path": "cores/reports/vice_xvic.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/vice_xvic.json",
+      "size": 123,
+      "sha256": "2472cb570c8a05fd29cb268ba65ced10360a8b2af51fff6fe3e1be4b69d046f7"
+    },
+    {
+      "path": "cores/reports/virtualjaguar.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/virtualjaguar.json",
+      "size": 127,
+      "sha256": "40732db8e7587220c286f0f56454f0460352c21d9b4c023d08c06096d5e49376"
+    },
+    {
+      "path": "cores/reports/yabause.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/reports/yabause.json",
+      "size": 121,
+      "sha256": "d4e189ad2ad85238542d874b637f181034f84e61a3915005b765a7a6c20cb6dc"
+    },
+    {
+      "path": "cores/same_cdi-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/same_cdi-legacy-wasm.data",
+      "size": 2567723,
+      "sha256": "8afc6ead3c511bb84ea9c3aad01fcad3cf7f5acec157c053b511dbcfaf5d1184"
+    },
+    {
+      "path": "cores/same_cdi-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/same_cdi-thread-legacy-wasm.data",
+      "size": 2583967,
+      "sha256": "87c39661a761bfd2a65562c41e6235554400bcf9c4a079e9d369dfae18108dea"
+    },
+    {
+      "path": "cores/same_cdi-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/same_cdi-thread-wasm.data",
+      "size": 2585146,
+      "sha256": "6720f51574670b12afb268c89dfc40c94386bc318f71ffcaddd1c0dfdee68aaa"
+    },
+    {
+      "path": "cores/same_cdi-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/same_cdi-wasm.data",
+      "size": 2568997,
+      "sha256": "e57d86ce2dcfff1f9a30228d90b9338aae0d8cac6103faabac4fc9331c10acb5"
+    },
+    {
+      "path": "cores/smsplus-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/smsplus-legacy-wasm.data",
+      "size": 712525,
+      "sha256": "634ea15df7dc07f476274797898ec44bbaed59862eb74e714a78ff967f1391c6"
+    },
+    {
+      "path": "cores/smsplus-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/smsplus-thread-legacy-wasm.data",
+      "size": 727424,
+      "sha256": "21e482c87513a01fb32578e3ed674057feebd1a109e935eb86f5bdd5dcc8b5f3"
+    },
+    {
+      "path": "cores/smsplus-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/smsplus-thread-wasm.data",
+      "size": 728262,
+      "sha256": "a60251b4903e8ff1654e37e7848600fba45fb136a2bbfa608af0781c1b031492"
+    },
+    {
+      "path": "cores/smsplus-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/smsplus-wasm.data",
+      "size": 713875,
+      "sha256": "83ed96bc567c19f4606c6585a83d778e024a41f97ddd74e58eeb3d7798ec0374"
+    },
+    {
+      "path": "cores/snes9x-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/snes9x-legacy-wasm.data",
+      "size": 908445,
+      "sha256": "ed37d84842543fe30a98f7f175e0f6cc551ef80b5185bd453ed7043fd48566b3"
+    },
+    {
+      "path": "cores/snes9x-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/snes9x-thread-legacy-wasm.data",
+      "size": 922198,
+      "sha256": "a34eb6905a33ab069a3ae8cdcd63e6ec42ac74a7486d2b97902b2b4367f78282"
+    },
+    {
+      "path": "cores/snes9x-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/snes9x-thread-wasm.data",
+      "size": 923944,
+      "sha256": "b23bc87a4538d1dae275098d458573e4d4ad900482775f612943f2c4ffea1f74"
+    },
+    {
+      "path": "cores/snes9x-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/snes9x-wasm.data",
+      "size": 908688,
+      "sha256": "fba187dcc71e7d441da94e3d3efc2f74ef3fd9972f7e4a5a60e1977a397b0f07"
+    },
+    {
+      "path": "cores/stella2014-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/stella2014-legacy-wasm.data",
+      "size": 890316,
+      "sha256": "5f79a1b48e4fa834409393fbd211c5b99c0019da8af7d0b91e2482eadf3481d7"
+    },
+    {
+      "path": "cores/stella2014-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/stella2014-thread-legacy-wasm.data",
+      "size": 905274,
+      "sha256": "a73713169aadc6064c14ec6c8c622f918f5c1e16d497cad061d3a27d94ecd273"
+    },
+    {
+      "path": "cores/stella2014-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/stella2014-thread-wasm.data",
+      "size": 905835,
+      "sha256": "dea677e6a57eda92625de720cbe8784de01ee58f6a5ecf95224d3f61e3d4e10d"
+    },
+    {
+      "path": "cores/stella2014-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/stella2014-wasm.data",
+      "size": 890097,
+      "sha256": "702e46cb8cdd4fba191d2e72c77c40d3e60f81f7aec80670d7ce6aa754b9a9fe"
+    },
+    {
+      "path": "cores/vice_x128-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/vice_x128-legacy-wasm.data",
+      "size": 1296002,
+      "sha256": "c1cf5a67197909f455e7c8d2767506b85b29b13d91f901d344537481a905f19f"
+    },
+    {
+      "path": "cores/vice_x128-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/vice_x128-thread-legacy-wasm.data",
+      "size": 1309121,
+      "sha256": "34480465e231fe8c95187ec1d921ce791f34e34817a676fb68f583eb0811d48c"
+    },
+    {
+      "path": "cores/vice_x128-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/vice_x128-thread-wasm.data",
+      "size": 1309906,
+      "sha256": "0dc630b20ba76c4548324028f3c12b738410b2e0e1480ba13b734f561d13b9f4"
+    },
+    {
+      "path": "cores/vice_x128-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/vice_x128-wasm.data",
+      "size": 1296170,
+      "sha256": "68370e991762bca7894fbb3ded7124cd964db16e35eedddc2d54a620b623a392"
+    },
+    {
+      "path": "cores/vice_x64-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/vice_x64-legacy-wasm.data",
+      "size": 1237045,
+      "sha256": "09074b79b36da26f9006f0f14479b43f5d0308fbf20f2506d64a3a2176270bab"
+    },
+    {
+      "path": "cores/vice_x64-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/vice_x64-thread-legacy-wasm.data",
+      "size": 1250349,
+      "sha256": "843c719352a7954afc54fba2c3d07da2630db55d58efb00b584a09a2ff8b8e6b"
+    },
+    {
+      "path": "cores/vice_x64-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/vice_x64-thread-wasm.data",
+      "size": 1250341,
+      "sha256": "76f9ecfca7a08a6fa1df42b4b8be1fba29e3009c62e6ea46c1484650120f1d6c"
+    },
+    {
+      "path": "cores/vice_x64-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/vice_x64-wasm.data",
+      "size": 1237300,
+      "sha256": "1dca447397545a8d788263995b28fd6a51ebf5ff21826463a9ac2f97b5c9f4df"
+    },
+    {
+      "path": "cores/vice_x64sc-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/vice_x64sc-legacy-wasm.data",
+      "size": 1226508,
+      "sha256": "afc0ac205d092d2b1abbe385c974828be326527724a82c631d37ac068d34ca07"
+    },
+    {
+      "path": "cores/vice_x64sc-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/vice_x64sc-thread-legacy-wasm.data",
+      "size": 1239913,
+      "sha256": "6789524ec76cbf1e7c6017e784981f8e118db4703571d961c6b334be11733942"
+    },
+    {
+      "path": "cores/vice_x64sc-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/vice_x64sc-thread-wasm.data",
+      "size": 1240394,
+      "sha256": "102cd7f98edfe07a0bff5e3f0b328e4fdfe664eb14e362610ace0519d45e83e3"
+    },
+    {
+      "path": "cores/vice_x64sc-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/vice_x64sc-wasm.data",
+      "size": 1226491,
+      "sha256": "0aa2c96a22a3b64bb360085193a323044a65807894741cde7dff886758af25b3"
+    },
+    {
+      "path": "cores/vice_xpet-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/vice_xpet-legacy-wasm.data",
+      "size": 1124482,
+      "sha256": "80c30e65f40756480392d9f2f11afbf204096f8e9b72d948890810f7053f9dbb"
+    },
+    {
+      "path": "cores/vice_xpet-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/vice_xpet-thread-legacy-wasm.data",
+      "size": 1138604,
+      "sha256": "d80472771e5201246c28ebf3161cd3d3af242a06e93808e730fae5036c96186f"
+    },
+    {
+      "path": "cores/vice_xpet-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/vice_xpet-thread-wasm.data",
+      "size": 1139532,
+      "sha256": "b97763c7fecfa0bb7bb602fa75d0db092cdf87481b936ca8e431c57298a37ee5"
+    },
+    {
+      "path": "cores/vice_xpet-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/vice_xpet-wasm.data",
+      "size": 1124838,
+      "sha256": "0b31203850fdefc4b74789bd8e401cea8ad6a4fb4c8b1697c8734e58b5b72e04"
+    },
+    {
+      "path": "cores/vice_xplus4-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/vice_xplus4-legacy-wasm.data",
+      "size": 1166055,
+      "sha256": "bb73981ca83b47f1390961a52fa5afe54ea86f8dc5e726d16ea8652773b24d99"
+    },
+    {
+      "path": "cores/vice_xplus4-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/vice_xplus4-thread-legacy-wasm.data",
+      "size": 1180052,
+      "sha256": "2f4a98f3dbafd368930223a4de343cd4aa8ed2f92bbebea9c534ab2867188686"
+    },
+    {
+      "path": "cores/vice_xplus4-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/vice_xplus4-thread-wasm.data",
+      "size": 1181787,
+      "sha256": "ba2b322ede784d02de4f62e34aa4608d040ab0e2f4e37cdc2fcb5253a4d88257"
+    },
+    {
+      "path": "cores/vice_xplus4-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/vice_xplus4-wasm.data",
+      "size": 1165096,
+      "sha256": "5c0989993f7cae6ef6ee74d899973c19890c30aae33a09f70b9db69b2067e0b6"
+    },
+    {
+      "path": "cores/vice_xvic-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/vice_xvic-legacy-wasm.data",
+      "size": 1138559,
+      "sha256": "e84da4635edefe405d12fce64c3fd0695c9dd5603b86197a29da0f5e5df1d192"
+    },
+    {
+      "path": "cores/vice_xvic-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/vice_xvic-thread-legacy-wasm.data",
+      "size": 1152080,
+      "sha256": "3d0c58bc7c777fdcaaf271fb44a4aed470e432aea455864a7d70b55c5e790978"
+    },
+    {
+      "path": "cores/vice_xvic-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/vice_xvic-thread-wasm.data",
+      "size": 1153151,
+      "sha256": "f04f56be7f53750cc877fa3a04b000a7590a23af158bad3e086a4564958cc73b"
+    },
+    {
+      "path": "cores/vice_xvic-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/vice_xvic-wasm.data",
+      "size": 1137765,
+      "sha256": "44b7c43691a287c8dad7e178f4cfded0e74c5df2b30ffe9966281ad7ee823d0e"
+    },
+    {
+      "path": "cores/virtualjaguar-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/virtualjaguar-legacy-wasm.data",
+      "size": 791240,
+      "sha256": "9cdb9bfbabbc2b07783139d466b88e2fbdd86a21af90fd7dc9ba7f7dcfcc1ccf"
+    },
+    {
+      "path": "cores/virtualjaguar-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/virtualjaguar-thread-legacy-wasm.data",
+      "size": 803809,
+      "sha256": "25ecf80ca4853a99ca33f365a819d8ee6952f996056e7b322d0df61a3b82df0f"
+    },
+    {
+      "path": "cores/virtualjaguar-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/virtualjaguar-thread-wasm.data",
+      "size": 804324,
+      "sha256": "0b8c3e52f598e2269e62b5c935884633f05d4208f8a3ea01679e269d943dda7e"
+    },
+    {
+      "path": "cores/virtualjaguar-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/virtualjaguar-wasm.data",
+      "size": 790183,
+      "sha256": "cb5e56c20a317a2fdf6f3f1a714dc0a250b146baf9ea3d0b71ee4721c3855aae"
+    },
+    {
+      "path": "cores/yabause-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/yabause-legacy-wasm.data",
+      "size": 808782,
+      "sha256": "0d54e45694ad685e3f96a9499c6c4905a0a530eaa44b7b0348ff6b1662d8c4b7"
+    },
+    {
+      "path": "cores/yabause-thread-legacy-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/yabause-thread-legacy-wasm.data",
+      "size": 826329,
+      "sha256": "8adb66fe5315ab78d74ead89ab93452402922b850d4ad3948557099d21effb64"
+    },
+    {
+      "path": "cores/yabause-thread-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/yabause-thread-wasm.data",
+      "size": 827128,
+      "sha256": "25c188e1d2441979807d3e00bc79dfecf499f8994f254688fb3077f96b96b00c"
+    },
+    {
+      "path": "cores/yabause-wasm.data",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/cores/yabause-wasm.data",
+      "size": 810502,
+      "sha256": "27044eaef709a766629127f35b1925f018b9b0e566afcf195e894c693d26071a"
+    },
+    {
+      "path": "emulator.css",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/emulator.css",
+      "size": 37832,
+      "sha256": "3b4b81e15cfbfa2c2dbdc7ec8d9254fdf7639d48534a4aac23f74af8df9a81d5"
+    },
+    {
+      "path": "emulator.min.css",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/emulator.min.css",
+      "size": 28854,
+      "sha256": "6c7b0ae656c00b8f5c2aabd662fa19c5fbf30119634a63782ad7567f9fb95627"
+    },
+    {
+      "path": "emulator.min.js",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/emulator.min.js",
+      "size": 483434,
+      "sha256": "b5f88bdfc57c11b76e20e7393c51e2257efde7637e48565be702e0d6590fb5ea"
+    },
+    {
+      "path": "emulator.min.js.map",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/emulator.min.js.map",
+      "size": 1112277,
+      "sha256": "b1fbaf2fc0bf792a60f8e356e3df4610d0317b4b5d1155ffef3df12fddacb5e7"
+    },
+    {
+      "path": "loader.js",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/loader.js",
+      "size": 8935,
+      "sha256": "b9c06630025602e0826e32d40d76336bfcee1a96a4cbddfc2e1d7551096bc8a1"
+    },
+    {
+      "path": "localization/README.md",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/localization/README.md",
+      "size": 3368,
+      "sha256": "829de5fd9ff54c1298aa2ef55c36680972176612fa35754f578c04a4ae27620b"
+    },
+    {
+      "path": "localization/ar.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/localization/ar.json",
+      "size": 9878,
+      "sha256": "52922a619850556c78738dce3f8f5784466e1201d69d0d4fb467a3df81cca600"
+    },
+    {
+      "path": "localization/bn.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/localization/bn.json",
+      "size": 12594,
+      "sha256": "da706dbaeb0803cffa3bd274573fef36d359e6f7ff78e7347d12bc99d3ff9d88"
+    },
+    {
+      "path": "localization/de.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/localization/de.json",
+      "size": 8776,
+      "sha256": "be3dfde02f0f4fa7ec65b598b8a4f2cd895fcdc01d434776310b64b49ff0195a"
+    },
+    {
+      "path": "localization/el.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/localization/el.json",
+      "size": 11295,
+      "sha256": "0b43c4aac9b1800c9f29e9ef549efc233a4b48086fdc891717d44a8529f3ad69"
+    },
+    {
+      "path": "localization/en.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/localization/en.json",
+      "size": 9857,
+      "sha256": "e241e358d229d9925adc8636cc4f9c060b1ae3e4efbf1f5d85cfeda1bf755f2e"
+    },
+    {
+      "path": "localization/es.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/localization/es.json",
+      "size": 9629,
+      "sha256": "2ac8cfafcd489ab9d9895416c4ab3de54db8b2505dc72630cc57993ab32fdbb4"
+    },
+    {
+      "path": "localization/fa.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/localization/fa.json",
+      "size": 10804,
+      "sha256": "a10ed4bc4a688460994643cf9589163244c97080a464c7107067be24a714de2f"
+    },
+    {
+      "path": "localization/fr.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/localization/fr.json",
+      "size": 10870,
+      "sha256": "6667529d154b95c29dca410a640c7981e2fafd7a6cf1f6086e042eea44e0357f"
+    },
+    {
+      "path": "localization/hi.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/localization/hi.json",
+      "size": 12814,
+      "sha256": "12449b8a149a20b68d1c8659d5da4f7c930b7ac7d4ba69b22c9459cff7b4a606"
+    },
+    {
+      "path": "localization/it.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/localization/it.json",
+      "size": 8741,
+      "sha256": "5c831dfb47f48c24b1e6dbbaf7d8868929421916fd3af0b348922d47dd83b5fe"
+    },
+    {
+      "path": "localization/ja.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/localization/ja.json",
+      "size": 9621,
+      "sha256": "ec0c86621867a7af615c4d845e11420e54006a777358a3fc4d327357d4a9f0d3"
+    },
+    {
+      "path": "localization/jv.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/localization/jv.json",
+      "size": 8421,
+      "sha256": "a428694b496f575fe1701a43d58699efeff58e321749999d34d34611aa7aad44"
+    },
+    {
+      "path": "localization/km.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/localization/km.json",
+      "size": 13720,
+      "sha256": "86d720d0536c83123d34bb37662ee4e27b7f4149f55faa0a60be2169a57a6e79"
+    },
+    {
+      "path": "localization/ko.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/localization/ko.json",
+      "size": 12631,
+      "sha256": "3281bed4713b1f65a04bb698190536881daf25d2f3d818e443b0ae94cd3fa1e1"
+    },
+    {
+      "path": "localization/pt.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/localization/pt.json",
+      "size": 13229,
+      "sha256": "cee0e1cee3d1545c75d8108733cdbd34537cd409eece620a74c3cd2e5f535467"
+    },
+    {
+      "path": "localization/retroarch.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/localization/retroarch.json",
+      "size": 30095,
+      "sha256": "31e0c9c1876402da54219ad6da5294eafe78e94d4663e7d2b02193d1b14925b7"
+    },
+    {
+      "path": "localization/ro.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/localization/ro.json",
+      "size": 9391,
+      "sha256": "d2907fad7d9886117fc678523ae864324a543b2e574f4af8da1b0e59be4c9e3d"
+    },
+    {
+      "path": "localization/ru.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/localization/ru.json",
+      "size": 11026,
+      "sha256": "f466956918200e65d797ccbf517fbb226c61356f984109a4024c5b0b3fc35d9c"
+    },
+    {
+      "path": "localization/tr.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/localization/tr.json",
+      "size": 8865,
+      "sha256": "1641b65c9cac31446233984f93bec180414ae87e0b7f159b5ab981cf07f6afa8"
+    },
+    {
+      "path": "localization/ua.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/localization/ua.json",
+      "size": 13352,
+      "sha256": "d715f68b13ca518f69e30bd239f5d0a1e5c4b8c20f37313c57492049eb20f1a5"
+    },
+    {
+      "path": "localization/vi.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/localization/vi.json",
+      "size": 9087,
+      "sha256": "4e837353134897c7fff19ef7b37a62c1c51eefb341c8140b951e6564f2e31bd4"
+    },
+    {
+      "path": "localization/zh.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/localization/zh.json",
+      "size": 10545,
+      "sha256": "eb7cecac255d0a539fc062448d97ae2002649338b3aff4351b5e60b1986107b9"
+    },
+    {
+      "path": "src/GameManager.js",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/src/GameManager.js",
+      "size": 20425,
+      "sha256": "d6e33a9316fe5db1c12bcdd41d83d831b602d9ac5fbc083098c44d18da5c2e7c"
+    },
+    {
+      "path": "src/cache.js",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/src/cache.js",
+      "size": 37147,
+      "sha256": "188523b25848281930b4c668aff72571466a8d25087866306047752642975c5c"
+    },
+    {
+      "path": "src/compression.js",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/src/compression.js",
+      "size": 9762,
+      "sha256": "353b470a726dfec26a89baa2d2989f70703a3e5aaf656b2dfd5543835fd0e2ea"
+    },
+    {
+      "path": "src/consts.js",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/src/consts.js",
+      "size": 1633,
+      "sha256": "e60f7d1c8af6e240c496a96648e6daf7633caa4c760b5da1d1fb9a30418cf03d"
+    },
+    {
+      "path": "src/emulator.js",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/src/emulator.js",
+      "size": 317232,
+      "sha256": "182aa14dd0f874b308220fbaa8aad66eff4a83fe4dae4163543adebfa21f9ed9"
+    },
+    {
+      "path": "src/gamepad.js",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/src/gamepad.js",
+      "size": 6042,
+      "sha256": "85fd777a46e9aa10a09a24f8c6455dc5ca0c5e2f1b2fbf66cf87e297b101b1ae"
+    },
+    {
+      "path": "src/license.js",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/src/license.js",
+      "size": 35147,
+      "sha256": "c21287c9e6f229321d03f7f8a8540a1690127d7e15958c832f49e605a5e75a53"
+    },
+    {
+      "path": "src/netplay.js",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/src/netplay.js",
+      "size": 87177,
+      "sha256": "4cf13de04948a289f34c6000d3ecec3fb0785d2240945c2a19d35c75fbe8d2d5"
+    },
+    {
+      "path": "src/setup.js",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/src/setup.js",
+      "size": 3310,
+      "sha256": "126278616a5bb4c9b0f471a9736d38ffc77e3f4437694d9801d017b114b3e17d"
+    },
+    {
+      "path": "src/shaders.js",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/src/shaders.js",
+      "size": 139571,
+      "sha256": "4596d0c6098deb58b07dc0481c0cb2ecc45603e5f555282b89902295f6380ec9"
+    },
+    {
+      "path": "src/storage.js",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/src/storage.js",
+      "size": 8251,
+      "sha256": "e4feb992cd005838b4350a9727edbd04429438e7ebf85edd3148c489b31c1c26"
+    },
+    {
+      "path": "src/utils.js",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/src/utils.js",
+      "size": 1715,
+      "sha256": "661d8c91b9726b50237215b9392ab8be746d232cb6b430df453f898ef4318414"
+    },
+    {
+      "path": "src/vendor/nipplejs.js",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/src/vendor/nipplejs.js",
+      "size": 20259,
+      "sha256": "cf745190f5dc5db942ad54f5683d56c6d6da445646f4b4fc23c049c9985a04df"
+    },
+    {
+      "path": "src/vendor/socket.io.min.js",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/src/vendor/socket.io.min.js",
+      "size": 46831,
+      "sha256": "b0e735814f8dcfecd6cdb8a7ce95a297a7e1e5f2727a29e6f5901801d52fa0c5"
+    },
+    {
+      "path": "version.json",
+      "url": "https://cdn.emulatorjs.org/4.3.0-pre/data/version.json",
+      "size": 126,
+      "sha256": "d8991427000a96fb97daefdb62178071e9bbff911760706148e584ae8d69f9e7"
+    }
+  ]
+}

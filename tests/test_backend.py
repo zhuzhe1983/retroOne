@@ -402,7 +402,7 @@ class LibraryCase(unittest.TestCase):
             self.assertIn('RetroOne-player2-', second_page)
             self.assertIn(f'player2_{game_id}_mario', second_page)
             self.assertIn(f'/p/player2/api/games/{game_id}/save-state', second_page)
-            self.assertIn('/p/player2/emulatorjs/data/loader.js', second_page)
+            self.assertRegex(second_page, r'/p/player2/emulatorjs/[0-9a-f]{20}/data/loader\.js')
 
     def test_player_identity_is_configurable_but_route_and_avatar_are_allowlisted(self):
         app = create_app(self.roms, self.config, runner=FakeRunner(), auto_scan=False)

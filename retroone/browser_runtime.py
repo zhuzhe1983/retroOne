@@ -7,6 +7,7 @@ The API must still enforce per-game configuration and firmware requirements.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -18,13 +19,14 @@ from .platforms import PLATFORMS
 
 AUTO_LIMIT = 20 * 1024**2
 DEFAULT_MAX_BYTES = 0  # No artificial size ceiling; positive operator values opt in.
-LARGE_PLATFORMS = frozenset({'gba', 'n64', 'nds', 'psx', 'psp'})
-# Match the pinned EmulatorJS 4.2.3 cores, not the native emulator's formats.
-# In particular, its PCSX-ReARMed and PPSSPP cores do not advertise CHD.
+LARGE_PLATFORMS = frozenset({'gba', 'n64', 'nds', 'psx', 'psp', '3ds'})
+# Match each installed browser runtime, not the native emulator's formats.
+# Installed disc cores are deliberately restricted to tested entry formats.
+# The 4.3.0-pre Azahar core accepts CCI/CXI cartridges, not installable CIA files.
 CARTRIDGES = {
     'nes': {'.nes', '.unf', '.unif'}, 'fds': {'.fds'},
     'snes': {'.sfc', '.smc', '.bs'}, 'gb': {'.gb'}, 'gbc': {'.gbc', '.gb'},
-    'gba': {'.gba'}, 'nds': {'.nds'}, 'n64': {'.z64', '.n64', '.v64'},
+    'gba': {'.gba'}, 'nds': {'.nds'}, '3ds': {'.3ds', '.cci', '.cxi'}, 'n64': {'.z64', '.n64', '.v64'},
     'virtualboy': {'.vb', '.vboy'}, 'megadrive': {'.md', '.gen', '.smd', '.bin'},
     'sega32x': {'.32x', '.bin'}, 'mastersystem': {'.sms'}, 'gamegear': {'.gg'},
     'atari2600': {'.a26', '.bin'}, 'atari5200': {'.a52', '.bin'},
@@ -45,14 +47,34 @@ class BrowserRuntimeError(RuntimeError):
 
 
 class BrowserRuntime:
-    def __init__(self, rom_root: Path, browser_data: Path, max_bytes: int | None = None):
+    def __init__(self, rom_root: Path, browser_data: Path, max_bytes: int | None = None,
+                 browser_3ds_data: Path | None = None):
         self.rom_root = Path(rom_root).resolve()
         self.library = self.rom_root / 'library'
         self.browser_data = Path(browser_data).resolve()
+        # The full bundle is upgraded together. An operator can optionally keep
+        # a complete separate 3DS bundle; individual core files cannot be mixed.
+        self.browser_3ds_data = Path(browser_3ds_data or os.environ.get('EMULATORJS_3DS_DATA') or
+                                     self.browser_data).resolve()
+        self._runtime_urls = {}
         value = os.environ.get('RETROONE_WASM_MAX_BYTES', str(DEFAULT_MAX_BYTES)) if max_bytes is None else max_bytes
         if isinstance(value, bool) or not re.fullmatch(r'[0-9]+', str(value)):
             raise ValueError('RETROONE_WASM_MAX_BYTES must be a non-negative integer')
         self.max_bytes = int(value)
+
+    def runtime_data(self, game: dict) -> Path:
+        return self.browser_3ds_data if game.get('platform') == '3ds' else self.browser_data
+
+    def runtime_url(self, game: dict) -> str:
+        data = self.runtime_data(game)
+        if data not in self._runtime_urls:
+            digest = hashlib.sha256()
+            for name in ('loader.js', '.retroone-runtime.json'):
+                path = data / name
+                if path.is_file():
+                    digest.update(path.read_bytes())
+            self._runtime_urls[data] = '/emulatorjs/' + digest.hexdigest()[:20] + '/data/'
+        return self._runtime_urls[data]
 
     def _path(self, value) -> Path:
         if not isinstance(value, str) or not value or '\x00' in value or '\\' in value:
@@ -152,6 +174,10 @@ class BrowserRuntime:
         platform = game.get('platform')
         definition = PLATFORMS.get(platform, {})
         core = game.get('browser_core')
+        # Existing catalog rows predate the experimental 3DS core. No rescan or
+        # automatic-mode change is needed to inspect their explicit option.
+        if core is None and definition.get('browser_experimental_only'):
+            core = definition.get('browser_core')
         if platform not in CARTRIDGES and platform not in DISC_FILES:
             raise BrowserRuntimeError('该平台尚未开放浏览器实验模式，请使用云游戏')
         if not core or core != definition.get('browser_core'):
@@ -172,15 +198,16 @@ class BrowserRuntime:
             raise BrowserRuntimeError('当前浏览器核心未支持此文件格式；光盘游戏请使用支持的独立镜像', 403)
         if max(size, unpacked) > AUTO_LIMIT and platform not in LARGE_PLATFORMS:
             raise BrowserRuntimeError('该平台的大文件尚未开放浏览器实验模式，请使用云游戏')
-        requires_threads = core == 'ppsspp'
-        core_file = self.browser_data / 'cores' / f'{core}{"-thread" if requires_threads else ""}-wasm.data'
-        if not (self.browser_data / 'loader.js').is_file() or not core_file.is_file():
+        requires_threads = core in {'ppsspp', 'azahar'}
+        data = self.runtime_data(game)
+        core_file = data / 'cores' / f'{core}{"-thread" if requires_threads else ""}-wasm.data'
+        if not (data / 'loader.js').is_file() or not core_file.is_file():
             raise BrowserRuntimeError('当前服务尚未安装该浏览器模拟器核心')
-        if core == 'ppsspp' and not (self.browser_data / 'cores' / 'ppsspp-assets.zip').is_file():
+        if core == 'ppsspp' and not (data / 'cores' / 'ppsspp-assets.zip').is_file():
             raise BrowserRuntimeError('PSP 浏览器模拟器所需资源尚未安装')
         return {'available': True, 'reason': '实验模式：完整下载后由此设备运行，兼容性和速度因游戏与设备而异',
                 'size_bytes': size, 'unpacked_bytes': unpacked, 'core': core,
-                'requires_threads': requires_threads, 'requires_webgl2': core == 'ppsspp',
+                'requires_threads': requires_threads, 'requires_webgl2': core in {'ppsspp', 'azahar'},
                 'max_bytes': self.max_bytes}, path
 
     def inspect(self, game: dict) -> dict:
@@ -189,8 +216,8 @@ class BrowserRuntime:
         except BrowserRuntimeError as error:
             core = PLATFORMS.get(game.get('platform'), {}).get('browser_core')
             return {'available': False, 'reason': str(error), 'size_bytes': None,
-                    'unpacked_bytes': None, 'core': core, 'requires_threads': core == 'ppsspp',
-                    'requires_webgl2': core == 'ppsspp', 'max_bytes': self.max_bytes}
+                    'unpacked_bytes': None, 'core': core, 'requires_threads': core in {'ppsspp', 'azahar'},
+                    'requires_webgl2': core in {'ppsspp', 'azahar'}, 'max_bytes': self.max_bytes}
 
     def require(self, game: dict) -> Path:
         return self._inspect(game)[1]

@@ -1,6 +1,7 @@
 """Experiment eligibility is independent of automatic mode and trusts live files."""
 import copy
 import json
+import re
 from pathlib import Path
 import stat
 import zipfile
@@ -187,3 +188,59 @@ def test_default_is_unlimited_and_positive_admin_limits_are_not_clamped(fixture,
     assert runtime.require(game) == path and runtime.inspect(game)['max_bytes'] == 0
     limited = BrowserRuntime(runtime.rom_root, runtime.browser_data, max_bytes=1024**3)
     assert not limited.inspect(game)['available']
+
+
+def test_3ds_experiment_uses_complete_threaded_runtime_and_old_catalog_rows(fixture):
+    runtime, make = fixture
+    game, path = make('3ds', '.cci', 917 * MIB)
+    game['browser_core'] = None  # Stored before Azahar WASM was introduced.
+    before = copy.deepcopy(game)
+    assert not runtime.inspect(game)['available']
+    data = runtime.browser_3ds_data
+    (data / 'cores').mkdir(parents=True, exist_ok=True)
+    (data / 'loader.js').write_text('// official 4.3.0-pre fixture')
+    (data / 'cores/azahar-thread-wasm.data').touch()
+    view = runtime.inspect(game)
+    assert view['available'] and view['core'] == 'azahar'
+    assert view['requires_threads'] and view['requires_webgl2']
+    assert runtime.require(game) == path
+    assert runtime.runtime_data(game) == data
+    assert re.fullmatch('/emulatorjs/[0-9a-f]{20}/data/', runtime.runtime_url(game))
+    assert runtime.runtime_url(game) == runtime.runtime_url({'platform': 'nes'})
+    assert game == before and game['mode'] == 'stream'
+    assert PLATFORMS['3ds']['browser_experimental_only']
+    assert str(data) not in json.dumps(view)
+    game['browser_core'] = 'ppsspp'
+    assert not runtime.inspect(game)['available']
+
+
+@pytest.mark.parametrize('suffix', ['.cia', '.7z', '.iso', '.elf'])
+def test_3ds_rejects_formats_outside_supported_cartridges(fixture, suffix):
+    runtime, make = fixture
+    game, _ = make('3ds', suffix, 10 * MIB)
+    data = runtime.browser_3ds_data
+    (data / 'cores').mkdir(parents=True, exist_ok=True)
+    (data / 'loader.js').touch()
+    (data / 'cores/azahar-thread-wasm.data').touch()
+    assert not runtime.inspect(game)['available']
+
+
+def test_3ds_runtime_can_be_explicitly_selected_without_changing_stable_platforms(fixture, tmp_path, monkeypatch):
+    runtime, make = fixture
+    selected = tmp_path / 'explicit-pre/data'
+    monkeypatch.setenv('EMULATORJS_3DS_DATA', str(selected))
+    other = BrowserRuntime(runtime.rom_root, runtime.browser_data)
+    assert other.runtime_data({'platform': '3ds'}) == selected.resolve()
+    assert other.runtime_data({'platform': 'gba'}) == runtime.browser_data
+    assert other.runtime_url({'platform': 'gba'}) == runtime.runtime_url({'platform': 'gba'})
+    direct = tmp_path / 'explicit-argument/data'
+    assert BrowserRuntime(runtime.rom_root, runtime.browser_data, browser_3ds_data=direct).browser_3ds_data == direct.resolve()
+
+
+def test_runtime_upgrade_changes_asset_namespace_for_entire_bundle(fixture):
+    runtime, _ = fixture
+    previous = runtime.runtime_url({'platform': 'nes'})
+    (runtime.browser_data / '.retroone-runtime.json').write_text('{"lock_sha256":"changed"}')
+    upgraded = BrowserRuntime(runtime.rom_root, runtime.browser_data)
+    assert upgraded.runtime_url({'platform': 'nes'}) != previous
+    assert upgraded.runtime_url({'platform': 'nes'}) == upgraded.runtime_url({'platform': '3ds'})

@@ -22,6 +22,11 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 LOCK = ROOT / 'container/runtime-lock.json'
+BROWSER_LOCK = ROOT / 'container/browser-runtime-lock.json'
+try:
+    from scripts import browser_runtime_assets as browser_assets
+except ModuleNotFoundError:  # Direct execution: python scripts/fetch_runtime.py
+    import browser_runtime_assets as browser_assets
 ASSETS = {
     'Eden-0.2.1.AppImage': 'eden.AppImage',
     'pcsx2-2.8.2.AppImage': 'pcsx2.AppImage',
@@ -131,50 +136,97 @@ def materialize(paths, entries, vendor):
         if not (vendor / 'emulatorjs/data/loader.js').is_file(): raise ValueError('Missing EmulatorJS loader after extraction')
 
 
-def create_bundle(target, lock_path, entries, vendor):
-    inputs = {'runtime-lock.json': lock_path}
+def create_bundle(target, lock_path, entries, vendor, *, browser_lock_path=None, browser_paths=None):
+    inputs = {'runtime-lock.json': lock_path} if entries else {}
     for name, entry in entries.items():
         path = cache_path(vendor, name); verify(path, entry['sha256']); inputs['archives/' + name] = path
+    if browser_lock_path is not None:
+        browser_bytes = browser_lock_path.read_bytes()
+        inputs['browser-runtime-lock.json'] = browser_lock_path
+        for entry in browser_assets.validate_lock(json.loads(browser_bytes)):
+            path = browser_paths[entry['path']]
+            browser_assets.verify(path, entry)
+            inputs['browser/' + entry['path']] = path
+    if not inputs: raise ValueError('Cannot create an empty private runtime bundle')
+    browser_assets.no_links(target)
     target.parent.mkdir(parents=True, exist_ok=True)
-    with target.open('wb') as raw, gzip.GzipFile(fileobj=raw, filename='', mode='wb', mtime=0) as compressed, tarfile.open(fileobj=compressed, mode='w', format=tarfile.USTAR_FORMAT) as archive:
-        for name, path in sorted(inputs.items()):
-            info = tarfile.TarInfo(name); info.size = path.stat().st_size; info.mode = 0o644; info.mtime = 0
-            with path.open('rb') as stream: archive.addfile(info, stream)
+    descriptor, temporary_name = tempfile.mkstemp(prefix='.runtime-bundle-', dir=target.parent)
+    import os
+    os.close(descriptor)
+    temporary = Path(temporary_name)
+    try:
+        with temporary.open('wb') as raw, gzip.GzipFile(fileobj=raw, filename='', mode='wb', mtime=0) as compressed, tarfile.open(fileobj=compressed, mode='w', format=tarfile.USTAR_FORMAT) as archive:
+            for name, path in sorted(inputs.items()):
+                info = tarfile.TarInfo(name); info.size = path.stat().st_size; info.mode = 0o644; info.mtime = 0
+                with path.open('rb') as stream: archive.addfile(info, stream)
+        temporary.replace(target)
+    finally: temporary.unlink(missing_ok=True)
     target.with_suffix(target.suffix + '.sha256').write_text(digest(target) + '  ' + target.name + '\n')
 
 
-def restore_bundle(bundle, lock_path, entries, vendor):
-    allowed = {'runtime-lock.json'} | {'archives/' + name for name in entries}
+def restore_bundle(bundle, lock_path, entries, vendor, *, browser_lock_path=None):
+    allowed = ({'runtime-lock.json'} | {'archives/' + name for name in entries}) if entries else set()
+    browser_bytes = browser_lock_path.read_bytes() if browser_lock_path is not None else None
+    browser_entries = browser_assets.validate_lock(json.loads(browser_bytes)) if browser_bytes is not None else []
+    if browser_bytes is not None: allowed |= {'browser-runtime-lock.json'} | {'browser/' + entry['path'] for entry in browser_entries}
     with tarfile.open(bundle, 'r:gz') as archive:
         members = []
         for member in archive:
             members.append(member)
             if len(members) > len(allowed): raise ValueError('Unexpected private bundle entries')
-        if len(members) != len(allowed) or {member.name for member in members} != allowed: raise ValueError('Unexpected, missing or duplicate private bundle entries')
+        if len(members) != len(allowed) or {member.name for member in members} != allowed: raise ValueError('Unexpected, missing or duplicate private bundle entries; match --browser-only/--native-only to the bundle')
         if any(not member.isfile() or member.size > MAX_ASSET_BYTES for member in members): raise ValueError('Unsafe private bundle member')
-        if archive.extractfile('runtime-lock.json').read() != lock_path.read_bytes(): raise ValueError('Private bundle belongs to another reviewed lock')
+        if entries and archive.extractfile('runtime-lock.json').read() != lock_path.read_bytes(): raise ValueError('Private bundle belongs to another reviewed lock')
+        if browser_bytes is not None and archive.extractfile('browser-runtime-lock.json').read() != browser_bytes: raise ValueError('Private bundle belongs to another reviewed browser lock')
         for name, entry in entries.items():
             data = archive.extractfile('archives/' + name).read()
             if hashlib.sha256(data).hexdigest() != entry['sha256']: raise ValueError('Private bundle checksum mismatch: ' + name)
             write_atomic(cache_path(vendor, name), data)
+        for entry in browser_entries:
+            member = archive.getmember('browser/' + entry['path'])
+            if member.size != entry['size']: raise ValueError('Private browser bundle size mismatch')
+            data = archive.extractfile(member).read()
+            if hashlib.sha256(data).hexdigest() != entry['sha256']: raise ValueError('Private browser bundle checksum mismatch')
+            browser_assets.write_atomic(browser_assets.cache_root(vendor, browser_bytes) / entry['path'], data)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--lock', type=Path, default=LOCK)
+    parser.add_argument('--browser-lock', type=Path, default=BROWSER_LOCK)
     parser.add_argument('--vendor-root', type=Path, default=ROOT / 'vendor')
+    scope = parser.add_mutually_exclusive_group()
+    scope.add_argument('--browser-only', action='store_true', help='Prepare only the pinned browser runtime')
+    scope.add_argument('--native-only', action='store_true', help='Prepare only native assets; also supports matching historical native bundles')
+    parser.add_argument('--browser-source', type=Path, help='Seed exact browser files from an already downloaded data directory')
     parser.add_argument('--offline', action='store_true')
-    parser.add_argument('--verify-only', action='store_true', help='Validate existing archives without extraction or network')
+    parser.add_argument('--verify-only', action='store_true', help='Validate existing reviewed cache without network or runtime activation')
     parser.add_argument('--create-bundle', type=Path, help='Private local backup only; never attach to a public release')
-    parser.add_argument('--from-bundle', type=Path, help='Restore archives into a clean vendor root from a private backup')
+    parser.add_argument('--from-bundle', type=Path, help='Restore reviewed assets into a clean vendor root from a private backup')
     args = parser.parse_args()
-    original = args.lock.read_bytes(); entries = records(json.loads(original))
-    if args.from_bundle: restore_bundle(args.from_bundle, args.lock, entries, args.vendor_root)
+    original = args.lock.read_bytes() if not args.browser_only else None
+    entries = records(json.loads(original)) if original is not None else {}
+    browser_original = args.browser_lock.read_bytes() if not args.native_only else None
+    if browser_original is not None: browser_assets.validate_lock(json.loads(browser_original))
+    browser_lock_path = args.browser_lock if browser_original is not None else None
+    if args.from_bundle: restore_bundle(args.from_bundle, args.lock, entries, args.vendor_root, browser_lock_path=browser_lock_path)
     with ThreadPoolExecutor(max_workers=4) as pool:
         paths = dict(pool.map(lambda item: fetch_one(args.vendor_root, item[0], item[1], args.offline or args.verify_only), entries.items()))
-    if args.create_bundle: create_bundle(args.create_bundle, args.lock, entries, args.vendor_root)
-    if not args.verify_only: materialize(paths, entries, args.vendor_root)
-    if args.lock.read_bytes() != original: raise ValueError('Runtime lock changed unexpectedly')
-    print(json.dumps({'assets_verified': len(paths), 'lock_sha256': hashlib.sha256(original).hexdigest(), 'vendor_root': str(args.vendor_root), 'materialized': not args.verify_only, 'distribution': 'private-local-only'}))
+    browser_paths = browser_assets.prepare_cache(args.vendor_root, browser_original, offline=args.offline,
+        source=args.browser_source, verify_only=args.verify_only) if browser_original is not None else {}
+    if args.create_bundle:
+        create_bundle(args.create_bundle, args.lock, entries, args.vendor_root,
+            browser_lock_path=browser_lock_path, browser_paths=browser_paths)
+    activated = None
+    if not args.verify_only:
+        materialize(paths, entries, args.vendor_root)
+        if browser_original is not None: activated = browser_assets.materialize(args.vendor_root, browser_original, browser_paths)
+    if original is not None and args.lock.read_bytes() != original: raise ValueError('Runtime lock changed unexpectedly')
+    if browser_original is not None and args.browser_lock.read_bytes() != browser_original: raise ValueError('Browser runtime lock changed unexpectedly')
+    print(json.dumps({'assets_verified': len(paths), 'browser_files_verified': len(browser_paths),
+        'lock_sha256': hashlib.sha256(original).hexdigest() if original is not None else None,
+        'browser_lock_sha256': hashlib.sha256(browser_original).hexdigest() if browser_original is not None else None,
+        'vendor_root': str(args.vendor_root), 'materialized': not args.verify_only,
+        'browser_activation': activated, 'distribution': 'private-local-only'}))
 
 if __name__ == '__main__': main()

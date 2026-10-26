@@ -27,9 +27,9 @@ function harness() {
 }
 async function available(h) {
   const read=h.ctx.loadDownloadOptions(h.game);
-  h.pending.at(-1).resolve({available:true,size_bytes:2**41,manifest_url:'/p/player1/api/games/large/download-manifest'});await read;
+  h.pending.at(-1).resolve({available:true,browser_launchable:true,size_bytes:2**41,manifest_url:'/p/player1/api/games/large/download-manifest'});await read;
 }
-test('download availability is independent from emulator compatibility and accepts a multi-terabyte size', async()=>{
+test('browser-compatible download UI accepts a multi-terabyte size independently of default launch mode', async()=>{
   const h=harness();await available(h);
   await h.ctx.downloadGame(h.game);
   assert.deepEqual(h.calls,['/api/games/large/download-options']);
@@ -81,7 +81,7 @@ test('the manager and advanced launch settings use one device sharing preference
     window:{RetroRomLibrary:{setSharing:value=>manager.push(value)}},renderDownloads:()=>{},downloadMessage:()=>{},errorMessage:e=>e.message});
   install(ctx,'setBrowserP2PPreference');ctx.setBrowserP2PPreference(false);
   assert.deepEqual(manager,[false]);assert.deepEqual(saved,[['retroone:browser-p2p','false']]);
-  const rendered=[];ctx.state.detailOpen=true;ctx.state.selected={id:'g'};ctx.renderLaunchChoices=g=>rendered.push(g.id);ctx.updateDeviceCacheBadges=()=>{};
+  const rendered=[];ctx.state.detailOpen=true;ctx.state.selected={id:'g'};ctx.renderLaunchChoices=g=>rendered.push(g.id);ctx.updateDeviceCacheBadges=()=>{};ctx.renderDownloadOverview=()=>{};
   install(ctx,'receiveDownloadSnapshot');ctx.receiveDownloadSnapshot({sharing:true,directory:{supported:true,permission:'granted'},entries:[]});
   assert.equal(ctx.state.browserP2P,true);assert.deepEqual(rendered,['g']);assert.equal(manager.length,1,'snapshot updates do not loop back into the manager');
 });
@@ -141,4 +141,38 @@ test('paused complete files remain downloaded while restored unchecked files wai
   assert.equal(ctx.deviceCacheLabel(states.get('verified'),true),'已下载');
   assert.equal(ctx.deviceCacheLabel(states.get('verified')),'已下载到此设备 · 分享已暂停');
   assert.equal(ctx.deviceCacheLabel(states.get('restored')),'缓存待校验');
+});
+
+
+test('download overview counts only active incomplete transfers and keeps completed seeding out of progress',()=>{
+  const ctx=vm.createContext({});install(ctx,'downloadOverview');
+  assert.deepEqual(plain(ctx.downloadOverview({entries:[
+    {size:100,received:40,status:'downloading'}, {size:300,received:60,status:'verifying'},
+    {size:500,received:500,status:'sharing',complete:true}, {size:50,status:'paused'}, {status:'permission'},
+  ]})),{active:2,total:5,attention:1,percent:25});
+  assert.deepEqual(plain(ctx.downloadOverview(null)),{active:0,total:0,attention:0,percent:0});
+});
+
+test('closing the download manager leaves the job owner intact and returns focus to the game control',()=>{
+  const calls=[],button={isConnected:true,focus:()=>calls.push('focus')};
+  const ctx=vm.createContext({state:{downloadReturn:button,downloadFromSelf:false,downloadPending:null},
+    $:()=>({close:()=>calls.push('close')}),syncModalBody:()=>{},window:{RetroRomLibrary:{pauseAll:()=>assert.fail('closing UI must not cancel downloads')}}});
+  install(ctx,'closeDownloads');ctx.closeDownloads();assert.deepEqual(calls,['close','focus']);
+});
+
+
+test('download completion never implies WASM compatibility',()=>{
+  const ctx=vm.createContext({state:{profileEpoch:3,downloadSupport:new Map()},t:s=>s});install(ctx,'downloadSupportLabel');
+  const entry={gameId:'3ds',complete:true,status:'sharing'};
+  assert.match(ctx.downloadSupportLabel(entry),/不代表/);
+  ctx.state.downloadSupport.set('3:3ds',{data:{browser_launchable:false}});assert.match(ctx.downloadSupportLabel(entry),/暂不支持/);
+  ctx.state.downloadSupport.set('3:3ds',{data:{browser_launchable:true}});assert.match(ctx.downloadSupportLabel(entry),/^支持浏览器/);
+});
+
+
+test('games without browser support cannot start a new UI download even when the file endpoint is available',async()=>{
+  const h=harness();const read=h.ctx.loadDownloadOptions(h.game);
+  h.pending[0].resolve({available:true,browser_launchable:false,manifest_url:'/p/player1/api/games/large/download-manifest'});await read;
+  h.ctx.state.downloadSnapshot.directory.permission='granted';await h.ctx.downloadGame(h.game);
+  assert.equal(h.added.length,0);assert.equal(h.ctx.state.downloadPending,null);
 });

@@ -105,7 +105,7 @@ test('HTTP downloads a complete file before loading EmulatorJS and never starts 
     await h.controller.start();
     assert.equal(h.controller.phase,'running');assert.equal(h.clients.length,0);
     assert.equal(h.env.EJS_gameUrl.name,'abc123.nds');assert.equal(h.env.EJS_gameUrl.size,64);
-    assert.equal(h.env.EJS_CacheLimit,0);assert.equal(h.env.EJS_gameName,'original-save-identity');assert.equal(h.env.EJS_gameID,77);
+    assert.equal(h.env.EJS_CacheLimit,0);assert.deepEqual(h.env.EJS_cacheConfig,{enabled:false});assert.equal(h.env.EJS_gameName,'original-save-identity');assert.equal(h.env.EJS_gameID,77);
     assert.deepEqual(h.scripts,['https://retro.example/emulatorjs/data/loader.js']);
     assert.equal(new URL(h.requests[0].url).searchParams.get('transport'),'http');
     assert.equal(h.controller.snapshot().http_bytes,64);assert.equal(h.intervals.size,0);
@@ -304,13 +304,41 @@ test('browser launch uses the parent-owned verified disk File without re-downloa
   }finally{h.controller.cancel(false);}
 });
 
-test('automatic browser launch reuses an existing disk cache but never downloads an uncached game through the library',async()=>{
+test('automatic browser launch populates the authorized shared directory on its first launch and reuses existing cache',async()=>{
   for(const known of [true,false]){
     const h=harness(),disk=attachLibrary(h,{known});h.controller.config.cachedOnly=true;h.env.EJS_gameUrl='/original/rom';
     try {
-      await h.controller.start();assert.equal(h.controller.phase,'running');assert.equal(h.requests.length,known?1:0);
-      assert.equal(h.env.EJS_gameUrl,known?disk.file:'/original/rom');assert.equal(disk.calls.length,known?2:0);assert.equal(h.clients.length,0);
+      await h.controller.start();assert.equal(h.controller.phase,'running');assert.equal(h.requests.length,1);
+      assert.equal(h.env.EJS_gameUrl,disk.file);assert.equal(disk.calls.length,2);assert.equal(h.clients.length,0);
+      assert.equal(new URL(h.requests[0].url).pathname,'/p/player2/api/games/abc/download-manifest');
+      assert.equal(disk.calls[0].gameId,'abc');assert.equal(disk.calls[0].profileId,'player2');
       assert.deepEqual(h.scripts,['https://retro.example/emulatorjs/data/loader.js']);
+    }finally{h.controller.cancel(false);}
+  }
+});
+
+test('automatic launch without an authorized directory leaves the temporary upstream path explicit and does not claim disk reuse',async()=>{
+  for(const permission of ['unselected','prompt','denied','unsupported']){
+    const h=harness(),disk=attachLibrary(h,{permission});h.controller.config.cachedOnly=true;h.env.EJS_gameUrl='/p/player2/api/games/abc/rom/demo.nds';
+    try{
+      await h.controller.start();assert.equal(h.controller.phase,'running');assert.equal(h.requests.length,0);assert.equal(disk.calls.length,0);
+      assert.equal(h.env.EJS_gameUrl,'/p/player2/api/games/abc/rom/demo.nds');assert.equal(h.env.EJS_CacheLimit,undefined);assert.equal(h.env.EJS_cacheConfig,undefined);
+    }finally{h.controller.cancel(false);}
+  }
+});
+
+test('automatic and explicit cached ZIP launches normalize only their emulator view and preserve save identity',async()=>{
+  const zip=require('./test_rom_zip_view.cjs');
+  for(const cachedOnly of [true,false]){
+    const file=zip.fixture(),original=Buffer.from(await file.arrayBuffer());
+    const h=harness({fetch:async()=>({ok:true,status:200,json:async()=>({...fixture(),name:file.name,size:file.size})})});
+    attachLibrary(h,{ensure:async()=>file});Object.assign(h.controller.config,{cachedOnly,normalizedRomName:'generated.gba'});
+    h.env.EJS_gameName='player2-personal-save';h.env.EJS_gameID=456;
+    try{
+      await h.controller.start();assert.equal(h.controller.phase,'running');
+      assert.equal((await zip.inspect(h.env.EJS_gameUrl)).name,'generated.gba');
+      assert.deepEqual(Buffer.from(await file.arrayBuffer()),original);assert.notEqual(h.env.EJS_gameUrl,file);
+      assert.equal(h.env.EJS_gameName,'player2-personal-save');assert.equal(h.env.EJS_gameID,456);
     }finally{h.controller.cancel(false);}
   }
 });

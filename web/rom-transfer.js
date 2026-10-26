@@ -17,6 +17,8 @@
     manifest: ['正在检查游戏文件…', 'Checking the game file…'],
     hashing: ['服务器正在准备文件分片…', 'The server is preparing file pieces…'],
     cached: ['正在读取这台设备上的游戏文件…', 'Reading the game file saved on this device…'],
+    'storage-choice': ['下载前，请先选择保存位置。固定目录可供下次直接读取，无需重复下载。', 'Choose where to save before downloading. A fixed folder lets you reuse the file next time.'],
+    chooseStorage: ['返回游戏库选择保存位置', 'Choose a save location in the library'],
     persistent: ['当前浏览器无法使用持久游戏缓存。请选择可用的下载目录或云游戏；临时下载不会在下次启动复用。', 'Persistent game storage is unavailable. Choose an accessible download directory or cloud gaming. Temporary downloads are not reused next time.'],
     temporaryLoading: ['当前浏览器无法保留游戏文件，本次临时加载。', 'This browser cannot retain game files. This launch uses a temporary download.'],
     temporary: ['本次使用临时下载，退出后下次需要重新下载。', 'This is a temporary download. The next launch will download the file again.'],
@@ -29,10 +31,10 @@
     retry: ['重试下载', 'Retry download'],
     http: ['改用 HTTP 下载', 'Use HTTP download'],
     failed: ['下载未完成', 'Download did not finish'],
-    fallback: ['没有其他浏览器时，会从 NAS 的 HTTP 节点下载。', 'Without other browser peers, the NAS HTTP node supplies the download.'],
-    direct: ['已改为从 NAS 直接下载，仍将在浏览器运行。', 'Downloading directly from the NAS. The game will still run in your browser.'],
+    fallback: ['没有其他设备分享时，会从服务器下载。', 'When no other devices are sharing, the server supplies the download.'],
+    direct: ['已改为从服务器直接下载，仍将在浏览器运行。', 'Downloading directly from the server. The game will still run in your browser.'],
     hint: ['完整下载后才开始模拟；游戏运行时会占用更多内存。', 'Emulation starts after the full download and uses additional memory.'],
-    server: ['NAS HTTP', 'NAS HTTP'],
+    server: ['服务器', 'Server'],
     peer: ['浏览器互传', 'Browser peers'],
     peers: ['连接设备', 'Peers'],
     upload: ['已分享', 'Shared'],
@@ -241,8 +243,14 @@
       const cancel = button(this.text('cancel'), () => this.cancel());
       const retry = button(this.text('retry'), () => this.start(this.config.transport)); retry.hidden = true;
       const http = button(this.text('http'), () => this.start('http')); http.hidden = true;
+      const storage = doc.createElement('a'); storage.textContent = this.text('chooseStorage'); storage.style.cssText = cancel.style.cssText;
+      const destination = new URL('/', this.env.location.href);
+      if (this.config.profileId) destination.searchParams.set('player', this.config.profileId);
+      if (this.config.gameId) destination.searchParams.set('game', this.config.gameId);
+      destination.searchParams.set('view', 'detail');
+      storage.href = destination.href; storage.target = '_top'; storage.hidden = true; actions.append(storage);
       panel.append(title, detail, progress, stats, hint, actions); game.replaceChildren(panel);
-      this.ui = {panel, title, detail, progress, stats, hint, cancel, retry, http};
+      this.ui = {panel, title, detail, progress, stats, hint, cancel, retry, http, storage};
     }
     update() {
       const size = this.manifest?.size || 0, stats = this.stats.snapshot();
@@ -287,6 +295,13 @@
       const detail = {type: 'retroone:rom-transfer-error', code, gameId: this.config.gameId || null, profileId: this.config.profileId || null};
       try { if (this.env.parent && this.env.parent !== this.env) this.env.parent.postMessage(detail, new URL(this.env.location.href).origin); } catch {}
     }
+    showStorageChoice() {
+      if (this.failure !== 'storage-choice' || !this.ui) return;
+      this.ui.title.textContent = this.text('prepare');
+      this.ui.retry.hidden = true; this.ui.http.hidden = true;
+      this.ui.progress.hidden = true; this.ui.stats.hidden = true; this.ui.hint.hidden = true;
+      this.ui.storage.hidden = false;
+    }
     async diskLibrary() {
       // A one-off transfer is opt-in only. Missing permission or storage must
       // never silently turn a persistent download into another full download.
@@ -297,7 +312,10 @@
       if (!library || !this.config.gameId) throw error('persistent');
       try { await library.init(); } catch (problem) { throw transferError(problem, 'persistent'); }
       const directory = library.snapshot().directory;
-      if (directory.permission === 'granted') return library;
+      if (directory.permission === 'granted') {
+        if (directory.selection_required === true) throw error('storage-choice');
+        return library;
+      }
       // Preserve the small-ROM automatic path only when the manager has proved
       // capability absence without a saved external location. Quota, denied
       // access and uncertain metadata errors are never temporary fallbacks.
@@ -398,6 +416,7 @@
         this.reportFailure(this.failure || transferError(problem, 'invalid').transferCode || 'network');
         this.ui.title.textContent = this.text('failed'); this.ui.detail.textContent = this.text(this.failure);
         this.ui.cancel.hidden = true; this.ui.retry.hidden = false;
+        this.showStorageChoice();
       }
     }
     async start(transport = this.config.transport, fallbackFrom = null) {
@@ -464,6 +483,7 @@
         this.ui.title.textContent = this.text('failed');
         this.ui.detail.textContent = this.text(code || 'network');
         this.ui.cancel.hidden = true; this.ui.retry.hidden = false; this.ui.http.hidden = true;
+        this.showStorageChoice();
       }
     }
     async downloadHTTP(manifest, epoch) {

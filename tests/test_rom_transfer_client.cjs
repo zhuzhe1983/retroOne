@@ -402,3 +402,19 @@ test('temporary capability fallback is per launch and disappears after storage i
   available=true;await h.controller.start();assert.equal(h.controller.phase,'running');assert.equal(h.controller.snapshot().temporary,false);assert.equal(h.env.EJS_gameUrl,d.file);assert.equal(h.env.document.getElementById('rom-temporary-notice').isConnected,false);
  }finally{h.controller.cancel(false);}
 });
+
+
+test('direct play URLs wait for storage choice before any manifest, ROM, peer, or emulator request',async()=>{
+  for(const cachedOnly of [true,false]){
+    const h=harness({transport:'p2p'}), d=attachLibrary(h);h.controller.config.cachedOnly=cachedOnly;
+    let selected=false;d.library.snapshot=()=>({directory:{permission:'granted',selection_required:!selected},entries:[]});
+    try {
+      await h.controller.start();assert.equal(h.controller.phase,'error');assert.equal(h.controller.snapshot().error,'storage-choice');
+      assert.equal(h.requests.length,0);assert.equal(h.scripts.length,0);assert.equal(h.clients.length,0);
+      assert.equal(h.controller.ui.storage.hidden,false);assert.equal(h.controller.ui.retry.hidden,true);
+      const destination=new URL(h.controller.ui.storage.href);
+      assert.equal(destination.origin,new URL(h.env.location.href).origin);assert.equal(destination.searchParams.get('game'),'abc');
+      selected=true;await h.controller.start();assert.equal(h.controller.phase,'running');
+    } finally {h.controller.cancel(false);}
+  }
+});

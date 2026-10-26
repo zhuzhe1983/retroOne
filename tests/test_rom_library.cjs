@@ -11,7 +11,7 @@ function setup({directory=new Directory(),persistence,locks=new Map(),sharing=fa
  persistence=persistence||{async load(){return saved;},async save(value){saved={...value,entries:value.entries.map(x=>({...x}))};}};
  const env={isSecureContext:true,indexedDB:{},location:{href:'https://retro.example/',origin:'https://retro.example'},crypto:{randomUUID:()=>`unique-${++uuidSerial}`},AbortController,RTCPeerConnection:class{},
   localStorage:{getItem:()=>String(sharing),setItem(){}},showDirectoryPicker:async()=>directory,
-  navigator:{locks:{async request(name,options,callback){if(options.ifAvailable&&locks.has(name))return callback(null);while(locks.has(name))await locks.get(name);let release;locks.set(name,new Promise(resolve=>release=resolve));try{return await callback({name});}finally{locks.delete(name);release();}}}},
+  navigator:{locks:{async request(name,options,callback){const shared=options.mode==='shared',blocked=()=>locks.has(name)&&!(shared&&locks.get(name).shared);if(options.ifAvailable&&blocked())return callback(null);while(blocked())await locks.get(name);let held=locks.get(name);if(!held){let release;held=new Promise(resolve=>release=resolve);Object.assign(held,{shared,count:0,release});locks.set(name,held);}held.count++;try{return await callback({name});}finally{if(--held.count===0){locks.delete(name);held.release();}}}}},
   addEventListener:(name,callback)=>{listeners[name]=callback;},setTimeout,clearTimeout,
   setInterval:fn=>{const id=++serial;timers.set(id,fn);return id;},clearInterval:id=>timers.delete(id),atob:value=>Buffer.from(value,'base64').toString('binary'),
   fetch:fetch||(async()=>({ok:true,status:200,json:async()=>fixture()})),RetroRomDirectoryStore:DirectoryStore};
@@ -27,6 +27,7 @@ function setup({directory=new Directory(),persistence,locks=new Map(),sharing=fa
      try{actual=await new Promise((resolve,reject)=>this.store.get(i,(error,value)=>error?reject(error):resolve(value)));}catch{}
      if(!actual||!Buffer.from(actual).equals(Buffer.from(wanted))){this.downloaded+=wanted.length;await new Promise((resolve,reject)=>this.store.put(i,wanted,error=>error?reject(error):resolve()));}
      torrent.downloaded+=wanted.length;
+    if(managerOptions.afterPiece)await managerOptions.afterPiece(i,this);
     }
     torrent.done=true;ready(torrent);torrent.emit('done');
    }catch(error){torrent.emit('error',error);}});return torrent;
@@ -126,8 +127,8 @@ test('external modification stops seeding and resume verifies and repairs the af
 test('metadata commits preserve other tabs entries and cannot revert a directory change',async()=>{
  const first=setup();await first.manager.chooseDirectory();
  const second=setup({directory:first.directory,persistence:first.persistence,locks:first.locks});await second.manager.init();
- first.manager.entries.set('one',{id:'one',status:'paused',paused:true});await first.manager.persist();
- second.manager.entries.set('two',{id:'two',status:'paused',paused:true});await second.manager.persist();
+ first.manager.entries.set('one',{id:'one',status:'paused',paused:true,cachedComplete:true});await first.manager.persist();
+ second.manager.entries.set('two',{id:'two',status:'paused',paused:true,cachedComplete:true});await second.manager.persist();
  assert.deepEqual((await first.persistence.load()).entries.map(x=>x.id).sort(),['one','two']);
  const replacement=new Directory('different');second.env.showDirectoryPicker=async()=>replacement;await second.manager.chooseDirectory();
  await assert.rejects(first.manager.persist(),{code:'directory-changed'});
@@ -361,15 +362,17 @@ test('real DOMException numeric legacy codes map to stable quota and permission 
   await h.manager.init();assert.equal(h.manager.snapshot().directory.error,code);assert.equal(h.manager.snapshot().directory.temporary_fallback,false);
  }
 });
-test('switching location settles a launch waiting for metadata and removes its listener',async()=>{
- let began;const started=new Promise(resolve=>began=resolve);const h=setup({fetch:async(_,{signal})=>{began();return new Promise((resolve,reject)=>signal.addEventListener('abort',()=>reject(new DOMException('Aborted','AbortError')),{once:true}));}});
- await h.manager.chooseDirectory();const outcome=h.manager.ensureFile(fixture(),{gameId:'game1',profileId:'player1',manifestUrl:'/manifest'}).then(()=>({resolved:true}),error=>({code:error.code}));
- await started;await tick();h.env.showDirectoryPicker=async()=>new Directory('replacement');await h.manager.chooseDirectory();
- assert.deepEqual(await outcome,{code:'directory-changed'});assert.equal(h.manager.jobs.size,0);assert.equal(h.manager.listeners.size,0);
+test('switching location rejects without cancelling a launch awaiting metadata',async()=>{
+ let response;const h=setup({fetch:()=>new Promise(resolve=>response=resolve)});
+ await h.manager.chooseDirectory();const pending=h.manager.ensureFile(fixture(),{gameId:'game1',profileId:'player1',manifestUrl:'/manifest'});
+ await until(()=>Boolean(response));const owner=h.manager.state.owner,epoch=h.manager.locationEpoch,job=[...h.manager.jobs.values()][0];
+ h.env.showDirectoryPicker=async()=>new Directory('replacement');await assert.rejects(h.manager.chooseDirectory(),{code:'location-active'});
+ assert.equal(h.manager.state.owner,owner);assert.equal(h.manager.locationEpoch,epoch);assert.equal(job.abort.signal.aborted,false);assert.equal(h.manager.jobs.size,1);
+ response({ok:true,status:200,json:async()=>fixture()});assert.equal((await pending).size,10);await h.manager.pauseAll();assert.equal(h.manager.listeners.size,0);
 });
 test('an explicit location switch can adopt another tabs location after stopping the stale owner job',async()=>{
- const a=setup({sharing:true});await a.manager.chooseDirectory();await a.manager.ensureFile(fixture(),{gameId:'game1',profileId:'player1',manifestUrl:'/manifest'});
- const oldRoot=a.manager.root,b=setup({directory:a.directory,persistence:a.persistence,locks:a.locks});await b.manager.init();const second=new Directory('second');b.env.showDirectoryPicker=async()=>second;await b.manager.chooseDirectory();
+ const a=setup({sharing:true});await a.manager.chooseDirectory();await a.manager.ensureFile(fixture(),{gameId:'game1',profileId:'player1',manifestUrl:'/manifest'});await until(()=>!a.manager.snapshot().directory.location_change_blocked);
+ const oldRoot=a.manager.root,b=setup({directory:a.directory,persistence:a.persistence,locks:a.locks});await b.manager.init();await until(()=>b.manager.snapshot().entries[0]?.status==='busy'&&b.manager.jobs.size===0);const second=new Directory('second');b.env.showDirectoryPicker=async()=>second;await b.manager.chooseDirectory();
  a.env.showDirectoryPicker=async()=>second;await a.manager.chooseDirectory();assert.equal(a.manager.state.owner,b.manager.state.owner);assert.equal(a.manager.state.directory,second);assert.equal(a.clients[0].destroyed,true);assert.ok(oldRoot.dirs.get('rom-'+fixture().info_hash).files.has('demo.gba'));assert.equal(a.manager.jobs.size,0);
 });
 test('reselecting the same directory does not cancel a launch awaiting metadata',async()=>{
@@ -402,4 +405,92 @@ test('returning to a location preserves a users manual pause and does not start 
  const h=setup({sharing:true});enableOPFS(h);await h.manager.ensureFile(fixture(),{gameId:'game1',profileId:'player1',manifestUrl:'/manifest'});
  await h.manager.pause(h.manager.snapshot().entries[0].id);const clientCount=h.clients.length;await h.manager.chooseDirectory();await h.manager.useBrowserStorage();await tick();
  assert.equal(h.manager.snapshot().entries[0].paused,true);assert.equal(h.manager.snapshot().entries[0].status,'paused');assert.equal(h.manager.snapshot().entries[0].cachedComplete,true);assert.equal(h.manager.jobs.size,0);assert.equal(h.clients.length,clientCount);
+});
+
+test('automatic OPFS asks for a choice, and explicitly reselecting it confirms persistently',async()=>{
+ const h=setup();enableOPFS(h);await h.manager.init();
+ assert.equal(h.manager.snapshot().directory.selection_required,true);assert.equal((await h.persistence.load()).user_selected,false);
+ const owner=h.manager.state.owner;await h.manager.useBrowserStorage();
+ assert.equal(h.manager.state.owner,owner);assert.equal(h.manager.snapshot().directory.selection_required,false);assert.equal((await h.persistence.load()).user_selected,true);
+ const next=setup({persistence:h.persistence,locks:h.locks});enableOPFS(next,h.env.navigator.storage.getDirectory&&await h.env.navigator.storage.getDirectory());await next.manager.init();assert.equal(next.manager.snapshot().directory.selection_required,false);
+});
+test('legacy external is confirmed but legacy automatic OPFS still requests an explicit choice',async()=>{
+ for(const kind of ['external','opfs']){
+  const first=setup();if(kind==='opfs')enableOPFS(first);else await first.manager.chooseDirectory();await first.manager.init();
+  const saved=await first.persistence.load();delete saved.user_selected;await first.persistence.save(saved);
+  const next=setup({persistence:first.persistence,locks:first.locks});if(kind==='opfs')enableOPFS(next,await first.env.navigator.storage.getDirectory());await next.manager.init();
+  assert.equal(next.manager.snapshot().directory.selection_required,kind==='opfs');
+ }
+});
+test('before any download a newly auto-created OPFS can be replaced by a fixed folder',async()=>{
+ const h=setup();enableOPFS(h);await h.manager.init();const owner=h.manager.state.owner;
+ assert.equal(h.manager.snapshot().directory.location_change_blocked,false);await h.manager.chooseDirectory();
+ assert.equal(h.manager.state.storage_kind,'external');assert.equal(h.manager.state.user_selected,true);assert.equal(h.manager.entries.size,0);
+ assert.equal(h.manager.state.previous_locations.find(value=>value.owner===owner).user_selected,false);
+ await h.manager.useBrowserStorage();assert.equal(h.manager.state.owner,owner);assert.equal(h.manager.state.user_selected,true);
+ await h.manager.chooseDirectory();assert.equal(h.manager.state.previous_locations.find(value=>value.owner===owner).user_selected,true);
+});
+test('a stale tab metadata save cannot undo another tabs explicit location confirmation',async()=>{
+ const a=setup();const opfs=enableOPFS(a);await a.manager.init();const b=setup({persistence:a.persistence,locks:a.locks});enableOPFS(b,opfs);await b.manager.init();
+ await b.manager.useBrowserStorage();assert.equal(a.manager.state.user_selected,false);await a.manager.persist();
+ assert.equal((await a.persistence.load()).user_selected,true);assert.equal(a.manager.snapshot().directory.selection_required,false);
+});
+test('invalid confirmation metadata fails closed instead of silently changing a legacy choice',async()=>{
+ const h=setup();await h.manager.chooseDirectory();const saved=await h.persistence.load();saved.user_selected='yes';await h.persistence.save(saved);
+ const next=setup({persistence:h.persistence});await next.manager.init();assert.equal(next.manager.snapshot().directory.error,'ownership');
+});
+test('paused partial pieces block a different folder and resume only missing bytes in the original',async()=>{
+ let unblock;const gate=new Promise(resolve=>unblock=resolve);let held=false;
+ const h=setup({managerOptions:{afterPiece:async(index,client)=>{if(index===0&&!held){held=true;await gate;}}}});
+ await h.manager.chooseDirectory();const entry=await add(h.manager);await until(()=>held);const owner=h.manager.state.owner;
+ const status=h.manager.snapshot().entries[0].status;assert.equal(status,'verifying');await h.manager.chooseDirectory();assert.equal(h.manager.snapshot().entries[0].status,status);
+ await h.manager.pause(entry.id);const root=h.manager.root,part=root.dirs.get('rom-'+fixture().info_hash);const before=[...part.files.keys()];
+ assert.equal(h.manager.snapshot().directory.location_change_blocked,true);const other=new Directory('other');h.env.showDirectoryPicker=async()=>other;
+ await assert.rejects(h.manager.chooseDirectory(),{code:'location-active'});assert.equal(h.manager.state.owner,owner);assert.equal(other.dirs.size,0);assert.deepEqual([...part.files.keys()],before);assert.equal(h.manager.snapshot().entries[0].paused,true);
+ h.env.showDirectoryPicker=async()=>h.directory;await h.manager.chooseDirectory();assert.equal(h.manager.snapshot().entries[0].paused,true);
+ unblock();await h.manager.resume(entry.id);await until(()=>h.manager.snapshot().entries[0].complete);await until(()=>h.manager.jobs.size===0);
+ assert.equal(h.clients[0].downloaded,4);assert.equal(h.clients[1].downloaded,6);assert.equal((await h.manager.getFile({gameId:'game1',revision:'r1'})).size,10);
+ h.env.showDirectoryPicker=async()=>other;await h.manager.chooseDirectory();assert.equal(h.manager.state.directory,other);
+});
+test('another tab cannot switch away during verification even when its index status is stale',async()=>{
+ let release;const gate=new Promise(resolve=>release=resolve);let waiting=false;
+ const a=setup({managerOptions:{afterPiece:async index=>{if(index===0&&!waiting){waiting=true;await gate;}}}});await a.manager.chooseDirectory();
+ const b=setup({directory:a.directory,persistence:a.persistence,locks:a.locks});await b.manager.init();const task=await add(a.manager);await until(()=>waiting);
+ // Other tabs may persist a cache/busy snapshot while one verifier is active.
+ const stale=await a.persistence.load();stale.entries=stale.entries.map(entry=>({...entry,status:'busy',cachedComplete:true,complete:false}));await a.persistence.save(stale);
+ const owner=a.manager.state.owner;b.env.showDirectoryPicker=async()=>new Directory('different');await assert.rejects(b.manager.chooseDirectory(),{code:'location-active'});
+ assert.equal((await a.persistence.load()).owner,owner);assert.equal(a.manager.jobs.get(task.id).abort.signal.aborted,false);release();await until(()=>a.manager.snapshot().entries[0].complete);await until(()=>a.manager.jobs.size===0);
+ await b.manager.chooseDirectory();assert.notEqual(b.manager.state.owner,owner);
+});
+test('a queued reservation and simultaneous cross-tab switch cannot discard the waiting launch',async()=>{
+ const a=setup();await a.manager.chooseDirectory();const b=setup({directory:a.directory,persistence:a.persistence,locks:a.locks});await b.manager.init();
+ let unlock;const lock=new Promise(resolve=>unlock=resolve);a.locks.set('retroone-rom-library-state',lock);
+ const pending=a.manager.ensureFile(fixture(),{gameId:'game1',profileId:'player1',manifestUrl:'/manifest'});await tick();
+ b.env.showDirectoryPicker=async()=>new Directory('new');const switching=b.manager.chooseDirectory();await tick();a.locks.delete('retroone-rom-library-state');unlock();
+ await assert.rejects(switching,{code:'location-active'});assert.equal((await pending).size,10);await a.manager.pauseAll();
+});
+test('confirming current OPFS during manifest preparation does not cancel or replace the download',async()=>{
+ let response;const h=setup({fetch:()=>new Promise(resolve=>response=resolve)});enableOPFS(h);await h.manager.init();
+ const pending=h.manager.ensureFile(fixture(),{gameId:'game1',profileId:'player1',manifestUrl:'/manifest'});await until(()=>Boolean(response));const job=[...h.manager.jobs.values()][0],owner=h.manager.state.owner;
+ await h.manager.useBrowserStorage();assert.equal(h.manager.state.owner,owner);assert.equal(h.manager.snapshot().directory.selection_required,false);assert.equal(job.abort.signal.aborted,false);
+ response({ok:true,status:200,json:async()=>fixture()});assert.equal((await pending).size,10);await h.manager.pauseAll();
+});
+
+
+test('a refused final location check restores completed sharing without resuming pauses or partial tasks',async()=>{
+ const h=setup({sharing:true});await h.manager.chooseDirectory();await h.manager.ensureFile(fixture(),{gameId:'game1',profileId:'player1',manifestUrl:'/manifest'});await until(()=>!h.manager.snapshot().directory.location_change_blocked);
+ const owner=h.manager.state.owner,original=h.manager.snapshot().entries[0].id;
+ const pauseAll=h.manager.pauseAll.bind(h.manager);let injected=false;
+ h.manager.pauseAll=async options=>{
+  await pauseAll(options);
+  if(injected)return;injected=true;
+  // Another tab reserves unfinished work between the two switch checks.
+  const saved=await h.persistence.load();saved.entries.push({id:'remote-queued',gameId:'other',status:'queued',complete:false,cachedComplete:false,paused:false});await h.persistence.save(saved);
+  h.manager.entries.set('manual-complete',{id:'manual-complete',gameId:'manual',cachedComplete:true,complete:true,status:'paused',paused:true});
+  h.manager.entries.set('manual-partial',{id:'manual-partial',gameId:'partial',cachedComplete:false,complete:false,status:'paused',paused:true});
+ };
+ h.env.showDirectoryPicker=async()=>new Directory('different');await assert.rejects(h.manager.chooseDirectory(),{code:'location-active'});
+ await until(()=>h.clients.length===2&&h.manager.entries.get(original).status==='sharing'&&!h.manager.snapshot().entries.find(x=>x.id===original).error);
+ assert.equal(h.manager.state.owner,owner);assert.equal(h.clients[1].downloaded,0);assert.equal(h.manager.entries.get('manual-complete').paused,true);assert.equal(h.manager.entries.get('manual-partial').paused,true);assert.equal(h.manager.jobs.size,1);
+ assert.ok((await h.persistence.load()).entries.some(entry=>entry.id==='remote-queued'));await pauseAll();
 });

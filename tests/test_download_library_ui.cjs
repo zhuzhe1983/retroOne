@@ -11,70 +11,42 @@ function install(ctx, ...names) {
   }
 }
 function harness() {
-  const game = {id:'large',title:'Large ROM',mode:'unavailable'};
-  const calls=[], pending=[],messages=[],added=[],order=[];
+  const game = {id:'large',title:'Large ROM',mode:'stream'};
+  const messages=[],added=[],order=[],launches=[];
   const ctx=vm.createContext({
-    state:{profile:{id:'player1',base_path:'/p/player1'},profileEpoch:1,detailOpen:true,selected:game,downloadOptions:null,downloadBusy:false,
+    state:{profile:{id:'player1',base_path:'/p/player1'},profileEpoch:1,detailOpen:true,selected:game,downloadBusy:false,
       downloadSnapshot:{directory:{supported:true,permission:'prompt',name:'Games'}},downloadPending:null,downloadEntryBusy:new Set()},
-    api:url=>{calls.push(url);return new Promise((resolve,reject)=>pending.push({resolve,reject}));},
-    resumeBrowserDownload:()=>{},renderDownloadOption:()=>{},renderDownloads:()=>order.push('render'),showDownloads:()=>order.push('show'),downloadMessage:(...args)=>messages.push(args),
+    resumeBrowserDownload:()=>{},closeDownloads:()=>order.push('close'),launchGame:async(...args)=>launches.push(args),
+    renderDownloads:()=>order.push('render'),showDownloads:()=>order.push('show'),downloadMessage:(...args)=>messages.push(args),
     receiveDownloadSnapshot:s=>ctx.state.downloadSnapshot=s,errorMessage:e=>e.message,t:s=>s,notify:(...args)=>messages.push(args),
-    localURL:url=>typeof url==='string'&&url.startsWith('/p/player1/api/games/')?url:'',
-    window:{RetroRomLibrary:{add:async arg=>added.push(arg),snapshot:()=>ctx.state.downloadSnapshot}},
+    downloadProblemMessage:e=>e.code,window:{RetroRomLibrary:{init:async()=>{},add:async arg=>added.push(arg),snapshot:()=>ctx.state.downloadSnapshot}},
   });
-  install(ctx,'loadDownloadOptions','downloadGame','downloadDirectoryReady','chooseDownloadDirectory','flushPendingDownload');
-  return {ctx,game,calls,pending,messages,added,order};
+  install(ctx,'prepareDownloadStorage','downloadDirectoryReady','chooseDownloadDirectory','flushPendingDownload');
+  return {ctx,game,messages,added,order,launches};
 }
-async function available(h) {
-  const read=h.ctx.loadDownloadOptions(h.game);
-  h.pending.at(-1).resolve({available:true,browser_launchable:true,size_bytes:2**41,manifest_url:'/p/player1/api/games/large/download-manifest'});await read;
+async function prepare(h) {
+  return h.ctx.prepareDownloadStorage(h.game,{kind:'launch',game:h.game,launchOptions:{launchMode:'browser-p2p'}});
 }
-test('browser-compatible download UI accepts a multi-terabyte size independently of default launch mode', async()=>{
-  const h=harness();await available(h);
-  await h.ctx.downloadGame(h.game);
-  assert.deepEqual(h.calls,['/api/games/large/download-options']);
-  assert.equal(h.ctx.state.downloadOptions.data.size_bytes,2**41);
-  assert.equal(h.added.length,0,'a missing folder must not trigger an in-memory download');
-  assert.equal(h.ctx.state.downloadPending.gameId,'large');
-  assert.deepEqual(h.order,['show']);
-});
-test('download information is detail-only, deduplicated, and ignores a late player response',async()=>{
-  const h=harness();h.ctx.state.detailOpen=false;await h.ctx.loadDownloadOptions(h.game);assert.equal(h.calls.length,0);
-  h.ctx.state.detailOpen=true;const read=h.ctx.loadDownloadOptions(h.game);await h.ctx.loadDownloadOptions(h.game);assert.equal(h.calls.length,1);
-  h.ctx.state.profileEpoch=2;h.pending[0].resolve({available:true});await read;
-  assert.equal(h.ctx.state.downloadOptions.data,null);
-});
-test('directory choice invokes the native picker before rendering or awaiting, then adds the pending download',async()=>{
-  const h=harness();await available(h);await h.ctx.downloadGame(h.game);h.order.length=0;
+test('directory choice invokes the native picker in the click turn, then resumes the pending browser launch',async()=>{
+  const h=harness();assert.equal(await prepare(h),false);h.order.length=0;
   let resolve;h.ctx.window.RetroRomLibrary.chooseDirectory=()=>{h.order.push('picker');return new Promise(r=>resolve=r);};
-  const choose=h.ctx.chooseDownloadDirectory();assert.equal(h.order[0],'picker');assert.equal(h.added.length,0);
+  const choose=h.ctx.chooseDownloadDirectory();assert.equal(h.order[0],'picker');assert.equal(h.launches.length,0);
   h.ctx.state.downloadSnapshot.directory.permission='granted';resolve();await choose;
-  assert.deepEqual(plain(h.added),[{gameId:'large',title:'Large ROM',profileId:'player1',manifestUrl:'/p/player1/api/games/large/download-manifest'}]);
-  assert.equal(h.ctx.state.downloadPending,null);assert.equal(h.ctx.state.downloadBusy,false);
+  assert.deepEqual(plain(h.launches),[[h.game,{launchMode:'browser-p2p'}]]);
+  assert.equal(h.added.length,0);assert.equal(h.ctx.state.downloadPending,null);assert.equal(h.ctx.state.downloadBusy,false);
 });
-test('permission reconnect is user-initiated and a cancelled prompt never starts the download',async()=>{
-  const h=harness();await available(h);await h.ctx.downloadGame(h.game);
+test('a cancelled permission prompt never starts the game or download',async()=>{
+  const h=harness();await prepare(h);
   h.ctx.window.RetroRomLibrary.reconnect=()=>{h.order.push('reconnect');return Promise.reject(Object.assign(new Error('cancelled'),{name:'AbortError'}));};
   await h.ctx.chooseDownloadDirectory(true);
-  assert.ok(h.order.includes('reconnect'));assert.equal(h.added.length,0);
+  assert.ok(h.order.includes('reconnect'));assert.equal(h.launches.length,0);assert.equal(h.added.length,0);
   assert.equal(h.messages.filter(x=>x[1]===true).length,0);
 });
-test('switching players while choosing a directory never enqueues the prior player request',async()=>{
-  const h=harness();await available(h);await h.ctx.downloadGame(h.game);
+test('switching players while choosing a directory never launches the prior player request',async()=>{
+  const h=harness();await prepare(h);
   let resolve;h.ctx.window.RetroRomLibrary.chooseDirectory=()=>new Promise(r=>resolve=r);
   const choose=h.ctx.chooseDownloadDirectory();h.ctx.state.profileEpoch++;h.ctx.state.profile={id:'player2'};
-  h.ctx.state.downloadSnapshot.directory.permission='granted';resolve();await choose;assert.equal(h.added.length,0);
-});
-test('authorized directories add directly without launching a game or writing play history',async()=>{
-  const h=harness();await available(h);h.ctx.state.downloadSnapshot.directory.permission='granted';await h.ctx.downloadGame(h.game);
-  assert.equal(h.added.length,1);assert.equal(h.ctx.state.downloadPending,null);
-  assert.equal(h.calls.length,1);assert.doesNotMatch(h.calls.join(),/launch|played/);
-});
-test('unavailable or unsafe download endpoints never reach the manager',async()=>{
-  for(const data of [{available:false,reason:'multiple files'},{available:true,manifest_url:'https://other.invalid/rom'}]) {
-    const h=harness();const read=h.ctx.loadDownloadOptions(h.game);h.pending[0].resolve(data);await read;
-    h.ctx.state.downloadSnapshot.directory.permission='granted';await h.ctx.downloadGame(h.game);assert.equal(h.added.length,0);
-  }
+  h.ctx.state.downloadSnapshot.directory.permission='granted';resolve();await choose;assert.equal(h.launches.length,0);
 });
 test('the manager and advanced launch settings use one device sharing preference',async()=>{
   const saved=[],manager=[];const ctx=vm.createContext({state:{browserP2P:true},remember:(...args)=>saved.push(args),
@@ -170,14 +142,6 @@ test('download completion never implies WASM compatibility',()=>{
 });
 
 
-test('games without browser support cannot start a new UI download even when the file endpoint is available',async()=>{
-  const h=harness();const read=h.ctx.loadDownloadOptions(h.game);
-  h.pending[0].resolve({available:true,browser_launchable:false,manifest_url:'/p/player1/api/games/large/download-manifest'});await read;
-  h.ctx.state.downloadSnapshot.directory.permission='granted';await h.ctx.downloadGame(h.game);
-  assert.equal(h.added.length,0);assert.equal(h.ctx.state.downloadPending,null);
-});
-
-
 test('storage presentation distinguishes automatic browser cache, external permission, and quota',()=>{
   const ctx=vm.createContext({t:s=>s,downloadProblemMessage:s=>s});install(ctx,'downloadStoragePresentation');
   const cached=ctx.downloadStoragePresentation({storage_kind:'opfs',permission:'granted'});
@@ -205,4 +169,43 @@ test('restoring storage resumes only the same blocked launch without reloading t
   assert.deepEqual(calls,['close',config]); calls.length=0;
   transfer.phase='running'; ctx.resumeBrowserDownload(); assert.equal(calls.length,0);
   transfer.phase='error';ctx.state.profile.id='p2';ctx.resumeBrowserDownload();assert.equal(calls.length,0);
+});
+
+
+test('first automatic browser cache requires a choice; confirmed storage does not ask again',async()=>{
+  const h=harness();
+  h.ctx.state.downloadSnapshot.directory={supported:true,permission:'granted',storage_kind:'opfs',selection_required:true};
+  assert.equal(await prepare(h),false);
+  assert.equal(h.launches.length,0);assert.equal(h.ctx.state.downloadPending.gameId,'large');
+  h.ctx.window.RetroRomLibrary.useBrowserStorage=async()=>{h.order.push('confirm-cache');h.ctx.state.downloadSnapshot.directory.selection_required=false;};
+  await h.ctx.chooseDownloadDirectory(false,true);
+  assert.equal(h.launches.length,1);assert.ok(h.order.includes('confirm-cache'));
+  assert.equal(await prepare(h),true);assert.equal(h.added.length,0);
+});
+test('profile change during storage initialization cannot resume a stale launch',async()=>{
+  const h=harness();let resume;
+  h.ctx.window.RetroRomLibrary.init=()=>new Promise(resolve=>resume=resolve);
+  const start=prepare(h);h.ctx.state.profileEpoch++;resume();await start;
+  assert.equal(h.launches.length,0);assert.equal(h.ctx.state.downloadPending,null);assert.equal(h.order.length,0);
+});
+test('storage choice for a browser launch preserves its requested mode and does not add a separate download',async()=>{
+  const h=harness(), launches=[];h.ctx.closeDownloads=()=>h.order.push('close');h.ctx.launchGame=async(...args)=>launches.push(args);
+  h.ctx.state.downloadSnapshot.directory={supported:true,permission:'granted',selection_required:true};
+  const options={launchMode:'browser-http'};
+  assert.equal(await h.ctx.prepareDownloadStorage(h.game,{kind:'launch',game:h.game,launchOptions:options}),false);
+  assert.equal(h.added.length,0);h.ctx.state.downloadSnapshot.directory.selection_required=false;
+  await h.ctx.flushPendingDownload();
+  assert.equal(h.added.length,0);assert.deepEqual(plain(launches),[[h.game,options]]);
+});
+
+test('a late folder picker never starts a replacement request for the same or another player',async()=>{
+  for(const switchPlayer of [false,true]) {
+    const h=harness();await prepare(h);let resolve;
+    h.ctx.window.RetroRomLibrary.chooseDirectory=()=>new Promise(r=>resolve=r);
+    const choosing=h.ctx.chooseDownloadDirectory();
+    if(switchPlayer){h.ctx.state.profileEpoch++;h.ctx.state.profile={id:'player2'};}
+    h.ctx.state.downloadPending={gameId:'second',title:'Second',epoch:h.ctx.state.profileEpoch,profileId:h.ctx.state.profile.id,manifestUrl:'/p/player1/api/games/second/download-manifest'};
+    h.ctx.state.downloadSnapshot.directory.permission='granted';resolve();await choosing;
+    assert.equal(h.added.length,0);assert.equal(h.launches.length,0);assert.equal(h.ctx.state.downloadPending.gameId,'second');
+  }
 });

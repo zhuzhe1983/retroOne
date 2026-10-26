@@ -44,7 +44,7 @@
     loading: false, request: 0, controller: null, session: null, playMode: null, health: null, connectionStatus: 'connecting',
     favoritePending: new Set(), scanPending: false, wasScanning: false, healthRefreshing: false,
     detailRequest: 0, focusReturn: null, launching: false, launchOptions: null, launchChoice: 'auto', browserP2P: remembered('retroone:browser-p2p') !== 'false',
-    downloadOptions: null, downloadSnapshot: null, downloadPending: null, downloadBusy: false, downloadEntryBusy: new Set(), downloadReturn: null, downloadFromSelf: false, deviceCacheBadges: new Map(), downloadSupport: new Map(), downloadSupportLoading: false,
+    downloadSnapshot: null, downloadPending: null, downloadBusy: false, downloadEntryBusy: new Set(), downloadReturn: null, downloadFromSelf: false, deviceCacheBadges: new Map(), downloadSupport: new Map(), downloadSupportLoading: false,
     profile: null, profiles: [], profileEpoch: 0, profileRequests: new Set(), profileEditing: null, profileEditEnter: false, profileAvatar: 'pixel', pendingProfile: null, profileSaving: false,
     profileRegistryEpoch: 0, profileLoading: false, profileCreateRequestId: null, profileWatchId: null, profileRetrying: new Set(), profileCapacity: null,
     playGameId: null, familySelectedId: null, presenceStale: false, presenceEpoch: 0,
@@ -443,7 +443,7 @@
   }
   function downloadProblemMessage(problem) {
     const code = typeof problem === 'string' ? problem : problem?.code;
-    const messages = {unsupported: '当前浏览器无法保留游戏文件，请选择可用目录或使用云游戏。', permission: '目录访问已失效，请点击“重新授权”。', ownership: '无法确认目录归属，请选择新的下载目录。', 'revision-changed': '服务器上的游戏文件已更新，请重新下载。', 'directory-changed': '另一页面已更换缓存目录，请刷新后重试。', 'location-limit': '已保存的缓存位置过多，请重新选择之前使用过的目录。', quota: '设备存储空间不足，请释放空间后继续。', invalid: '下载信息无效，请刷新游戏详情后重试。', component: '下载组件未能载入，请检查网络后重试。', network: '连接服务器失败，请检查网络后继续。', mismatch: '文件校验未通过，请重新下载。', modified: '设备上的文件已变化，需要重新校验。', busy: '另一页面正在使用这个文件，关闭对应任务后重试。', download: '下载未完成，请检查网络和目录权限后继续。', 'not-found': '找不到这个下载任务，请重新添加。', cancelled: '操作已取消。'};
+    const messages = {'location-active': '还有未完成的下载，完成后才能更换保存位置。已下载的部分会保留。', unsupported: '当前浏览器无法保留游戏文件，请选择可用目录或使用云游戏。', permission: '目录访问已失效，请点击“重新授权”。', ownership: '无法确认目录归属，请选择新的下载目录。', 'revision-changed': '服务器上的游戏文件已更新，请重新下载。', 'directory-changed': '另一页面已更换缓存目录，请刷新后重试。', 'location-limit': '已保存的缓存位置过多，请重新选择之前使用过的目录。', quota: '设备存储空间不足，请释放空间后继续。', invalid: '下载信息无效，请刷新游戏详情后重试。', component: '下载组件未能载入，请检查网络后重试。', network: '连接服务器失败，请检查网络后继续。', mismatch: '文件校验未通过，请重新下载。', modified: '设备上的文件已变化，需要重新校验。', busy: '另一页面正在使用这个文件，关闭对应任务后重试。', download: '下载未完成，请检查网络和目录权限后继续。', 'not-found': '找不到这个下载任务，请重新添加。', cancelled: '操作已取消。'};
     return Object.hasOwn(messages, code) ? t(messages[code]) : typeof problem === 'string' ? diagnostic(problem) : errorMessage(problem);
   }
   function downloadDirectoryReady(snapshot = state.downloadSnapshot) { return snapshot?.directory?.supported === true && snapshot.directory.permission === 'granted'; }
@@ -494,15 +494,19 @@
     const snapshot = state.downloadSnapshot, directory = snapshot?.directory || {}, manager = window.RetroRomLibrary;
     loadDownloadSupport();
     const supported = directory.supported === true, ready = downloadDirectoryReady(snapshot);
+    const choosing = Boolean(state.downloadPending && (directory.selection_required === true || !ready)), needsChoice = directory.selection_required === true;
+    const reconnecting = choosing && !needsChoice && directory.storage_kind === 'external' && !ready;
+    $('downloads-title').textContent = t(reconnecting ? '授权已有游戏目录' : choosing ? '下载前，先选保存位置' : '下载与分享');
+    $('downloads-description').textContent = t(reconnecting ? '原目录仍保留着游戏文件。重新授权后会继续下载或读取已有文件。' : choosing ? '保存到固定目录，下次访问可直接读取已有文件，无需重复下载。同一浏览器的玩家共用游戏文件，存档各自保存。' : '把游戏留在这台设备，之后直接读取；能否在浏览器运行取决于模拟器支持。');
     const storage = downloadStoragePresentation(directory, Boolean(manager));
     $('download-directory-title').textContent = storage.title;
-    $('download-directory-note').textContent = storage.note;
+    $('download-directory-note').textContent = reconnecting ? storage.note : choosing && needsChoice && !directory.location_change_blocked ? t('推荐选择专门保存游戏的固定目录；也可以使用浏览器缓存，清除网站数据时缓存会被删除。') : directory.location_change_blocked ? t('还有未完成的下载，完成后才能更换保存位置。已下载的部分会保留。') : storage.note;
     $('choose-download-directory').hidden = directory.can_choose_directory === false;
-    $('choose-download-directory').disabled = !supported || state.downloadBusy;
-    $('choose-download-directory').textContent = t(directory.name && !storage.browser ? '更换目录' : '选择目录');
+    $('choose-download-directory').disabled = !supported || state.downloadBusy || directory.location_change_blocked === true;
+    $('choose-download-directory').textContent = t(directory.name && !storage.browser ? '更换目录' : '选择固定目录（推荐）');
     if ($('use-browser-storage')) {
-      $('use-browser-storage').hidden = storage.browser || !directory.can_use_browser_storage;
-      $('use-browser-storage').disabled = state.downloadBusy;
+      $('use-browser-storage').hidden = (storage.browser && !needsChoice) || !directory.can_use_browser_storage;
+      $('use-browser-storage').disabled = state.downloadBusy || (!storage.browser && directory.location_change_blocked === true);
     }
     $('reconnect-download-directory').hidden = !supported || storage.browser || !directory.name || ready;
     $('reconnect-download-directory').disabled = state.downloadBusy;
@@ -520,7 +524,7 @@
       const action = running ? 'pause' : 'resume', label = running ? entry.complete ? t('停止分享') : t('暂停下载') : entry.complete ? t('继续分享') : t('继续下载');
       const source = Number.isFinite(entry.http_bytes) || Number.isFinite(entry.peer_bytes) ? t('服务器 {http} · P2P {peer}', {http: formatSize(entry.http_bytes || 0), peer: formatSize(entry.peer_bytes || 0)}) : '';
       return `<article class="download-entry"><div class="download-entry-heading"><strong title="${escapeHTML(entry.title || entry.name)}">${escapeHTML(entry.title || entry.name || t('未命名游戏'))}</strong><span class="download-entry-status" data-status="${escapeHTML(entry.status)}">${escapeHTML(downloadEntryStatus(entry))}</span></div><div class="download-entry-progress"><progress value="${percent}" max="100" aria-label="${escapeHTML(t('下载进度'))}"></progress><span>${percent}%</span></div><p class="download-entry-size">${escapeHTML(t('{received} / {total}', {received: formatSize(entry.complete ? total : received), total: formatSize(total)}))}${source ? ` · ${escapeHTML(source)}` : ''}</p><div class="download-entry-footer"><span>${escapeHTML(t('已分享 {size} · {peers} 个连接', {size: formatSize(entry.uploaded || 0), peers: number(entry.peers || 0)}))}</span><button type="button" class="button button-secondary" data-download-id="${escapeHTML(entry.id)}" data-download-action="${action}" ${state.downloadEntryBusy.has(entry.id) || !ready || action === 'resume' && entry.complete && !state.browserP2P ? 'disabled' : ''}>${escapeHTML(label)}</button></div><p class="download-entry-compatibility">${escapeHTML(downloadSupportLabel(entry))}</p>${entry.error ? `<p class="download-entry-error">${escapeHTML(downloadProblemMessage(entry.error))}</p>` : ''}</article>`;
-    }).join('') : `<div class="download-empty">${icon('cloud')}<strong>${escapeHTML(t('还没有保存游戏文件'))}</strong><p>${escapeHTML(t('在游戏详情选择“下载到设备”，即可加入这里。下载不会计入游玩记录。'))}</p></div>`;
+    }).join('') : `<div class="download-empty">${icon('cloud')}<strong>${escapeHTML(t('还没有保存游戏文件'))}</strong><p>${escapeHTML(t('选择浏览器运行后，下载进度会显示在这里。可以继续浏览游戏库，稍后回来查看。'))}</p></div>`;
     if (list.innerHTML !== html) {
       list.innerHTML = html;
       if (active) [...list.querySelectorAll('[data-download-id]')].find(button => button.dataset.downloadId === active.id)?.focus({preventScroll: true});
@@ -615,8 +619,9 @@
     if ($('self-dialog').open) $('self-dialog').close();
     if (window.RetroRomLibrary) state.downloadSnapshot = window.RetroRomLibrary.snapshot();
     $('downloads-dialog').showModal(); syncModalBody(); renderDownloads();
-    ($('reconnect-download-directory').hidden ? $('choose-download-directory') : $('reconnect-download-directory')).focus();
-    if (document.activeElement === document.body || document.activeElement === $('downloads-dialog')) $('close-downloads').focus();
+    const preferred = ['reconnect-download-directory', 'choose-download-directory', 'use-browser-storage']
+      .map($).find(button => button && !button.hidden && !button.disabled);
+    (preferred || $('close-downloads')).focus();
   }
   function closeDownloads() {
     state.downloadPending = null; $('downloads-dialog').close(); syncModalBody();
@@ -624,16 +629,34 @@
     else if (state.downloadFromSelf) { showSelf(); $('self-download-settings').focus(); }
     else if (state.downloadReturn?.isConnected) state.downloadReturn.focus({preventScroll: true});
   }
+  async function prepareDownloadStorage(game, pending, {allowTemporary = false} = {}) {
+    const manager = window.RetroRomLibrary, epoch = state.profileEpoch;
+    if (!manager) { notify(t('下载组件尚未就绪，请刷新页面后重试。'), true); return false; }
+    await manager.init();
+    if (epoch !== state.profileEpoch) return false;
+    receiveDownloadSnapshot(manager.snapshot());
+    const directory = state.downloadSnapshot?.directory || {};
+    if (allowTemporary && directory.temporary_fallback === true) return true;
+    if (downloadDirectoryReady() && directory.selection_required !== true) return true;
+    state.downloadPending = {gameId: game.id, title: game.title, profileId: state.profile.id, epoch, ...pending};
+    downloadMessage(); showDownloads();
+    if (directory.error && directory.error !== 'permission') downloadMessage(downloadProblemMessage(directory.error), true);
+    return false;
+  }
   async function chooseDownloadDirectory(reconnect = false, browserStorage = false) {
     const manager = window.RetroRomLibrary;
     if (!manager || state.downloadBusy) return;
+    const epoch = state.profileEpoch, pending = state.downloadPending, playGameId = state.playGameId;
     // Invoke the picker/requestPermission synchronously inside this click turn.
     // No capability fetch or initialization may consume the user gesture first.
     state.downloadBusy = true;
     try {
       const choosing = browserStorage ? manager.useBrowserStorage() : reconnect ? manager.reconnect() : manager.chooseDirectory();
       renderDownloads(); await choosing; receiveDownloadSnapshot(manager.snapshot());
-      if (downloadDirectoryReady()) { downloadMessage(); await flushPendingDownload(); resumeBrowserDownload(); }
+      if (epoch === state.profileEpoch && pending === state.downloadPending && downloadDirectoryReady() && state.downloadSnapshot?.directory?.selection_required !== true) {
+        downloadMessage(); await flushPendingDownload();
+        if (epoch === state.profileEpoch && playGameId === state.playGameId) resumeBrowserDownload();
+      }
     } catch (error) { if (error.name !== 'AbortError') downloadMessage(downloadProblemMessage(error), true); }
     finally { state.downloadBusy = false; renderDownloads(); }
   }
@@ -643,24 +666,31 @@
       const frame = $('game-frame')?.contentWindow, config = frame?.RetroRomTransferConfig;
       if (!config || config.profileId !== state.profile?.id || config.gameId !== state.playGameId) return;
       const transfer = frame.RetroRomTransfer?.snapshot();
-      if (transfer?.phase !== 'error' || !['folder', 'persistent', 'quota'].includes(transfer.error)) return;
+      if (transfer?.phase !== 'error' || !['folder', 'persistent', 'quota', 'storage-choice'].includes(transfer.error)) return;
       closeDownloads();
       frame.RetroRomTransfer.start(config);
     } catch { /* A replaced frame cannot resume a different player's launch. */ }
   }
   function handleRomTransferError(data) {
     if (state.playMode !== 'browser' || data.profileId !== state.profile?.id || data.gameId !== state.playGameId) return;
+    if (data.code === 'storage-choice') {
+      state.downloadPending = {kind: 'resume', gameId: data.gameId, title: $('play-title').textContent, profileId: data.profileId, epoch: state.profileEpoch};
+      downloadMessage(); showDownloads(); return;
+    }
     const codes = {folder: 'permission', persistent: 'unsupported', quota: 'quota'};
     if (!Object.hasOwn(codes, data.code)) return;
     showDownloads(); downloadMessage(downloadProblemMessage(codes[data.code]), true);
   }
   async function flushPendingDownload() {
     const pending = state.downloadPending;
-    if (!pending || pending.epoch !== state.profileEpoch || pending.profileId !== state.profile?.id || !downloadDirectoryReady()) return;
+    if (!pending || pending.epoch !== state.profileEpoch || pending.profileId !== state.profile?.id || !downloadDirectoryReady() || state.downloadSnapshot?.directory?.selection_required === true) return;
     state.downloadPending = null;
-    try { await window.RetroRomLibrary.add({gameId: pending.gameId, title: pending.title, profileId: pending.profileId, manifestUrl: pending.manifestUrl}); }
-    catch (error) { if (pending.epoch === state.profileEpoch) downloadMessage(downloadProblemMessage(error), true); }
-    finally { if (pending.epoch === state.profileEpoch) renderDownloads(); }
+    if (pending.kind === 'launch') {
+      closeDownloads();
+      await launchGame(pending.game, pending.launchOptions);
+      return;
+    }
+    if (pending.kind === 'resume') resumeBrowserDownload();
   }
   async function downloadEntryAction(id, action) {
     if (!['pause', 'resume'].includes(action) || state.downloadEntryBusy.has(id) || !window.RetroRomLibrary) return;
@@ -1193,7 +1223,7 @@
     $('platform-dialog').close();
     state.profileEpoch++; state.interfaceRequest++; state.interfaceSaving = false; state.request++; state.detailRequest++;
     state.launchOptions = null; state.launchChoice = 'auto';
-    state.downloadOptions = null; state.downloadPending = null;
+    state.downloadPending = null;
     if ($('downloads-dialog').open) $('downloads-dialog').close();
     closeLibraryManagement({restoreFocus: false}); state.managementData = null; state.managementBusy = false;
     state.displayReadController?.abort(); state.displayReadController = null;
@@ -1669,46 +1699,6 @@
       }
     }
   }
-  function renderDownloadOption(game) {
-    const button = $('download-game'), note = $('download-game-note');
-    if (!button || !game || state.selected?.id !== game.id) return;
-    const record = state.downloadOptions, data = record?.gameId === game.id && record.epoch === state.profileEpoch ? record.data : null;
-    const group = button.closest('.detail-download');
-    if (group) group.hidden = !record?.error && data?.browser_launchable !== true;
-    button.disabled = Boolean(record?.loading || !data?.available && !record?.error);
-    button.textContent = record?.error ? t('重新读取下载信息') : t('下载到设备');
-    note.textContent = record?.loading ? t('正在读取下载信息…') : record?.error ? t('暂时无法读取下载信息，请重试。') : data?.available ? t(data.browser_launchable === false ? '文件大小 {size} · 可下载与分享，暂不支持浏览器运行' : '文件大小 {size} · 下载完成后可尝试浏览器运行', {size: formatSize(data.size_bytes)}) : data?.reason ? diagnostic(data.reason) : t('此游戏暂不支持独立下载。');
-  }
-  async function loadDownloadOptions(game, retry = false) {
-    if (!state.profile || !state.detailOpen || !game || state.selected?.id !== game.id) return;
-    const previous = state.downloadOptions;
-    if (!retry && previous?.gameId === game.id && previous.epoch === state.profileEpoch) return;
-    const epoch = state.profileEpoch, record = {gameId: game.id, epoch, loading: true, error: false, data: null};
-    state.downloadOptions = record; renderDownloadOption(game);
-    try {
-      const data = await api(`/api/games/${encodeURIComponent(game.id)}/download-options`, {timeoutMs: 15000});
-      if (epoch !== state.profileEpoch || state.downloadOptions !== record || state.selected?.id !== game.id) return;
-      if (typeof data?.available !== 'boolean') throw new Error('Invalid download options');
-      record.data = data;
-    } catch (error) {
-      if (epoch !== state.profileEpoch || state.downloadOptions !== record || error.name === 'AbortError') return;
-      record.error = true;
-    } finally {
-      if (epoch === state.profileEpoch && state.downloadOptions === record) { record.loading = false; renderDownloadOption(game); }
-    }
-  }
-  async function downloadGame(game) {
-    const record = state.downloadOptions;
-    if (!state.profile || !game || record?.gameId !== game.id || record.epoch !== state.profileEpoch) return;
-    if (record.error) { await loadDownloadOptions(game, true); return; }
-    if (record.data?.browser_launchable !== true || !record.data?.available) return;
-    const suppliedURL = record.data.manifest_url ?? `${state.profile.base_path}/api/games/${encodeURIComponent(game.id)}/download-manifest?transport=p2p`;
-    const manifestUrl = localURL(suppliedURL, [`${state.profile.base_path}/api/games/`, '/api/games/']);
-    if (!manifestUrl) { notify(t('没有收到有效的下载入口，请重试。'), true); return; }
-    state.downloadPending = {gameId: game.id, title: game.title, profileId: state.profile.id, epoch: state.profileEpoch, manifestUrl};
-    downloadMessage(); showDownloads();
-    if (downloadDirectoryReady()) await flushPendingDownload();
-  }
   function renderDetail(game) {
     if (!state.detailOpen) { $('game-detail').replaceChildren(); renderDetailPage(); return; }
     if (!game) {
@@ -1721,14 +1711,13 @@
     const official = Library.secureURL(data.official_url);
     const sources = (Array.isArray(data.sources) ? data.sources : []).filter(source => source && typeof source.name === 'string' && Library.secureURL(source.url));
     const description = typeof data.description === 'string' && data.description || game.description;
-    $('game-detail').innerHTML = `<div class="detail-hero"><div class="detail-cover">${cover(game, true)}</div><div class="detail-introduction"><div class="detail-eyebrow"><p class="eyebrow">IN YOUR COLLECTION</p><span>${escapeHTML(game.favorite ? t('已收藏') : t('游戏详情'))}</span></div><p class="detail-platform">${Library.platformArt(game.platform)}${escapeHTML(platformName(game.platform, game.platform_name))}</p><h1 class="detail-title">${escapeHTML(game.title)}</h1>${deviceCacheBadge(game.id, 'detail')}${variantTags(game)}${detailPopularity(game)}<div class="detail-actions"><button class="button detail-launch" id="launch-game" ${mode === 'unavailable' ? 'disabled' : ''}>${icon(mode === 'unavailable' ? 'info' : 'play')}${escapeHTML(mode === 'unavailable' ? t('等待配置') : mode === 'stream' ? t('开始云端游戏') : t('开始游戏'))}</button><button class="icon-button detail-favorite ${game.favorite ? 'is-favorite' : ''}" id="detail-favorite" aria-label="${escapeHTML(game.favorite ? t('取消收藏') : t('收藏'))} ${escapeHTML(game.title)}" aria-pressed="${Boolean(game.favorite)}" ${state.favoritePending.has(game.id) ? 'disabled' : ''}>${icon('star')}</button></div><div id="launch-choices" class="launch-choices"></div><div class="detail-download"><button type="button" class="button button-secondary" id="download-game" disabled>${escapeHTML(t('下载到设备'))}</button><p id="download-game-note"></p></div><p class="detail-note">${escapeHTML(mode === 'browser' ? t('在当前设备运行 · 进度可在模拟器中保存') : mode === 'stream' ? t('服务器运行 · 游戏镜像无需下载到本机') : t('保留在游戏库中，补齐环境后即可尝试启动'))}</p>${game.reason ? `<p class="detail-reason">${icon('info')}${escapeHTML(diagnostic(game.reason))}</p>` : ''}${official ? `<a class="button button-secondary official-link" href="${escapeHTML(official)}" target="_blank" rel="noopener noreferrer">${escapeHTML(t('访问官方页面'))}${icon('arrow')}</a>` : ''}</div></div><div class="detail-body"><section class="detail-about"><h2>${escapeHTML(t('关于这款游戏'))}</h2>${description ? `<p class="detail-description">${escapeHTML(description)}</p>` : `<p class="detail-missing">${escapeHTML(t('暂时没有可靠的游戏介绍，后续补充资料后会显示在这里。'))}</p>`}${videoURL ? `<button class="button button-secondary video-toggle" id="preview-video">${icon('play')}${escapeHTML(t('观看游戏预览'))}</button><video class="detail-video" id="detail-video" src="${escapeHTML(videoURL)}" controls preload="none" playsinline hidden></video>` : ''}${screenshots.length ? `<h2>${escapeHTML(t('游戏画面'))}</h2><div class="detail-screenshots">${screenshots.map((url, index) => `<a href="${escapeHTML(url)}" target="_blank" rel="noopener noreferrer" aria-label="${escapeHTML(t('查看游戏画面 {value1}', {value1: index + 1}))}"><img src="${escapeHTML(url)}" alt="${escapeHTML(t('《{value1}》游戏画面 {value2}', {value1: game.title, value2: index + 1}))}" loading="lazy" decoding="async" crossorigin="anonymous" referrerpolicy="no-referrer"></a>`).join('')}</div>` : ''}${sources.length ? `<p class="detail-sources">${escapeHTML(t('资料来源'))} · ${sources.map(source => `<a href="${escapeHTML(Library.secureURL(source.url))}" target="_blank" rel="noopener noreferrer">${escapeHTML(source.name)}</a>`).join(' · ')}</p>` : ''}</section><section class="detail-information"><h2>${escapeHTML(t('游戏资料'))}</h2><dl class="detail-facts">${detailFacts(game)}</dl></section></div><details class="detail-technical"><summary>${escapeHTML(t('版本、文件与运行检查'))}</summary>${launchConfigDetails(game)}${reviewDetails(game)}</details>`;
+    $('game-detail').innerHTML = `<div class="detail-hero"><div class="detail-cover">${cover(game, true)}</div><div class="detail-introduction"><div class="detail-eyebrow"><p class="eyebrow">IN YOUR COLLECTION</p><span>${escapeHTML(game.favorite ? t('已收藏') : t('游戏详情'))}</span></div><p class="detail-platform">${Library.platformArt(game.platform)}${escapeHTML(platformName(game.platform, game.platform_name))}</p><h1 class="detail-title">${escapeHTML(game.title)}</h1>${deviceCacheBadge(game.id, 'detail')}${variantTags(game)}${detailPopularity(game)}<div class="detail-actions"><button class="button detail-launch" id="launch-game" ${mode === 'unavailable' ? 'disabled' : ''}>${icon(mode === 'unavailable' ? 'info' : 'play')}${escapeHTML(mode === 'unavailable' ? t('等待配置') : mode === 'stream' ? t('开始云端游戏') : t('开始游戏'))}</button><button class="icon-button detail-favorite ${game.favorite ? 'is-favorite' : ''}" id="detail-favorite" aria-label="${escapeHTML(game.favorite ? t('取消收藏') : t('收藏'))} ${escapeHTML(game.title)}" aria-pressed="${Boolean(game.favorite)}" ${state.favoritePending.has(game.id) ? 'disabled' : ''}>${icon('star')}</button></div><div id="launch-choices" class="launch-choices"></div><p class="detail-note">${escapeHTML(mode === 'browser' ? t('在当前设备运行 · 进度可在模拟器中保存') : mode === 'stream' ? t('服务器运行 · 游戏镜像无需下载到本机') : t('保留在游戏库中，补齐环境后即可尝试启动'))}</p>${game.reason ? `<p class="detail-reason">${icon('info')}${escapeHTML(diagnostic(game.reason))}</p>` : ''}${official ? `<a class="button button-secondary official-link" href="${escapeHTML(official)}" target="_blank" rel="noopener noreferrer">${escapeHTML(t('访问官方页面'))}${icon('arrow')}</a>` : ''}</div></div><div class="detail-body"><section class="detail-about"><h2>${escapeHTML(t('关于这款游戏'))}</h2>${description ? `<p class="detail-description">${escapeHTML(description)}</p>` : `<p class="detail-missing">${escapeHTML(t('暂时没有可靠的游戏介绍，后续补充资料后会显示在这里。'))}</p>`}${videoURL ? `<button class="button button-secondary video-toggle" id="preview-video">${icon('play')}${escapeHTML(t('观看游戏预览'))}</button><video class="detail-video" id="detail-video" src="${escapeHTML(videoURL)}" controls preload="none" playsinline hidden></video>` : ''}${screenshots.length ? `<h2>${escapeHTML(t('游戏画面'))}</h2><div class="detail-screenshots">${screenshots.map((url, index) => `<a href="${escapeHTML(url)}" target="_blank" rel="noopener noreferrer" aria-label="${escapeHTML(t('查看游戏画面 {value1}', {value1: index + 1}))}"><img src="${escapeHTML(url)}" alt="${escapeHTML(t('《{value1}》游戏画面 {value2}', {value1: game.title, value2: index + 1}))}" loading="lazy" decoding="async" crossorigin="anonymous" referrerpolicy="no-referrer"></a>`).join('')}</div>` : ''}${sources.length ? `<p class="detail-sources">${escapeHTML(t('资料来源'))} · ${sources.map(source => `<a href="${escapeHTML(Library.secureURL(source.url))}" target="_blank" rel="noopener noreferrer">${escapeHTML(source.name)}</a>`).join(' · ')}</p>` : ''}</section><section class="detail-information"><h2>${escapeHTML(t('游戏资料'))}</h2><dl class="detail-facts">${detailFacts(game)}</dl></section></div><details class="detail-technical"><summary>${escapeHTML(t('版本、文件与运行检查'))}</summary>${launchConfigDetails(game)}${reviewDetails(game)}</details>`;
     renderDetailPage();
     bindImageErrors($('game-detail'));
     $('game-detail').querySelectorAll('.detail-screenshots img').forEach(img => img.addEventListener('error', () => { const label = document.createElement('span'); label.className = 'screenshot-unavailable'; label.textContent = t('暂时无法载入这张画面'); img.replaceWith(label); }, {once: true}));
     updateLaunchButton();
-    renderLaunchChoices(game); loadLaunchOptions(game); renderDownloadOption(game); loadDownloadOptions(game);
+    renderLaunchChoices(game); loadLaunchOptions(game);
     $('launch-game').addEventListener('click', () => launchGame(game, {launchMode: selectedLaunchMode(game)}));
-    $('download-game').addEventListener('click', () => downloadGame(game));
     $('detail-favorite').addEventListener('click', () => toggleFavorite(game.id));
     for (const name of ['evidence', 'copies']) $('review-' + name + '-toggle')?.addEventListener('click', (event) => {
       const panel = $('review-' + name); panel.hidden = !panel.hidden;
@@ -2047,6 +2036,10 @@
     const note = state.selected?.id === game.id ? $('game-detail').querySelector('.detail-note') : null;
     if (note && (requestedMode === 'stream' || requestedMode === 'auto' && game.mode === 'stream')) { note.hidden = false; note.textContent = t("首次解压可能需要数分钟，请稍候。"); }
     try {
+      if (requestedMode.startsWith('browser-') || requestedMode === 'auto' && game.mode === 'browser') {
+        if (!await prepareDownloadStorage(game, {kind: 'launch', game, launchOptions: {replaceSessionId, networkRoomId, launchMode: requestedMode}}, {allowTemporary: requestedMode === 'auto'})) return;
+        if (epoch !== state.profileEpoch) return;
+      }
       const result = await requestGameLaunch(game.id, {mode: requestedMode, device_id: displayDeviceId, ...(replaceSessionId ? {replace_session_id: replaceSessionId} : {}), ...(networkRoomId ? {network_room_id: networkRoomId} : {})});
       if (epoch !== state.profileEpoch) return;
       const url = localURL(result.play_url, [`${state.profile.base_path}/play/`, `${state.profile.base_path}/stream/`]);

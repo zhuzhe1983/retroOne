@@ -189,7 +189,7 @@ function launchHarness() {
   const ctx=vm.createContext({
     state:{profile:{id:'player1',base_path:'/p/player1'},profileEpoch:1,selected:null,playMode:null,launching:false},
     $:()=>({open:false}), t:s=>s, displayDeviceId:'device',
-    selectedLaunchMode:()=> 'browser-p2p', currentLaunchOptions:()=>options().options,
+    prepareDownloadStorage:async()=>true,selectedLaunchMode:()=> 'browser-p2p', currentLaunchOptions:()=>options().options,
     requestGameLaunch:(id,body)=>{calls.push({id,body});return new Promise((resolve,reject)=>pending.push({resolve,reject}));},
     localURL:url=>url, sessionNetworkRoomId:()=>null, renderFamilyPresence:()=>{},closeNetwork:()=>{},
     openPlayer:(...args)=>opened.push(args),refreshSession:()=>{},notify:()=>{},interfaceError:message=>new Error(message),
@@ -200,7 +200,7 @@ function launchHarness() {
 }
 
 test('explicit browser launch is allowed when automatic catalog mode is unavailable', async () => {
-  const h=launchHarness(); const promise=h.ctx.launchGame(h.game,{launchMode:'browser-http'});
+  const h=launchHarness(); const promise=h.ctx.launchGame(h.game,{launchMode:'browser-http'}); await new Promise(setImmediate);
   assert.equal(h.calls[0].body.mode,'browser-http');
   h.pending[0].resolve({mode:'browser',play_url:'/p/player1/play/g?experimental=true&transport=http'}); await promise;
   assert.equal(h.opened[0][2],'browser');
@@ -219,23 +219,23 @@ test('conflict stores the selected launch mode and retries preserve the confirme
   const first=h.ctx.launchGame(h.game,{launchMode:'stream'});
   h.pending[0].reject(Object.assign(new Error('conflict'),{status:409,detail:{code:'session_conflict',session:{id:'old'}}})); await first;
   assert.equal(h.conflicts[0][2].launchMode,'stream');
-  const second=h.ctx.launchGame(h.game,{launchMode:h.conflicts[0][2].launchMode,replaceSessionId:'old'});
+  const second=h.ctx.launchGame(h.game,{launchMode:h.conflicts[0][2].launchMode,replaceSessionId:'old'}); await new Promise(setImmediate);
   assert.deepEqual(plain(h.calls[1].body),{mode:'stream',device_id:'device',replace_session_id:'old'});
   h.pending[1].resolve({mode:'stream',play_url:'/p/player1/stream/'}); await second;
 });
 
 test('browser conflict confirmation freezes its resolved transport even after the preference changes', async () => {
   const h=launchHarness();
-  const first=h.ctx.launchGame(h.game,{launchMode:'browser-p2p'});
+  const first=h.ctx.launchGame(h.game,{launchMode:'browser-p2p'}); await new Promise(setImmediate);
   h.pending[0].reject(Object.assign(new Error('conflict'),{status:409,detail:{code:'session_conflict',session:{id:'old'}}})); await first;
   h.ctx.selectedLaunchMode=()=> 'browser-http';
-  const second=h.ctx.launchGame(h.game,{launchMode:h.conflicts[0][2].launchMode,replaceSessionId:'old'});
+  const second=h.ctx.launchGame(h.game,{launchMode:h.conflicts[0][2].launchMode,replaceSessionId:'old'}); await new Promise(setImmediate);
   assert.equal(h.calls[1].body.mode,'browser-p2p'); assert.equal(h.calls[1].body.replace_session_id,'old');
   h.pending[1].resolve({mode:'browser',play_url:'/p/player1/play/g?transport=p2p'}); await second;
 });
 
 test('a launch response after a player change cannot open the prior player game', async () => {
-  const h=launchHarness(); const promise=h.ctx.launchGame(h.game);
+  const h=launchHarness(); const promise=h.ctx.launchGame(h.game); await new Promise(setImmediate);
   h.ctx.state.profileEpoch++; h.ctx.state.launching=true;
   h.pending[0].resolve({mode:'browser',play_url:'/p/player1/play/g'}); await promise;
   assert.equal(h.opened.length,0); assert.equal(h.ctx.state.launching,true);
@@ -262,4 +262,19 @@ test('detail controller navigation includes the advanced switch and activates it
   ctx.focusDetailNeighbor('down'); assert.equal(document.activeElement,toggle);
   ctx.activateFocused(); assert.equal(clicked,1);
   ctx.focusDetailNeighbor('down'); assert.equal(document.activeElement,select);
+});
+
+
+test('browser launch waits for storage selection before POSTing or opening a frame',async()=>{
+  const h=launchHarness();let resume;h.ctx.prepareDownloadStorage=()=>new Promise(resolve=>resume=resolve);
+  const start=h.ctx.launchGame(h.game,{launchMode:'browser-http'});
+  assert.equal(h.calls.length,0);assert.equal(h.opened.length,0);
+  resume(false);await start;
+  assert.equal(h.calls.length,0);assert.equal(h.ctx.state.launching,false);
+});
+test('profile change while storage chooser initializes never sends a stale launch',async()=>{
+  const h=launchHarness();let resume;h.ctx.prepareDownloadStorage=()=>new Promise(resolve=>resume=resolve);
+  const start=h.ctx.launchGame(h.game,{launchMode:'browser-http'});
+  h.ctx.state.profileEpoch++;resume(true);await start;
+  assert.equal(h.calls.length,0);assert.equal(h.opened.length,0);
 });

@@ -1,5 +1,14 @@
 /* Interface translations only. Game metadata and server diagnostics retain their original text. */
 window.RetroI18n.add('en', {
+  "取消": "Cancel",
+  "下载说明": "About downloads",
+  "保存位置说明": "About save locations",
+  "分享说明": "About sharing",
+  "固定目录方便长期保存，下次游玩直接读取。浏览器缓存无需选目录，但清除网站数据会删除缓存。": "A folder keeps games for reuse next time. Browser cache needs no folder, but is deleted when you clear site data.",
+  "下载完成后可更换位置，当前进度会保留。": "You can change location after the download finishes. Your progress is kept.",
+  "请选择": "Choose a location",
+  "暂不支持浏览器运行": "Browser play is not supported yet",
+
   "授权已有游戏目录": "Grant access to your game folder",
   "原目录仍保留着游戏文件。重新授权后会继续下载或读取已有文件。": "Your game files are still in the original folder. Grant access again to resume downloads or read existing files.",
   "下载前，先选保存位置": "Choose where to save before downloading",

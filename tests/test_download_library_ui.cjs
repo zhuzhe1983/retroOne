@@ -128,7 +128,7 @@ test('download overview counts only active incomplete transfers and keeps comple
 test('closing the download manager leaves the job owner intact and returns focus to the game control',()=>{
   const calls=[],button={isConnected:true,focus:()=>calls.push('focus')};
   const ctx=vm.createContext({state:{downloadReturn:button,downloadFromSelf:false,downloadPending:null},
-    $:()=>({close:()=>calls.push('close')}),syncModalBody:()=>{},window:{RetroRomLibrary:{pauseAll:()=>assert.fail('closing UI must not cancel downloads')}}});
+    $:()=>({close:()=>calls.push('close')}),closeDownloadHelp:()=>{},syncModalBody:()=>{},window:{RetroRomLibrary:{pauseAll:()=>assert.fail('closing UI must not cancel downloads')}}});
   install(ctx,'closeDownloads');ctx.closeDownloads();assert.deepEqual(calls,['close','focus']);
 });
 

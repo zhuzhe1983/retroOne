@@ -499,8 +499,11 @@
     $('downloads-title').textContent = t(reconnecting ? '授权已有游戏目录' : choosing ? '下载前，先选保存位置' : '下载与分享');
     $('downloads-description').textContent = t(reconnecting ? '原目录仍保留着游戏文件。重新授权后会继续下载或读取已有文件。' : choosing ? '保存到固定目录，下次访问可直接读取已有文件，无需重复下载。同一浏览器的玩家共用游戏文件，存档各自保存。' : '把游戏留在这台设备，之后直接读取；能否在浏览器运行取决于模拟器支持。');
     const storage = downloadStoragePresentation(directory, Boolean(manager));
-    $('download-directory-title').textContent = storage.title;
-    $('download-directory-note').textContent = reconnecting ? storage.note : choosing && needsChoice && !directory.location_change_blocked ? t('推荐选择专门保存游戏的固定目录；也可以使用浏览器缓存，清除网站数据时缓存会被删除。') : directory.location_change_blocked ? t('还有未完成的下载，完成后才能更换保存位置。已下载的部分会保留。') : storage.note;
+    $('download-directory-title').textContent = needsChoice && !directory.location_change_blocked ? t('请选择') : storage.title;
+    const storageNote = reconnecting ? storage.note : directory.location_change_blocked ? t('下载完成后可更换位置，当前进度会保留。') : !manager || directory.error || !ready && !needsChoice ? storage.note : '';
+    $('download-directory-note').textContent = storageNote;
+    $('download-directory-note').hidden = !storageNote;
+    if ($('download-storage-detail')) $('download-storage-detail').textContent = storage.note;
     $('choose-download-directory').hidden = directory.can_choose_directory === false;
     $('choose-download-directory').disabled = !supported || state.downloadBusy || directory.location_change_blocked === true;
     $('choose-download-directory').textContent = t(directory.name && !storage.browser ? '更换目录' : '选择固定目录（推荐）');
@@ -513,8 +516,10 @@
     $('download-sharing-toggle').disabled = !manager;
     $('download-sharing-toggle').setAttribute('aria-checked', String(state.browserP2P));
     $('download-pending').hidden = !state.downloadPending;
-    $('download-pending').textContent = state.downloadPending ? t('准备下载《{title}》。选择并授权目录后继续。', {title: state.downloadPending.title}) : '';
+    $('download-pending').textContent = state.downloadPending?.title || '';
+    $('minimize-downloads').textContent = t(choosing ? '取消' : state.playMode ? '返回游戏' : '继续浏览');
     const entries = Array.isArray(snapshot?.entries) ? snapshot.entries : [];
+    if ($('download-list-section')) $('download-list-section').hidden = choosing && !entries.length;
     $('download-summary').textContent = t('{count} 个文件 · {size}', {count: number(entries.length), size: formatSize(entries.reduce((total, entry) => total + (Number(entry.size) || 0), 0))});
     const list = $('download-entries'), active = list.contains(document.activeElement) ? {id: document.activeElement.dataset.downloadId, action: document.activeElement.dataset.downloadAction} : null;
     const html = entries.length ? entries.map(entry => {
@@ -523,8 +528,8 @@
       const running = ['downloading', 'checking', 'verifying', 'sharing', 'seeding', 'queued'].includes(entry.status);
       const action = running ? 'pause' : 'resume', label = running ? entry.complete ? t('停止分享') : t('暂停下载') : entry.complete ? t('继续分享') : t('继续下载');
       const source = Number.isFinite(entry.http_bytes) || Number.isFinite(entry.peer_bytes) ? t('服务器 {http} · P2P {peer}', {http: formatSize(entry.http_bytes || 0), peer: formatSize(entry.peer_bytes || 0)}) : '';
-      return `<article class="download-entry"><div class="download-entry-heading"><strong title="${escapeHTML(entry.title || entry.name)}">${escapeHTML(entry.title || entry.name || t('未命名游戏'))}</strong><span class="download-entry-status" data-status="${escapeHTML(entry.status)}">${escapeHTML(downloadEntryStatus(entry))}</span></div><div class="download-entry-progress"><progress value="${percent}" max="100" aria-label="${escapeHTML(t('下载进度'))}"></progress><span>${percent}%</span></div><p class="download-entry-size">${escapeHTML(t('{received} / {total}', {received: formatSize(entry.complete ? total : received), total: formatSize(total)}))}${source ? ` · ${escapeHTML(source)}` : ''}</p><div class="download-entry-footer"><span>${escapeHTML(t('已分享 {size} · {peers} 个连接', {size: formatSize(entry.uploaded || 0), peers: number(entry.peers || 0)}))}</span><button type="button" class="button button-secondary" data-download-id="${escapeHTML(entry.id)}" data-download-action="${action}" ${state.downloadEntryBusy.has(entry.id) || !ready || action === 'resume' && entry.complete && !state.browserP2P ? 'disabled' : ''}>${escapeHTML(label)}</button></div><p class="download-entry-compatibility">${escapeHTML(downloadSupportLabel(entry))}</p>${entry.error ? `<p class="download-entry-error">${escapeHTML(downloadProblemMessage(entry.error))}</p>` : ''}</article>`;
-    }).join('') : `<div class="download-empty">${icon('cloud')}<strong>${escapeHTML(t('还没有保存游戏文件'))}</strong><p>${escapeHTML(t('选择浏览器运行后，下载进度会显示在这里。可以继续浏览游戏库，稍后回来查看。'))}</p></div>`;
+      return `<article class="download-entry"><div class="download-entry-heading"><strong title="${escapeHTML(entry.title || entry.name)}">${escapeHTML(entry.title || entry.name || t('未命名游戏'))}</strong><span class="download-entry-status" data-status="${escapeHTML(entry.status)}">${escapeHTML(downloadEntryStatus(entry))}</span></div><div class="download-entry-progress"><progress value="${percent}" max="100" aria-label="${escapeHTML(t('下载进度'))}"></progress><span>${percent}%</span></div><p class="download-entry-size">${escapeHTML(t('{received} / {total}', {received: formatSize(entry.complete ? total : received), total: formatSize(total)}))}${source ? ` · ${escapeHTML(source)}` : ''}</p><div class="download-entry-footer"><span>${escapeHTML(t('已分享 {size} · {peers} 个连接', {size: formatSize(entry.uploaded || 0), peers: number(entry.peers || 0)}))}</span><button type="button" class="button button-secondary" data-download-id="${escapeHTML(entry.id)}" data-download-action="${action}" ${state.downloadEntryBusy.has(entry.id) || !ready || action === 'resume' && entry.complete && !state.browserP2P ? 'disabled' : ''}>${escapeHTML(label)}</button></div>${state.downloadSupport.get(`${state.profileEpoch}:${entry.gameId}`)?.data?.browser_launchable === false ? `<p class="download-entry-compatibility">${escapeHTML(t('暂不支持浏览器运行'))}</p>` : ''}${entry.error ? `<p class="download-entry-error">${escapeHTML(downloadProblemMessage(entry.error))}</p>` : ''}</article>`;
+    }).join('') : `<div class="download-empty"><span>${escapeHTML(t('还没有保存游戏文件'))}</span></div>`;
     if (list.innerHTML !== html) {
       list.innerHTML = html;
       if (active) [...list.querySelectorAll('[data-download-id]')].find(button => button.dataset.downloadId === active.id)?.focus({preventScroll: true});
@@ -612,6 +617,28 @@
     try { await manager.init(); receiveDownloadSnapshot(manager.snapshot()); }
     catch (error) { downloadMessage(downloadProblemMessage(error), true); receiveDownloadSnapshot(manager.snapshot()); }
   }
+  let downloadHelp = null;
+  function closeDownloadHelp() {
+    if (!downloadHelp) return false;
+    downloadHelp.button.setAttribute('aria-expanded', 'false');
+    downloadHelp.button.removeAttribute('aria-describedby');
+    downloadHelp.panel.hidden = true; downloadHelp = null; return true;
+  }
+  function showDownloadHelp(button, pinned = false) {
+    const panel = $(button?.dataset.downloadHelp);
+    if (!panel || !$('downloads-dialog').open) return;
+    if (downloadHelp?.button !== button) closeDownloadHelp();
+    downloadHelp = {button, panel, pinned: pinned || Boolean(downloadHelp?.pinned)};
+    button.setAttribute('aria-expanded', 'true'); button.setAttribute('aria-describedby', panel.id); panel.hidden = false;
+    const anchor = button.getBoundingClientRect(), dialog = $('downloads-dialog').getBoundingClientRect();
+    const width = Math.min(340, dialog.width - 24, window.innerWidth - 24);
+    panel.style.width = `${width}px`;
+    const left = Math.max(Math.max(12, dialog.left + 12), Math.min(anchor.left, Math.min(window.innerWidth - width - 12, dialog.right - width - 12)));
+    const height = panel.getBoundingClientRect().height;
+    const below = anchor.bottom + 8, bottom = Math.min(window.innerHeight - 12, dialog.bottom - 12);
+    panel.style.left = `${left}px`;
+    panel.style.top = `${Math.max(12, below + height <= bottom ? below : anchor.top - height - 8)}px`;
+  }
   function showDownloads({fromSelf = false} = {}) {
     state.downloadReturn = document.activeElement; state.downloadFromSelf = fromSelf;
     window.RetroMobilePlayer?.release();
@@ -624,6 +651,7 @@
     (preferred || $('close-downloads')).focus();
   }
   function closeDownloads() {
+    closeDownloadHelp();
     state.downloadPending = null; $('downloads-dialog').close(); syncModalBody();
     if (state.playMode) { window.RetroMobilePlayer?.setMenu(false); $('game-frame')?.focus({preventScroll: true}); }
     else if (state.downloadFromSelf) { showSelf(); $('self-download-settings').focus(); }
@@ -2368,7 +2396,7 @@
           else if (key === 'accept') document.activeElement?.click();
         }
         else if ($('downloads-dialog').open) {
-          if (key === 'back') closeDownloads();
+          if (key === 'back') { if (!closeDownloadHelp()) closeDownloads(); }
           else if (directional) focusModalAction($('downloads-dialog'), key);
           else if (key === 'accept') activateFocused();
         }
@@ -2468,8 +2496,25 @@
   $('play-downloads').addEventListener('click', () => showDownloads());
   $('minimize-downloads').addEventListener('click', closeDownloads);
   $('close-downloads').addEventListener('click', closeDownloads);
-  $('downloads-dialog').addEventListener('cancel', event => { event.preventDefault(); closeDownloads(); });
-  $('downloads-dialog').addEventListener('close', syncModalBody);
+  $('downloads-dialog').addEventListener('cancel', event => { event.preventDefault(); if (!closeDownloadHelp()) closeDownloads(); });
+  $('downloads-dialog').addEventListener('close', () => { closeDownloadHelp(); syncModalBody(); });
+  for (const button of document.querySelectorAll('[data-download-help]')) {
+    button.addEventListener('click', () => {
+      if (downloadHelp?.button === button && downloadHelp.pinned) closeDownloadHelp();
+      else showDownloadHelp(button, true);
+    });
+    button.addEventListener('pointerenter', event => { if (event.pointerType === 'mouse') showDownloadHelp(button); });
+    button.addEventListener('focus', () => { if (button.matches(':focus-visible')) showDownloadHelp(button); });
+    const dismiss = () => { if (!downloadHelp?.pinned) closeDownloadHelp(); };
+    button.addEventListener('pointerleave', event => { if (!$(button.dataset.downloadHelp)?.contains(event.relatedTarget) && !button.matches(':focus-visible')) dismiss(); });
+    button.addEventListener('blur', dismiss);
+    $(button.dataset.downloadHelp)?.addEventListener('pointerleave', event => { if (!button.contains(event.relatedTarget)) dismiss(); });
+  }
+  document.addEventListener('pointerdown', event => {
+    if (downloadHelp && !downloadHelp.button.contains(event.target) && !downloadHelp.panel.contains(event.target)) closeDownloadHelp();
+  });
+  $('downloads-dialog').addEventListener('scroll', closeDownloadHelp);
+  window.addEventListener('resize', closeDownloadHelp);
   $('choose-download-directory').addEventListener('click', () => chooseDownloadDirectory());
   $('reconnect-download-directory').addEventListener('click', () => chooseDownloadDirectory(true));
   $('use-browser-storage')?.addEventListener('click', () => chooseDownloadDirectory(false, true));
@@ -2628,7 +2673,7 @@
   document.addEventListener('keydown', (event) => {
     if (event.ctrlKey || event.metaKey || event.altKey || event.isComposing || (state.playMode && !$('profile-dialog').open && !$('replace-dialog').open && !$('network-dialog').open && !$('display-dialog').open && !$('management-dialog').open && !$('downloads-dialog').open) || $('help-dialog').open) return;
     if ($('downloads-dialog').open) {
-      if (event.key === 'Escape') { event.preventDefault(); closeDownloads(); }
+      if (event.key === 'Escape') { event.preventDefault(); if (!closeDownloadHelp()) closeDownloads(); }
       else { const direction = {ArrowLeft:'left', ArrowRight:'right', ArrowUp:'up', ArrowDown:'down', KeyA:'left', KeyD:'right', KeyW:'up', KeyS:'down'}[event.code]; if (direction) { event.preventDefault(); focusModalAction($('downloads-dialog'), direction); } }
       return;
     }

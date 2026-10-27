@@ -587,9 +587,11 @@
         let unsubscribe = () => {}, finished = false;
         const finish = (problem, file) => { if (finished) return; finished = true; unsubscribe(); signal?.removeEventListener('abort', cancel); problem ? reject(problem) : resolve(file); };
         const cancel = () => {
-          // Cancelling a game launch only cancels the new, incomplete transfer it
-          // owns. Existing background downloads and finished seeding stay alive.
-          if (ownsTransfer && this.jobs.get(entry.id) === ownedJob && !this.entries.get(entry.id)?.complete) this.pause(entry.id).catch(() => {});
+          // Leaving/replacing the iframe detaches only this File waiter. The
+          // parent library keeps downloading independently of the player view.
+          // An explicit cancel still pauses only its own incomplete transfer;
+          // another player's waiter and completed seeders cannot be stopped.
+          if (signal?.reason !== 'retroone:detach' && ownsTransfer && this.jobs.get(entry.id) === ownedJob && !this.entries.get(entry.id)?.complete) this.pause(entry.id).catch(() => {});
           finish(aborted());
         };
         signal?.addEventListener('abort', cancel, {once: true});

@@ -218,7 +218,7 @@
       this.epoch = 0; this.phase = 'idle'; this.client = null; this.torrent = null;
       this.abort = null; this.timer = null; this.stats = createStats(); this.received = 0;
       this.manifest = null; this.ui = null; this.sharing = null; this.failure = null; this.unloaded = false;
-      this.onLeave = () => { this.unloaded = true; this.cancel(false); };
+      this.onLeave = () => { this.unloaded = true; this.cancel(false, {keepDownload: true}); };
       env.addEventListener?.('pagehide', this.onLeave);
       env.addEventListener?.('beforeunload', this.onLeave);
     }
@@ -266,8 +266,8 @@
       if (client && !client.destroyed) { try { client.destroy(() => {}); } catch { /* The client may have failed first. */ } }
     }
     clearTimers() { if (this.timer !== null) this.env.clearInterval(this.timer); this.timer = null; }
-    cancel(show = true) {
-      this.epoch++; this.abort?.abort(); this.clearTimers(); this.destroyClient();
+    cancel(show = true, {keepDownload = false} = {}) {
+      this.epoch++; this.abort?.abort(keepDownload ? 'retroone:detach' : undefined); this.clearTimers(); this.destroyClient();
       if (this.phase === 'running') { this.phase = 'closed'; return; }
       this.phase = 'cancelled';
       if (show && this.ui) {
@@ -387,7 +387,7 @@
       const status = doc.getElementById('status'); if (status) status.after(note); else doc.body.append(note);
     }
     async startCachedOrDefault() {
-      this.cancel(false); if (this.unloaded) return;
+      this.cancel(false, {keepDownload: true}); if (this.unloaded) return;
       this.abort = new this.env.AbortController(); const epoch = this.epoch;
       this.phase = 'preparing'; this.failure = null; this.temporaryFallback = false;
       this.env.document.getElementById('rom-temporary-notice')?.remove();
@@ -421,7 +421,7 @@
     }
     async start(transport = this.config.transport, fallbackFrom = null) {
       if (this.config.cachedOnly) return this.startCachedOrDefault();
-      this.cancel(false); this.sharing?.wrapper.remove(); this.sharing = null;
+      this.cancel(false, {keepDownload: true}); this.sharing?.wrapper.remove(); this.sharing = null;
       if (this.unloaded) return;
       if (!['http', 'p2p'].includes(transport)) { this.phase = 'error'; return; }
       this.config.transport = transport; this.phase = 'preparing'; this.stats = createStats(); this.received = 0; this.manifest = null; this.failure = null;
@@ -585,7 +585,7 @@
   }
   let active;
   return {sameOriginURL, validateManifest, clientEligibility, webtorrentOptions, createStats, normalizeZipForLaunch, DownloadController,
-    start(config) { if (!root) throw new Error('Browser required'); active?.cancel(false); active = new DownloadController(config, root); return active.start(); },
+    start(config) { if (!root) throw new Error('Browser required'); active?.cancel(false, {keepDownload: true}); active = new DownloadController(config, root); return active.start(); },
     cancel() { active?.cancel(); }, stopSharing() { active?.stopSharing(); }, snapshot() { return active?.snapshot() || {phase: 'idle'}; },
   };
 });

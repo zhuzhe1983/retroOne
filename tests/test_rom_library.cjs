@@ -494,3 +494,38 @@ test('a refused final location check restores completed sharing without resuming
  assert.equal(h.manager.state.owner,owner);assert.equal(h.clients[1].downloaded,0);assert.equal(h.manager.entries.get('manual-complete').paused,true);assert.equal(h.manager.entries.get('manual-partial').paused,true);assert.equal(h.manager.jobs.size,1);
  assert.ok((await h.persistence.load()).entries.some(entry=>entry.id==='remote-queued'));await pauseAll();
 });
+
+
+test('detaching the launch waiter keeps its own partial transfer alive and reusable across players',async()=>{
+ let release;const gate=new Promise(resolve=>release=resolve);let held=false;
+ const h=setup({managerOptions:{afterPiece:async index=>{if(index===0&&!held){held=true;await gate;}}}});await h.manager.chooseDirectory();
+ const signal=new AbortController();const waiting=h.manager.ensureFile(fixture(),{gameId:'game1',profileId:'player1',manifestUrl:'/manifest',signal:signal.signal});
+ await until(()=>held);const entry=h.manager.snapshot().entries[0],job=h.manager.jobs.get(entry.id);assert.equal(h.clients[0].downloaded,4);
+ signal.abort('retroone:detach');await assert.rejects(waiting,{name:'AbortError'});
+ assert.equal(h.manager.listeners.size,0);assert.equal(h.manager.jobs.get(entry.id),job);assert.equal(job.abort.signal.aborted,false);assert.equal(h.manager.entries.get(entry.id).paused,false);assert.equal(h.clients[0].destroyed,false);
+ release();await until(()=>h.manager.snapshot().entries[0].complete);await until(()=>h.manager.jobs.size===0);
+ const file=await h.manager.ensureFile(fixture(),{gameId:'game1',profileId:'player2',manifestUrl:'/p/player2/manifest'});
+ assert.equal(file.size,10);assert.equal(h.clients.length,1);assert.equal(h.clients[0].downloaded,10);assert.deepEqual([...new Uint8Array(await file.slice(0,4).arrayBuffer()),...new Uint8Array(await file.slice(4,8).arrayBuffer()),...new Uint8Array(await file.slice(8,10).arrayBuffer())],[1,2,3,4,5,6,7,8,9,10]);
+});
+test('explicit cancellation still pauses the launch-owned partial download and preserves resumable pieces',async()=>{
+ let release;const gate=new Promise(resolve=>release=resolve);let held=false;
+ const h=setup({managerOptions:{afterPiece:async index=>{if(index===0&&!held){held=true;await gate;}}}});await h.manager.chooseDirectory();
+ const signal=new AbortController();const waiting=h.manager.ensureFile(fixture(),{gameId:'game1',profileId:'player1',manifestUrl:'/manifest',signal:signal.signal});
+ await until(()=>held);const id=h.manager.snapshot().entries[0].id;signal.abort();await assert.rejects(waiting,{name:'AbortError'});await until(()=>h.manager.jobs.size===0);
+ assert.equal(h.manager.listeners.size,0);assert.equal(h.manager.entries.get(id).paused,true);assert.equal(h.clients[0].destroyed,true);assert.equal(h.clients[0].downloaded,4);
+ release();await h.manager.resume(id);await until(()=>h.manager.snapshot().entries[0].complete);await until(()=>h.manager.jobs.size===0);
+ assert.equal(h.clients[1].downloaded,6);assert.equal((await h.manager.getFile({gameId:'game1',revision:'r1'})).size,10);
+});
+test('another player cannot cancel the detached owners ongoing background download',async()=>{
+ let response;const h=setup({fetch:()=>new Promise(resolve=>response=resolve)});await h.manager.chooseDirectory();
+ const ownerSignal=new AbortController(),otherSignal=new AbortController();
+ const owner=h.manager.ensureFile(fixture(),{gameId:'game1',profileId:'player1',manifestUrl:'/manifest',signal:ownerSignal.signal});await until(()=>Boolean(response));
+ ownerSignal.abort('retroone:detach');await assert.rejects(owner,{name:'AbortError'});const job=[...h.manager.jobs.values()][0];
+ const other=h.manager.ensureFile(fixture(),{gameId:'game1',profileId:'player2',manifestUrl:'/p/player2/manifest',signal:otherSignal.signal});await tick();otherSignal.abort();await assert.rejects(other,{name:'AbortError'});
+ assert.equal(job.abort.signal.aborted,false);assert.equal(h.manager.listeners.size,0);response({ok:true,status:200,json:async()=>fixture()});await until(()=>h.manager.snapshot().entries[0].complete);await until(()=>h.manager.jobs.size===0);assert.equal(h.clients[0].downloaded,10);
+});
+test('aborting an already completed launch never stops its background seeding',async()=>{
+ const h=setup({sharing:true});await h.manager.chooseDirectory();const signal=new AbortController();
+ await h.manager.ensureFile(fixture(),{gameId:'game1',profileId:'player1',manifestUrl:'/manifest',signal:signal.signal});await until(()=>!h.manager.snapshot().directory.location_change_blocked);
+ const job=[...h.manager.jobs.values()][0];signal.abort();await tick();assert.equal(job.abort.signal.aborted,false);assert.equal(h.clients[0].destroyed,false);assert.equal(h.manager.snapshot().entries[0].status,'sharing');assert.equal(h.manager.listeners.size,0);await h.manager.pauseAll();
+});

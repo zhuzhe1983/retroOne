@@ -617,14 +617,16 @@
     try { await manager.init(); receiveDownloadSnapshot(manager.snapshot()); }
     catch (error) { downloadMessage(downloadProblemMessage(error), true); receiveDownloadSnapshot(manager.snapshot()); }
   }
-  let downloadHelp = null;
+  let downloadHelp = null, downloadHelpHideTimer = null;
   function closeDownloadHelp() {
+    clearTimeout(downloadHelpHideTimer);
     if (!downloadHelp) return false;
     downloadHelp.button.setAttribute('aria-expanded', 'false');
     downloadHelp.button.removeAttribute('aria-describedby');
     downloadHelp.panel.hidden = true; downloadHelp = null; return true;
   }
   function showDownloadHelp(button, pinned = false) {
+    clearTimeout(downloadHelpHideTimer);
     const panel = $(button?.dataset.downloadHelp);
     if (!panel || !$('downloads-dialog').open) return;
     if (downloadHelp?.button !== button) closeDownloadHelp();
@@ -2505,7 +2507,14 @@
     });
     button.addEventListener('pointerenter', event => { if (event.pointerType === 'mouse') showDownloadHelp(button); });
     button.addEventListener('focus', () => { if (button.matches(':focus-visible')) showDownloadHelp(button); });
-    const dismiss = () => { if (!downloadHelp?.pinned) closeDownloadHelp(); };
+    const dismiss = () => {
+      clearTimeout(downloadHelpHideTimer);
+      const current = downloadHelp;
+      downloadHelpHideTimer = setTimeout(() => {
+        if (current && downloadHelp === current && !current.pinned && !current.panel.matches(':hover') && !current.button.matches(':hover, :focus-visible')) closeDownloadHelp();
+      }, 180);
+    };
+    $(button.dataset.downloadHelp)?.addEventListener('pointerenter', () => clearTimeout(downloadHelpHideTimer));
     button.addEventListener('pointerleave', event => { if (!$(button.dataset.downloadHelp)?.contains(event.relatedTarget) && !button.matches(':focus-visible')) dismiss(); });
     button.addEventListener('blur', dismiss);
     $(button.dataset.downloadHelp)?.addEventListener('pointerleave', event => { if (!button.contains(event.relatedTarget)) dismiss(); });

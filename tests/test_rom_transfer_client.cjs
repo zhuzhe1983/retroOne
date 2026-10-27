@@ -418,3 +418,18 @@ test('direct play URLs wait for storage choice before any manifest, ROM, peer, o
     } finally {h.controller.cancel(false);}
   }
 });
+
+
+test('leaving a waiting iframe detaches from the parent transfer; explicit cancel retains cancellation intent',async()=>{
+  for(const leave of [true,false]) {
+    const h=harness();let signal;
+    attachLibrary(h,{ensure:async(manifest,opts)=>{signal=opts.signal;return new Promise((resolve,reject)=>signal.addEventListener('abort',()=>reject(Object.assign(new Error('cancelled'),{name:'AbortError'})),{once:true}));}});
+    try {
+      const started=h.controller.start();await flush();assert(signal);
+      if(leave)h.listeners.pagehide();else h.controller.cancel();
+      await started;assert.equal(signal.aborted,true);
+      if(leave)assert.equal(signal.reason,'retroone:detach');else assert.notEqual(signal.reason,'retroone:detach');
+      assert.equal(h.scripts.length,0,'detached wait must never start an emulator later');
+    } finally {h.controller.cancel(false);}
+  }
+});

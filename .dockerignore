@@ -1,4 +1,5 @@
 .git
+android
 .venv
 **/node_modules
 container/p2p/dist

@@ -12,6 +12,19 @@ from scripts import fetch_runtime as runtime
 from scripts.check_public_source import violations
 
 
+def test_android_wrapper_exemption_is_exact_and_hash_pinned(tmp_path):
+    path = 'android/gradle/wrapper/gradle-wrapper.jar'
+    target = tmp_path / path
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b'PK\0not the reviewed Gradle wrapper')
+    assert violations([path], tmp_path) == [(path, 'build tool checksum mismatch')]
+    other = tmp_path / 'unreviewed.jar'
+    other.write_bytes(b'PK\0not a permitted binary')
+    assert violations(['unreviewed.jar'], tmp_path)
+    root = Path(__file__).resolve().parents[1]
+    assert not violations([path], root)
+
+
 def fixture_cache(tmp_path):
     vendor = tmp_path / 'vendor'
     archive = vendor / 'runtime-downloads/demo_libretro.so.zip'

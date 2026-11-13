@@ -264,6 +264,10 @@ Display preferences are saved separately for each player and browser/device: use
 - **NVIDIA**：只有后端适配接口，显卡透传、采集与 NVENC 链路尚未实现，当前不能仅改一个环境变量就迁移成功。
 - **帧率与并发**：60 FPS 是串流目标，不是全平台性能保证。成员数量上限不等于能同时运行同样数量的重型游戏。卡顿、声音异常与温度排查见 [性能说明](docs/performance.md)。
 
+## Android 本机版本
+
+原生 Android 客户端已放在 [`android/`](android/README.md)：提供 Apps / Games 双视图、可选默认桌面、玩家切换、收藏、最近游玩和全库排序，支持后台下载与校验、暂停和续传，并通过只读 content URI 调用本机 PPSSPP。PSP 云存档可查看并导出备份；Android 自动双向同步与模拟器玩家存档隔离尚未开放。首版验证 PSP 独立 ISO / CSO；PBP、CHD、多文件游戏和其他模拟器的边界见 [Android 使用说明](docs/android.md)。客户端不包含游戏、固件或模拟器，也不改动现有网页与云端服务。
+
 ## 文档与开发
 
 - [MCP 与只读观战：安装、连接和使用](docs/mcp.md) · [Agent Skill](docs/skills/retroone-agent/SKILL.md)

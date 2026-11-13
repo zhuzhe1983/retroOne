@@ -1,0 +1,24 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'io.retroone.android'
+    compileSdk 36
+    defaultConfig {
+        applicationId 'io.retroone.android'
+        minSdk 26
+        targetSdk 35
+        versionCode 2
+        versionName '0.2.0'
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    buildTypes { release { minifyEnabled false } }
+    testOptions { unitTests.returnDefaultValues = true }
+    lint { abortOnError true }
+}
+dependencies {
+    implementation 'androidx.core:core:1.15.0'
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20250517'
+    androidTestImplementation 'androidx.test:runner:1.6.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+}

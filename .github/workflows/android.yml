@@ -1,0 +1,40 @@
+name: Android client
+on:
+  push:
+    branches: [main]
+    paths: ['android/**', '.github/workflows/android.yml']
+  pull_request:
+    paths: ['android/**', '.github/workflows/android.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Android SDK platform
+        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;35.0.0"'
+      - name: Check public sources
+        run: python3 scripts/check_public_source.py
+      - name: Build and check (no device, ROMs or credentials)
+        run: ./android/gradlew -p android --no-daemon assembleDebug assembleDebugAndroidTest testDebugUnitTest lintDebug
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: RetroOne-Android-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: Android-check-reports
+          path: |
+            android/app/build/reports/
+            android/app/build/test-results/

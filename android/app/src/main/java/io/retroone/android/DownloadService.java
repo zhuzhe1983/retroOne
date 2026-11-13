@@ -165,9 +165,9 @@ public final class DownloadService extends Service {
     ServerConfig config = RetroApplication.from(this).credentials.load(item.base, item.http);
     ApiClient api = new ApiClient(config);
     String endpoint = "games/" + ServerConfig.encode(item.game);
-    JSONObject options = api.json(config.api(endpoint + "/download-options"));
-    if (!options.optBoolean("available"))
-      throw new IOException(options.optString("reason", "服务端不支持下载此资源"));
+    DownloadCapability options =
+        new DownloadCapability(api.json(config.api(endpoint + "/download-options")));
+    if (!options.available) throw new IOException(options.explanation());
     long deadline = System.currentTimeMillis() + 30 * 60 * 1000L;
     JSONObject json;
     while (true) {

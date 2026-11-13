@@ -33,7 +33,7 @@ adb -s DEVICE_SERIAL shell am start -n io.retroone.android/.MainActivity
 测试服务使用真实 RetroOne API，独立扫描临时目录。不会访问生产 ROM 根目录、调用游戏启动 API，或生成用户存档。生成器源码为本项目原创并以 CC0 提供；生成的 PBP/ISO/CSO 不纳入版本控制。
 
 ```sh
-.venv/bin/pip install --no-incremental -r android/tools/requirements-fixtures.txt
+.venv/bin/pip install -r android/tools/requirements-fixtures.txt
 .venv/bin/python android/tools/fixture_server.py \
   --root artifacts/android/local-fixture --port 18780 --throttle-kib 2048
 ```
@@ -82,3 +82,6 @@ adb -s DEVICE_SERIAL reverse --remove tcp:18780
 ```
 
 只移除本次创建的转发；不要移除其他任务的转发。
+
+
+0.2.1 的 `LibraryPreferencesUiTest` 使用同一 `fixtureBase`，从界面关注/取消关注 PSP、切换全库排序、收藏自制测试程序并验证服务端数据；只对独立夹具写入，结束恢复原连接及夹具偏好。`LibraryUiTest` 仍只读生产目录，增加紧凑布局高度、PSP 下载入口与玩家选择检查；宽屏须使用默认热度排序和全部游戏视图。截图留在设备应用的外部私有目录，不纳入公开仓库。

@@ -1,0 +1,7 @@
+<!-- Platform artwork shared with web/library-ui.js. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="32dp" android:height="32dp" android:viewportWidth="64" android:viewportHeight="64">
+    <path android:pathData="M11 16h42c8 0 9 10 9 16s-1 16-9 16H11C3 48 2 38 2 32s1-16 9-16Z" android:fillColor="@android:color/transparent" android:strokeColor="#A3DFFF" android:strokeWidth="2.2" android:strokeLineCap="round" android:strokeLineJoin="round"/>
+    <path android:pathData="M17.0,21.0h30.0v22.0h-30.0z" android:fillColor="@android:color/transparent" android:strokeColor="#A3DFFF" android:strokeWidth="2.2" android:strokeLineCap="round" android:strokeLineJoin="round"/>
+    <path android:pathData="M6 30h8m-4-4v8m42-4h6m-3-3v6" android:fillColor="@android:color/transparent" android:strokeColor="#A3DFFF" android:strokeWidth="2.2" android:strokeLineCap="round" android:strokeLineJoin="round"/>
+    <path android:pathData="M8.0,40.0a2.0,2.0 0 1,0 4.0,0a2.0,2.0 0 1,0 -4.0,0" android:fillColor="@android:color/transparent" android:strokeColor="#A3DFFF" android:strokeWidth="2.2" android:strokeLineCap="round" android:strokeLineJoin="round"/>
+</vector>

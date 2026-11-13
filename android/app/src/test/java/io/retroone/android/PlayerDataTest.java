@@ -19,6 +19,7 @@ public class PlayerDataTest {
   volatile Throwable serverError;
   ServerConfig config;
   String mode = "ok";
+  JSONObject library;
   AtomicInteger releases = new AtomicInteger(), escaped = new AtomicInteger();
   List<String> requests = new ArrayList<>();
 
@@ -28,6 +29,9 @@ public class PlayerDataTest {
     config =
         new ServerConfig(
             "http://127.0.0.1:" + server.getLocalPort() + "/p/player2", true, "Bearer fixture");
+    library =
+        new JSONObject(
+            "{\"pinned_platforms\":[\"switch\"],\"sort\":\"popularity\",\"direction\":\"desc\"}");
     serverThread =
         new Thread(
             () -> {
@@ -59,7 +63,16 @@ public class PlayerDataTest {
                   String extra = "";
                   int code = 200;
                   String body = "{}";
-                  if (path.endsWith("/favorite")) {
+                  if (path.endsWith("/settings/library")) {
+                    if (mode.equals("bad-settings")) body = "{}";
+                    else if (mode.equals("settings-redirect") && request.startsWith("PUT ")) {
+                      code = 307;
+                      extra = "Location: /p/player1/api/settings/library\r\n";
+                    } else {
+                      if (request.startsWith("PUT ")) library = new JSONObject(input);
+                      body = new JSONObject().put("settings", library).toString();
+                    }
+                  } else if (path.endsWith("/favorite")) {
                     assertEquals("POST", request.split(" ")[0]);
                     body =
                         new JSONObject()
@@ -121,6 +134,65 @@ public class PlayerDataTest {
 
   static JSONArray files(String path) throws Exception {
     return new JSONArray().put(new JSONObject().put("path", path).put("data", "cHJvZ3Jlc3M="));
+  }
+
+  @Test
+  public void webLibraryPreferencesRoundTripWithoutClobberingOtherFields() throws Exception {
+    LibrarySettings updated = LibrarySettings.update(config, "psp", true, null, null);
+    assertEquals(List.of("switch", "psp"), updated.pins);
+    assertEquals("popularity", updated.sort);
+    // Simulate a web edit between two Android actions.
+    library.put("pinned_platforms", new JSONArray(List.of("nes", "psp")));
+    updated = LibrarySettings.update(config, null, null, "release_date", "asc");
+    assertEquals(List.of("nes", "psp"), updated.pins);
+    assertEquals("release_date", updated.sort);
+    updated = LibrarySettings.update(config, "psp", false, null, null);
+    assertEquals(List.of("nes"), updated.pins);
+    assertEquals("asc", updated.direction);
+    assertTrue(requests.stream().allMatch(p -> p.startsWith("/p/player2/")));
+  }
+
+  @Test
+  public void failedSettingsReadDoesNotOverwritePreferences() {
+    mode = "bad-settings";
+    assertThrows(Exception.class, () -> LibrarySettings.update(config, "psp", true, null, null));
+    assertEquals(1, requests.size());
+    assertEquals("popularity", library.optString("sort"));
+  }
+
+  @Test
+  public void settingsRedirectNeverWritesToAnotherPlayer() {
+    mode = "settings-redirect";
+    assertThrows(Exception.class, () -> LibrarySettings.update(config, "psp", true, null, null));
+    assertEquals(2, requests.size()); // GET + rejected PUT, never follows Location.
+    assertTrue(requests.stream().allMatch(p -> p.startsWith("/p/player2/")));
+    assertEquals(1, library.optJSONArray("pinned_platforms").length());
+  }
+
+  @Test
+  public void fileDownloadsDoNotDependOnBrowserOrEmulatorSupport() throws Exception {
+    JSONObject options =
+        new JSONObject(
+            "{\"available\":true,\"name\":\"game.xci\",\"size_bytes\":6314501120,\"browser_launchable\":false}");
+    DownloadCapability download = new DownloadCapability(options);
+    assertTrue(download.available);
+    assertEquals(6314501120L, download.size);
+    options.put("available", false).put("reason", "此游戏包含多个文件或分盘，尚不支持完整打包下载");
+    assertTrue(new DownloadCapability(options).explanation().contains("多碟"));
+    options.remove("available");
+    assertThrows(IOException.class, () -> new DownloadCapability(options));
+  }
+
+  @Test
+  public void platformShortlistHonorsPinsRecentAndActiveWithoutDuplicates() throws Exception {
+    JSONObject psp = new JSONObject("{\"id\":\"psp\",\"last_played_at\":9}");
+    JSONObject nes = new JSONObject("{\"id\":\"nes\",\"last_played_at\":0}");
+    JSONObject ps2 = new JSONObject("{\"id\":\"ps2\",\"last_played_at\":0}");
+    assertEquals(
+        List.of(nes, psp, ps2),
+        LibrarySettings.visible(List.of(psp, nes, ps2), List.of("nes"), "ps2"));
+    assertEquals(
+        List.of(psp), LibrarySettings.visible(List.of(psp, nes, ps2), List.of("psp"), "psp"));
   }
 
   @Test

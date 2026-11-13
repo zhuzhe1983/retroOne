@@ -9,6 +9,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.StateListDrawable;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -19,7 +20,6 @@ import android.text.TextWatcher;
 import android.util.LruCache;
 import android.view.Gravity;
 import android.view.View;
-import android.view.inputmethod.InputMethodManager;
 import android.widget.*;
 import java.net.HttpURLConnection;
 import java.nio.charset.StandardCharsets;
@@ -28,36 +28,38 @@ import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadPoolExecutor;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 /** Native, keyboard-focusable UI. Remote catalog and on-device downloads have separate states. */
 public final class MainActivity extends Activity {
-  static final int BG = 0xff101722,
-      PANEL = 0xff1b2939,
+  static final int BG = 0xff0d192b,
+      PANEL = 0xff192b40,
       TEXT = 0xffedf4fa,
       MUTED = 0xff9eb1c6,
-      ACCENT = 0xff66d8c0;
+      ACCENT = 0xffa3dfff;
   private final Handler handler = new Handler(Looper.getMainLooper());
   private final ExecutorService io = Executors.newFixedThreadPool(2),
-      images = Executors.newFixedThreadPool(2);
+      preferencesIo = Executors.newSingleThreadExecutor();
+  private final ThreadPoolExecutor images = (ThreadPoolExecutor) Executors.newFixedThreadPool(3);
   private final LruCache<String, Bitmap> artwork = new LruCache<>(32);
   private final List<JSONObject> games = new ArrayList<>();
-  private final List<String> platformIds = new ArrayList<>();
-  private LinearLayout root, body, grid;
-  private TextView status, connection;
+  private final List<JSONObject> platforms = new ArrayList<>();
+  private final List<String> pinnedPlatforms = new ArrayList<>();
+  private LinearLayout root, body, grid, platformStrip, headerScopes;
+  private TextView status;
   private ScrollView scroll;
-  private EditText search;
-  private Spinner platform;
   private ServerConfig config;
   private DownloadStore store;
   private String tab = "library", query = "", platformId = "", downloadSignature = "", exportId;
   private String scope = "all", sort = "popularity", direction = "desc", profileName = "选择玩家";
   private String saveExportPath, profileRequestedBase;
-  private Button profileButton;
+  private Button profileButton, sortButton;
   private int requestVersion, total, pageOffset;
-  private boolean destroyed, suppressPlatform;
-  private final Runnable searchLater = () -> loadGames(false);
+  private boolean destroyed, settingsBusy;
+  private String settingsBase;
+  private int settingsVersion;
   private final Runnable poll =
       new Runnable() {
         public void run() {
@@ -99,29 +101,40 @@ public final class MainActivity extends Activity {
         });
     setContentView(root);
     LinearLayout header = row();
-    TextView brand = text("RETROONE", 25, TEXT);
+    ImageView logo = new ImageView(this);
+    logo.setImageResource(R.drawable.ic_retroone);
+    header.addView(logo, new LinearLayout.LayoutParams(dp(32), dp(32)));
+    TextView brand = text("retroone", 22, TEXT);
+    brand.setPadding(0, dp(6), dp(16), dp(6));
     brand.setTypeface(null, Typeface.BOLD);
-    if (getResources().getConfiguration().screenWidthDp < 600) root.addView(brand);
-    else header.addView(brand, new LinearLayout.LayoutParams(0, dp(48), 1));
-    header.addView(button("Games", () -> show("library")));
-    header.addView(button("Apps", () -> show("apps")));
+    header.addView(brand, new LinearLayout.LayoutParams(-2, dp(44)));
+    if (getResources().getConfiguration().screenWidthDp >= 700) {
+      headerScopes = row();
+      header.addView(headerScopes);
+    }
+    header.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
+    Button download = chip("↓", () -> show("downloads"));
+    download.setContentDescription("下载管理");
+    download.setTooltipText("下载管理 · 离开页面仍继续下载");
+    header.addView(download, new LinearLayout.LayoutParams(dp(44), dp(44)));
+    Button more = chip("⋯", this::navigationMenu);
+    more.setContentDescription("更多功能");
+    header.addView(more, new LinearLayout.LayoutParams(dp(44), dp(44)));
     profileButton =
-        button(
-            profileName,
+        chip(
+            profileName + " ▾",
             () -> {
               if (config != null) chooseProfile();
               else show("settings");
             });
+    profileButton.setContentDescription("切换玩家");
+    profileButton.setMaxWidth(
+        dp(getResources().getConfiguration().screenWidthDp < 600 ? 110 : 160));
+    profileButton.setSingleLine(true);
+    profileButton.setEllipsize(android.text.TextUtils.TruncateAt.END);
+    profileButton.setBackground(controlBackground(true));
     header.addView(profileButton);
-    header.addView(button("本机与下载", () -> show("downloads")));
-    header.addView(button("连接设置", () -> show("settings")));
-    if (getResources().getConfiguration().screenWidthDp < 700) {
-      HorizontalScrollView nav = new HorizontalScrollView(this);
-      nav.addView(header);
-      root.addView(nav);
-    } else root.addView(header);
-    connection = text("", 12, MUTED);
-    root.addView(connection);
+    root.addView(header, new LinearLayout.LayoutParams(-1, dp(48)));
     body = column();
     root.addView(body, new LinearLayout.LayoutParams(-1, 0, 1));
     show(tab);
@@ -151,6 +164,7 @@ public final class MainActivity extends Activity {
     handler.removeCallbacksAndMessages(null);
     io.shutdownNow();
     images.shutdownNow();
+    preferencesIo.shutdownNow();
     super.onDestroy();
   }
 
@@ -163,10 +177,11 @@ public final class MainActivity extends Activity {
 
   private void show(String page) {
     requestVersion++;
-    handler.removeCallbacks(searchLater);
     tab = page;
+    renderHeaderScopes();
     body.removeAllViews();
-    connection.setText(config == null ? "私人游戏馆 · 连接你的 RetroOne 服务" : "私人游戏馆  /  " + config.base);
+    images.getQueue().clear();
+
     if ("apps".equals(page)) {
       apps();
       return;
@@ -187,136 +202,372 @@ public final class MainActivity extends Activity {
     library();
   }
 
-  private void library() {
-    TextView title = text("你的收藏，随时开玩", 28, TEXT);
-    title.setTypeface(null, Typeface.BOLD);
-    body.addView(title);
-    LinearLayout choices = row();
-    String[] scopes = {"all", "favorites", "recent"};
-    String[] labels = {"全部游戏", "我的收藏", "最近游玩"};
-    for (int i = 0; i < scopes.length; i++) {
-      String value = scopes[i];
-      choices.addView(
-          button(
-              (scope.equals(value) ? "● " : "") + labels[i],
+  private void renderHeaderScopes() {
+    if (headerScopes == null) return;
+    headerScopes.removeAllViews();
+    String[] values = {"all", "favorites", "recent"};
+    String[] labels = {"游戏库", "★ 收藏", "最近玩过"};
+    for (int i = 0; i < values.length; i++) {
+      String value = values[i];
+      Button item =
+          chip(
+              labels[i],
               () -> {
                 scope = value;
                 writeLibraryPreferences();
                 show("library");
-              }));
+              });
+      item.setBackground(controlBackground("library".equals(tab) && scope.equals(value)));
+      headerScopes.addView(item);
     }
-    choices.addView(
-        button(
-            "排序：" + LibraryQuery.LABELS[java.util.Arrays.asList(LibraryQuery.SORTS).indexOf(sort)],
-            this::chooseSort));
-    choices.addView(
-        button(
-            "asc".equals(direction) ? "升序 ↑" : "降序 ↓",
-            () -> {
-              direction = "asc".equals(direction) ? "desc" : "asc";
-              writeLibraryPreferences();
-              show("library");
-            }));
-    HorizontalScrollView choiceScroll = new HorizontalScrollView(this);
-    choiceScroll.addView(choices);
-    body.addView(choiceScroll);
-    LinearLayout filters = row();
-    search = edit("搜索游戏名称", false);
-    search.setText(query);
-    search.setSingleLine(true);
-    search.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH);
-    boolean narrow = getResources().getConfiguration().screenWidthDp < 600;
-    if (narrow) body.addView(search, new LinearLayout.LayoutParams(-1, dp(56)));
-    else filters.addView(search, new LinearLayout.LayoutParams(0, dp(56), 1));
-    platform = new Spinner(this);
-    filters.addView(platform, new LinearLayout.LayoutParams(dp(200), dp(56)));
-    filters.addView(
-        button(
-            "刷新",
-            () -> {
-              ((InputMethodManager) getSystemService(INPUT_METHOD_SERVICE))
-                  .hideSoftInputFromWindow(search.getWindowToken(), 0);
-              loadGames(false);
-            }));
-    body.addView(filters);
-    status = text("", 13, MUTED);
-    body.addView(status);
+  }
+
+  private void navigationMenu() {
+    new AlertDialog.Builder(this)
+        .setTitle("RetroOne")
+        .setItems(
+            new String[] {"游戏库", "应用", "下载管理", "刷新游戏库", "连接与模拟器设置"},
+            (d, which) -> {
+              if (which == 3) settingsBase = null;
+              show(new String[] {"library", "apps", "downloads", "library", "settings"}[which]);
+            })
+        .setNegativeButton("返回", null)
+        .show();
+  }
+
+  private void library() {
+    platformStrip = row();
+    LinearLayout navigation = row();
+    HorizontalScrollView platformScroll = new HorizontalScrollView(this);
+    platformScroll.setHorizontalScrollBarEnabled(false);
+    platformScroll.addView(platformStrip);
+    navigation.addView(platformScroll, new LinearLayout.LayoutParams(0, dp(52), 1));
+    Button allPlatforms = chip("平台 +", this::choosePlatforms);
+    allPlatforms.setContentDescription("更多平台");
+    allPlatforms.setTooltipText("选择、搜索和关注平台；与当前玩家的网页设置同步");
+    navigation.addView(allPlatforms);
+    body.addView(navigation, new LinearLayout.LayoutParams(-1, dp(52)));
+    renderPlatformStrip();
+    LinearLayout choices = row();
+    if (headerScopes == null) {
+      String label = scope.equals("favorites") ? "★ 收藏" : scope.equals("recent") ? "最近玩过" : "全部游戏";
+      choices.addView(
+          chip(
+              label + " ▾",
+              () ->
+                  new AlertDialog.Builder(this)
+                      .setTitle("查看游戏")
+                      .setItems(
+                          new String[] {"全部游戏", "我的收藏", "最近玩过"},
+                          (d, w) -> {
+                            scope = new String[] {"all", "favorites", "recent"}[w];
+                            writeLibraryPreferences();
+                            show("library");
+                          })
+                      .show()));
+      choices.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
+    }
+    sortButton = chip(sortLabel(), this::chooseSort);
+    sortButton.setContentDescription("游戏排序");
+    sortButton.setTooltipText("按整个游戏库排序");
+    choices.addView(sortButton);
+    Button searchButton = chip("⌕", this::searchDialog);
+    searchButton.setContentDescription("搜索游戏");
+    searchButton.setTooltipText(query.isEmpty() ? "搜索游戏" : query);
+    choices.addView(searchButton, new LinearLayout.LayoutParams(dp(44), dp(44)));
+    if (headerScopes == null) body.addView(choices, new LinearLayout.LayoutParams(-1, dp(48)));
+    else navigation.addView(choices);
+    status = text("", 12, MUTED);
+    status.setSingleLine(true);
+    status.setEllipsize(android.text.TextUtils.TruncateAt.END);
+    status.setPadding(dp(4), 0, 0, 0);
+    status.setGravity(Gravity.CENTER_VERTICAL);
+    status.setTooltipText("点击刷新游戏库与平台偏好");
+    status.setOnClickListener(
+        v -> {
+          settingsBase = null;
+          loadLibrarySettings();
+          loadGames(false);
+        });
+    body.addView(status, new LinearLayout.LayoutParams(-1, dp(24)));
     scroll = new ScrollView(this);
     grid = column();
     scroll.addView(grid);
     body.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
-    search.addTextChangedListener(
-        new TextWatcher() {
-          public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
-
-          public void onTextChanged(CharSequence s, int st, int b, int c) {
-            query = s.toString();
-            handler.removeCallbacks(searchLater);
-            handler.postDelayed(searchLater, 400);
-          }
-
-          public void afterTextChanged(Editable s) {}
-        });
-    search.setOnEditorActionListener(
-        (v, action, event) -> {
-          handler.removeCallbacks(searchLater);
-          loadGames(false);
-          return true;
-        });
     if (config == null) {
-      status.setText("尚未连接服务器。本机下载可离线查看。");
+      status.setText("连接服务器，打开你的游戏库");
       grid.addView(button("配置服务地址", () -> show("settings")));
       return;
     }
     refreshProfile();
     loadPlatforms();
+    loadLibrarySettings();
     loadGames(false);
+  }
+
+  private String sortLabel() {
+    return LibraryQuery.LABELS[java.util.Arrays.asList(LibraryQuery.SORTS).indexOf(sort)]
+        + ("asc".equals(direction) ? " ↑" : " ↓");
+  }
+
+  private void searchDialog() {
+    EditText input = edit("搜索游戏名称", false);
+    input.setText(query);
+    input.setPadding(dp(24), dp(12), dp(24), dp(12));
+    AlertDialog dialog =
+        new AlertDialog.Builder(this)
+            .setTitle("搜索游戏")
+            .setView(input)
+            .setPositiveButton(
+                "搜索",
+                (d, w) -> {
+                  query = input.getText().toString().trim();
+                  loadGames(false);
+                })
+            .setNeutralButton(
+                "清除搜索",
+                (d, w) -> {
+                  query = "";
+                  loadGames(false);
+                })
+            .setNegativeButton("取消", null)
+            .create();
+    input.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH);
+    input.setOnEditorActionListener(
+        (v, action, event) -> {
+          query = input.getText().toString().trim();
+          dialog.dismiss();
+          loadGames(false);
+          return true;
+        });
+    dialog.show();
+    input.requestFocus();
   }
 
   private void loadPlatforms() {
     ServerConfig current = config;
-    Spinner target = platform;
+    LinearLayout target = platformStrip;
     io.execute(
         () -> {
           try {
             JSONArray rows =
                 new ApiClient(current).json(current.api("platforms")).getJSONArray("platforms");
-            List<String> names = new ArrayList<>(), ids = new ArrayList<>();
-            names.add("全部平台");
-            ids.add("");
-            for (int i = 0; i < rows.length(); i++) {
-              JSONObject p = rows.getJSONObject(i);
-              ids.add(p.getString("id"));
-              names.add(p.getString("name") + " · " + p.optInt("count"));
-            }
+            List<JSONObject> values = new ArrayList<>();
+            for (int i = 0; i < rows.length(); i++) values.add(rows.getJSONObject(i));
             ui(
                 () -> {
-                  if (target != platform || !"library".equals(tab)) return;
-                  suppressPlatform = true;
-                  platformIds.clear();
-                  platformIds.addAll(ids);
-                  target.setAdapter(
-                      new ArrayAdapter<>(
-                          this, android.R.layout.simple_spinner_dropdown_item, names));
-                  target.setSelection(Math.max(0, ids.indexOf(platformId)));
-                  target.post(() -> suppressPlatform = false);
-                  target.setOnItemSelectedListener(
-                      new AdapterView.OnItemSelectedListener() {
-                        public void onNothingSelected(AdapterView<?> p) {}
-
-                        public void onItemSelected(
-                            AdapterView<?> p, View v, int position, long id) {
-                          if (!suppressPlatform && !platformId.equals(platformIds.get(position))) {
-                            platformId = platformIds.get(position);
-                            loadGames(false);
-                          }
-                        }
-                      });
+                  if (target != platformStrip
+                      || config == null
+                      || !current.base.equals(config.base)) return;
+                  platforms.clear();
+                  platforms.addAll(values);
+                  renderPlatformStrip();
                 });
           } catch (Exception ignored) {
-            /* Games request owns the visible connection error. */
+            /* The game request shows connection errors. */
           }
         });
+  }
+
+  private void renderPlatformStrip() {
+    if (platformStrip == null || !"library".equals(tab)) return;
+    platformStrip.removeAllViews();
+    addPlatformChip("", "全部平台", false);
+    for (JSONObject p : LibrarySettings.visible(platforms, pinnedPlatforms, platformId)) {
+      String id = p.optString("id");
+      addPlatformChip(
+          id, PlatformArt.shortName(id, p.optString("name")), pinnedPlatforms.contains(id));
+    }
+  }
+
+  private void addPlatformChip(String id, String name, boolean pinned) {
+    Button item =
+        chip(
+            (pinned ? "★ " : "") + name,
+            () -> {
+              platformId = id;
+              renderPlatformStrip();
+              loadGames(false);
+            });
+    android.graphics.drawable.Drawable icon = getDrawable(PlatformArt.resource(id));
+    icon.setBounds(0, 0, dp(26), dp(26));
+    item.setCompoundDrawables(icon, null, null, null);
+    item.setCompoundDrawablePadding(dp(7));
+    item.setBackground(controlBackground(platformId.equals(id)));
+    item.setTooltipText(name + (pinned ? " · 已关注" : ""));
+    item.setContentDescription(name + (platformId.equals(id) ? "，已选中" : ""));
+    platformStrip.addView(item);
+  }
+
+  private void loadLibrarySettings() {
+    ServerConfig source = config;
+    if (source == null || source.base.equals(settingsBase) || settingsBusy) return;
+    settingsBase = source.base;
+    int generation = ++settingsVersion;
+    preferencesIo.execute(
+        () -> {
+          try {
+            LibrarySettings settings = LibrarySettings.read(source);
+            ui(
+                () -> {
+                  if (generation != settingsVersion
+                      || config == null
+                      || !source.base.equals(config.base)) return;
+                  applyLibrarySettings(settings);
+                });
+          } catch (Exception e) {
+            ui(
+                () -> {
+                  if (generation != settingsVersion
+                      || config == null
+                      || !source.base.equals(config.base)) return;
+                  settingsBase = null;
+                  if ("library".equals(tab)) {
+                    status.setText("平台偏好未同步 · 点击重试");
+                    status.setTooltipText(ApiClient.message(e));
+                  }
+                });
+          }
+        });
+  }
+
+  private void applyLibrarySettings(LibrarySettings settings) {
+    boolean reorder = !sort.equals(settings.sort) || !direction.equals(settings.direction);
+    pinnedPlatforms.clear();
+    pinnedPlatforms.addAll(settings.pins);
+    sort = settings.sort;
+    direction = settings.direction;
+    writeLibraryPreferences();
+    if ("library".equals(tab)) {
+      sortButton.setText(sortLabel());
+      renderPlatformStrip();
+      if (reorder) loadGames(false);
+    }
+  }
+
+  private void saveLibrarySettings(
+      String pin, Boolean follow, String newSort, String newDirection, Runnable done) {
+    if (config == null || settingsBusy) return;
+    ServerConfig source = config;
+    int generation = ++settingsVersion;
+    settingsBusy = true;
+    preferencesIo.execute(
+        () -> {
+          try {
+            LibrarySettings saved =
+                LibrarySettings.update(source, pin, follow, newSort, newDirection);
+            ui(
+                () -> {
+                  if (generation != settingsVersion
+                      || config == null
+                      || !source.base.equals(config.base)) return;
+                  settingsBusy = false;
+                  settingsBase = source.base;
+                  applyLibrarySettings(saved);
+                  if (done != null) done.run();
+                });
+          } catch (Exception e) {
+            ui(
+                () -> {
+                  if (generation != settingsVersion
+                      || config == null
+                      || !source.base.equals(config.base)) return;
+                  settingsBusy = false;
+                  settingsBase = null;
+                  alert("设置未保存：" + ApiClient.message(e));
+                  if (done != null) done.run();
+                });
+          }
+        });
+  }
+
+  private void choosePlatforms() {
+    ServerConfig source = config;
+    LinearLayout content = column();
+    content.setPadding(dp(20), 0, dp(20), dp(12));
+    EditText find = edit("查找平台，例如 PSP、街机", false);
+    content.addView(find);
+    ScrollView listScroll = new ScrollView(this);
+    LinearLayout list = column();
+    listScroll.addView(list);
+    content.addView(listScroll, new LinearLayout.LayoutParams(-1, dp(320)));
+    AlertDialog dialog =
+        new AlertDialog.Builder(this)
+            .setTitle("选择平台")
+            .setView(content)
+            .setNegativeButton("完成", null)
+            .create();
+    Runnable render =
+        () -> {
+          if (config == null || source == null || !source.base.equals(config.base)) {
+            dialog.dismiss();
+            return;
+          }
+          list.removeAllViews();
+          List<JSONObject> ordered = new ArrayList<>(platforms);
+          ordered.sort(
+              (a, b) -> {
+                int ai = pinnedPlatforms.indexOf(a.optString("id")),
+                    bi = pinnedPlatforms.indexOf(b.optString("id"));
+                return Integer.compare(ai < 0 ? 1000 : ai, bi < 0 ? 1000 : bi);
+              });
+          String q = find.getText().toString().trim().toLowerCase(Locale.ROOT);
+          for (JSONObject p : ordered) {
+            String id = p.optString("id"), name = p.optString("name");
+            if (!(name + " " + id).toLowerCase(Locale.ROOT).contains(q)) continue;
+            LinearLayout line = row();
+            ImageView icon = new ImageView(this);
+            icon.setImageResource(PlatformArt.resource(id));
+            line.addView(icon, new LinearLayout.LayoutParams(dp(32), dp(32)));
+            Button select =
+                chip(
+                    name + "  ·  " + p.optInt("count"),
+                    () -> {
+                      platformId = id;
+                      dialog.dismiss();
+                      renderPlatformStrip();
+                      loadGames(false);
+                    });
+            select.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+            line.addView(select, new LinearLayout.LayoutParams(0, dp(48), 1));
+            boolean pinned = pinnedPlatforms.contains(id);
+            Button follow = chip(pinned ? "★ 已关注" : "☆ 关注", () -> {});
+            follow.setContentDescription((pinned ? "取消关注 " : "关注 ") + name);
+            follow.setOnClickListener(
+                v -> {
+                  if (settingsBusy) return;
+                  follow.setEnabled(false);
+                  saveLibrarySettings(
+                      id,
+                      !pinnedPlatforms.contains(id),
+                      null,
+                      null,
+                      () -> {
+                        if (!dialog.isShowing()) return;
+                        follow.setEnabled(true);
+                        // Keep focus and scroll position when toggling a platform.
+                        boolean now = pinnedPlatforms.contains(id);
+                        follow.setText(now ? "★ 已关注" : "☆ 关注");
+                        follow.setContentDescription((now ? "取消关注 " : "关注 ") + name);
+                      });
+                });
+            line.addView(follow);
+            list.addView(line);
+          }
+          if (list.getChildCount() == 0) list.addView(text("没有匹配的平台", 14, MUTED));
+        };
+    find.addTextChangedListener(
+        new TextWatcher() {
+          public void beforeTextChanged(CharSequence s, int a, int c, int f) {}
+
+          public void onTextChanged(CharSequence s, int a, int b, int c) {
+            render.run();
+          }
+
+          public void afterTextChanged(Editable s) {}
+        });
+    dialog.show();
+    render.run();
   }
 
   private void loadGames(boolean more) {
@@ -348,7 +599,13 @@ public final class MainActivity extends Activity {
                     loadPage(Math.max(0, ((total - 1) / 60) * 60));
                     return;
                   }
-                  status.setText("共 " + total + " 款 · 第 " + (offset / 60 + 1) + " 页");
+                  status.setText(
+                      "共 "
+                          + total
+                          + " 款 · 第 "
+                          + (offset / 60 + 1)
+                          + " 页"
+                          + (query.isEmpty() ? "" : " · 搜索：" + query));
                   renderGames(false);
                 });
           } catch (Exception e) {
@@ -365,6 +622,7 @@ public final class MainActivity extends Activity {
   }
 
   private void renderGames(boolean more) {
+    images.getQueue().clear();
     int y = more ? scroll.getScrollY() : 0;
     grid.removeAllViews();
     if (games.isEmpty()) {
@@ -373,25 +631,27 @@ public final class MainActivity extends Activity {
       return;
     }
     int width = getResources().getConfiguration().screenWidthDp - 44;
-    int columns = Math.max(1, Math.min(6, width / 190));
+    int columns = Math.max(1, Math.min(6, width / 158));
     List<DownloadStore.Item> localItems = store.all();
-    boolean hasEmulator = !Emulators.installed(this).isEmpty();
     LinearLayout line = null;
     for (int i = 0; i < games.size(); i++) {
       JSONObject game = games.get(i);
       if (i % columns == 0) {
         line = row();
+        line.setGravity(Gravity.TOP);
         grid.addView(line);
       }
       LinearLayout card = column();
-      card.setPadding(dp(12), dp(12), dp(12), dp(14));
-      card.setBackground(shape(PANEL, 12));
+      card.setPadding(dp(6), dp(6), dp(6), dp(8));
+      card.setBackground(controlBackground(false));
       LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(0, -2, 1);
       cp.setMargins(dp(4), dp(6), dp(4), dp(6));
       line.addView(card, cp);
       FrameLayout cover = new FrameLayout(this);
       cover.setBackground(shape(0xff263b50, 8));
-      card.addView(cover, new LinearLayout.LayoutParams(-1, dp(132)));
+      card.addView(
+          cover,
+          new LinearLayout.LayoutParams(-1, dp(Math.min(230, (width / columns - 20) * 4 / 3))));
       TextView monogram =
           text(
               game.optString("platform_name", game.optString("platform")).toUpperCase(Locale.ROOT),
@@ -402,8 +662,9 @@ public final class MainActivity extends Activity {
       String coverUrl = game.optString("cover_url", "");
       if (!coverUrl.isEmpty() && !"null".equals(coverUrl)) {
         ImageView image = new ImageView(this);
-        image.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        image.setScaleType(ImageView.ScaleType.FIT_CENTER);
         cover.addView(image, new FrameLayout.LayoutParams(-1, -1));
+        image.setTag(monogram);
         loadCover(image, coverUrl, config);
       }
       TextView name =
@@ -419,10 +680,7 @@ public final class MainActivity extends Activity {
                   + bytes(game.optLong("size")),
               12,
               MUTED));
-      String localLabel =
-          "psp".equals(game.optString("platform"))
-              ? (hasEmulator ? "未下载" : "需安装 PPSSPP")
-              : "尚未接入本机模拟器";
+      String localLabel = "";
       for (DownloadStore.Item item : localItems) {
         if (item.base.equals(config.base)
             && item.game.equals(game.optString("id"))
@@ -437,7 +695,7 @@ public final class MainActivity extends Activity {
           break;
         }
       }
-      card.addView(text(localLabel, 12, ACCENT));
+      if (!localLabel.isEmpty()) card.addView(text(localLabel, 12, ACCENT));
       card.setFocusable(true);
       card.setClickable(true);
       card.setContentDescription(game.optString("title") + "，查看详情");
@@ -455,6 +713,11 @@ public final class MainActivity extends Activity {
   }
 
   private void loadCover(ImageView view, String value, ServerConfig source) {
+    loadCover(view, value, source, false);
+  }
+
+  private void loadCover(ImageView view, String value, ServerConfig source, boolean priority) {
+    if (value.isEmpty() || "null".equals(value)) return;
     final String url;
     try {
       url = source.resolve(value).toString();
@@ -464,34 +727,43 @@ public final class MainActivity extends Activity {
     Bitmap cached = artwork.get(url);
     if (cached != null) {
       view.setImageBitmap(cached);
+      if (view.getTag() instanceof View placeholder) placeholder.setVisibility(View.GONE);
       return;
     }
-    images.execute(
-        () -> {
-          HttpURLConnection c = null;
-          try {
-            c = new ApiClient(source).open(java.net.URI.create(url), null);
-            if (c.getResponseCode() != 200) return;
-            byte[] data;
-            try (java.io.InputStream input = c.getInputStream()) {
-              data = ApiClient.read(input, 3 * 1024 * 1024);
-            }
-            BitmapFactory.Options options = new BitmapFactory.Options();
-            options.inJustDecodeBounds = true;
-            BitmapFactory.decodeByteArray(data, 0, data.length, options);
-            if (options.outWidth <= 0 || options.outHeight <= 0) return;
-            options.inSampleSize = Math.max(1, Math.max(options.outWidth, options.outHeight) / 512);
-            options.inJustDecodeBounds = false;
-            Bitmap bitmap = BitmapFactory.decodeByteArray(data, 0, data.length, options);
-            if (bitmap != null) {
-              artwork.put(url, bitmap);
-              ui(() -> view.setImageBitmap(bitmap));
-            }
-          } catch (Exception ignored) {
-          } finally {
-            if (c != null) c.disconnect();
-          }
-        });
+    (priority ? io : images)
+        .execute(
+            () -> {
+              if (!view.isAttachedToWindow()) return;
+              HttpURLConnection c = null;
+              try {
+                c = new ApiClient(source).open(java.net.URI.create(url), null);
+                if (c.getResponseCode() != 200) return;
+                byte[] data;
+                try (java.io.InputStream input = c.getInputStream()) {
+                  data = ApiClient.read(input, 3 * 1024 * 1024);
+                }
+                BitmapFactory.Options options = new BitmapFactory.Options();
+                options.inJustDecodeBounds = true;
+                BitmapFactory.decodeByteArray(data, 0, data.length, options);
+                if (options.outWidth <= 0 || options.outHeight <= 0) return;
+                options.inSampleSize =
+                    Math.max(1, Math.max(options.outWidth, options.outHeight) / 512);
+                options.inJustDecodeBounds = false;
+                Bitmap bitmap = BitmapFactory.decodeByteArray(data, 0, data.length, options);
+                if (bitmap != null) {
+                  artwork.put(url, bitmap);
+                  ui(
+                      () -> {
+                        view.setImageBitmap(bitmap);
+                        if (view.getTag() instanceof View placeholder)
+                          placeholder.setVisibility(View.GONE);
+                      });
+                }
+              } catch (Exception ignored) {
+              } finally {
+                if (c != null) c.disconnect();
+              }
+            });
   }
 
   private void detail(JSONObject basic) {
@@ -514,26 +786,30 @@ public final class MainActivity extends Activity {
           try {
             ApiClient api = new ApiClient(source);
             String path = "games/" + ServerConfig.encode(basic.getString("id"));
-            JSONObject game = api.json(source.api(path)),
-                options = api.json(source.api(path + "/download-options"));
+            JSONObject game = api.json(source.api(path));
+            DownloadCapability capability =
+                new DownloadCapability(api.json(source.api(path + "/download-options")));
             ui(
                 () -> {
                   if (!dialog.isShowing()) return;
                   String desc = game.optString("description", "");
                   if (desc.length() > 1200) desc = desc.substring(0, 1200) + "…";
-                  String name = options.optString("name", "");
-                  String reason = Emulators.support(game.optString("platform"), name);
+                  String reason = Emulators.support(game.optString("platform"), capability.name);
                   info.setText(
                       game.optString("platform_name", game.optString("platform"))
                           + "  ·  "
-                          + bytes(options.optLong("size_bytes", game.optLong("size")))
-                          + "\n\n"
-                          + (desc.isEmpty() ? "暂无游戏介绍。" : desc)
-                          + "\n\n"
-                          + (reason.isEmpty()
-                              ? "PPSSPP 接口可接收此格式。具体游戏兼容性由模拟器与文件决定；此处不代表已验证可玩。"
-                              : reason)
-                          + "\n\n本机模拟器管理游玩存档；云存档可在下方查看并下载备份。");
+                          + bytes(capability.size > 0 ? capability.size : game.optLong("size")));
+                  LinearLayout hero = row();
+                  content.addView(hero);
+                  ImageView cover = new ImageView(this);
+                  cover.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                  cover.setImageResource(PlatformArt.resource(game.optString("platform")));
+                  cover.setBackground(shape(PANEL, 8));
+                  hero.addView(cover, new LinearLayout.LayoutParams(dp(128), dp(175)));
+                  loadCover(cover, game.optString("cover_url", ""), source, true);
+                  LinearLayout actions = column();
+                  actions.setPadding(dp(16), 0, 0, 0);
+                  hero.addView(actions, new LinearLayout.LayoutParams(0, -2, 1));
                   Button favorite =
                       button(game.optBoolean("favorite") ? "★ 已收藏" : "☆ 收藏", () -> {});
                   favorite.setOnClickListener(
@@ -567,9 +843,10 @@ public final class MainActivity extends Activity {
                               }
                             });
                       });
-                  content.addView(favorite);
-                  content.addView(button("云存档", () -> cloudSave(source, game)));
-                  content.addView(text("已记录游玩 " + game.optInt("play_count") + " 次", 13, MUTED));
+                  LinearLayout personal = row();
+                  personal.addView(favorite);
+                  personal.addView(button("云存档", () -> cloudSave(source, game)));
+                  actions.addView(personal);
                   DownloadStore.Item local = null;
                   for (DownloadStore.Item item : store.all())
                     if (item.base.equals(source.base)
@@ -580,18 +857,24 @@ public final class MainActivity extends Activity {
                     }
                   if (local != null) {
                     DownloadStore.Item item = local;
-                    content.addView(
+                    boolean direct =
+                        DownloadStore.READY.equals(item.state)
+                            && Emulators.support(item.platform, item.name).isEmpty()
+                            && !Emulators.installed(this).isEmpty();
+                    actions.addView(
                         button(
-                            DownloadStore.READY.equals(item.state) ? "用本机模拟器启动" : "查看下载任务",
+                            direct
+                                ? "启动 PPSSPP"
+                                : DownloadStore.READY.equals(item.state) ? "已下载 · 查看文件" : "查看下载任务",
                             () -> {
                               dialog.dismiss();
-                              if (DownloadStore.READY.equals(item.state)) launch(item);
+                              if (direct) launch(item);
                               else show("downloads");
                             }));
-                  } else if (options.optBoolean("available"))
-                    content.addView(
+                  } else if (capability.available)
+                    actions.addView(
                         button(
-                            "下载到这台设备",
+                            "↓ 下载到掌机",
                             () -> {
                               try {
                                 store.enqueue(source, game);
@@ -603,10 +886,48 @@ public final class MainActivity extends Activity {
                                 alert(ApiClient.message(e));
                               }
                             }));
-                  else
-                    content.addView(
+                  if (!capability.available) {
+                    actions.addView(text("此资源暂不支持下载", 15, 0xffffcf9d));
+                    actions.addView(text(capability.explanation(), 13, MUTED));
+                  } else if (!reason.isEmpty()) {
+                    actions.addView(text("可下载 · 需手动导入模拟器", 13, MUTED));
+                  } else {
+                    actions.addView(
                         text(
-                            "暂不可下载：" + options.optString("reason", "服务尚未提供可下载文件"), 15, 0xffffbb88));
+                            Emulators.installed(this).isEmpty()
+                                ? "下载后安装 PPSSPP 即可启动"
+                                : "PSP · 使用已安装的 PPSSPP",
+                            13,
+                            ACCENT));
+                  }
+                  Button explain =
+                      chip(
+                          "下载与启动说明 ⓘ",
+                          () ->
+                              alert(
+                                  (capability.available
+                                          ? (reason.isEmpty()
+                                              ? "支持下载和 PPSSPP 启动，具体游戏兼容性由模拟器决定。"
+                                              : reason)
+                                          : capability.explanation())
+                                      + "\n\n"
+                                      + "文件下载和模拟器兼容性分别判断。已下载的文件可以从下载管理导出；多文件游戏需要完整资源，不能只下载入口文件。"));
+                  explain.setTooltipText("能下载文件，不等于此设备已接入对应模拟器");
+                  content.addView(explain);
+                  if (!desc.isEmpty()) {
+                    TextView description = text(desc, 14, MUTED);
+                    description.setVisibility(View.GONE);
+                    Button expand =
+                        chip(
+                            "关于这款游戏 ▾",
+                            () ->
+                                description.setVisibility(
+                                    description.getVisibility() == View.GONE
+                                        ? View.VISIBLE
+                                        : View.GONE));
+                    content.addView(expand);
+                    content.addView(description);
+                  }
                 });
           } catch (Exception e) {
             ui(
@@ -928,7 +1249,7 @@ public final class MainActivity extends Activity {
                 + " 尚未验证可靠直启。其他平台仅提供下载管理。多文件光盘、目录游戏和压缩包不会被自动改造。\n\n"
                 + "本机文件保存在 RetroOne 私有目录，卸载应用会移除这些下载。模拟器独立管理存档；本版没有云存档同步，也不会为不同 RetroOne"
                 + " 玩家隔离同一模拟器的存档。\n\n"
-                + "RetroOne Android 0.2.0 · 自有内容客户端",
+                + "RetroOne Android 0.2.1 · 自有内容客户端",
             14,
             MUTED));
   }
@@ -1011,7 +1332,7 @@ public final class MainActivity extends Activity {
                   () -> {
                     if (config == null || !source.base.equals(config.base)) return;
                     profileName = name;
-                    profileButton.setText(name);
+                    profileButton.setText(name + " ▾");
                     getPreferences(0).edit().putString(source.key() + ".name", name).apply();
                   });
               break;
@@ -1031,8 +1352,14 @@ public final class MainActivity extends Activity {
     if (!"asc".equals(direction)) direction = "desc";
     scope = prefs.getString(key + ".scope", "all");
     profileName = prefs.getString(key + ".name", "选择玩家");
+    pinnedPlatforms.clear();
+    platforms.clear();
+    settingsBase = null;
+    settingsVersion++;
+    settingsBusy = false;
+    profileRequestedBase = null;
     query = "";
-    if (profileButton != null) profileButton.setText(profileName);
+    if (profileButton != null) profileButton.setText(profileName + " ▾");
   }
 
   private void writeLibraryPreferences() {
@@ -1046,18 +1373,27 @@ public final class MainActivity extends Activity {
   }
 
   private void chooseSort() {
+    if (config == null || settingsBusy) return;
     new AlertDialog.Builder(this)
-        .setTitle("按整个游戏库排序")
+        .setTitle("游戏排序")
         .setSingleChoiceItems(
             LibraryQuery.LABELS,
             java.util.Arrays.asList(LibraryQuery.SORTS).indexOf(sort),
             (d, w) -> {
-              sort = LibraryQuery.SORTS[w];
-              direction = (sort.equals("name") || sort.equals("default")) ? "asc" : "desc";
-              writeLibraryPreferences();
+              String selected = LibraryQuery.SORTS[w];
               d.dismiss();
-              show("library");
+              saveLibrarySettings(
+                  null,
+                  null,
+                  selected,
+                  selected.equals("name") || selected.equals("default") ? "asc" : "desc",
+                  null);
             })
+        .setNeutralButton(
+            "asc".equals(direction) ? "改为降序 ↓" : "改为升序 ↑",
+            (d, w) ->
+                saveLibrarySettings(
+                    null, null, sort, "asc".equals(direction) ? "desc" : "asc", null))
         .setNegativeButton("返回", null)
         .show();
   }
@@ -1206,7 +1542,7 @@ public final class MainActivity extends Activity {
       card.addView(name);
       card.setFocusable(true);
       card.setClickable(true);
-      card.setBackground(shape(PANEL, 12));
+      card.setBackground(controlBackground(false));
       card.setForeground(getDrawable(android.R.drawable.list_selector_background));
       card.setOnClickListener(
           v -> {
@@ -1283,8 +1619,37 @@ public final class MainActivity extends Activity {
     v.setTextColor(ACCENT);
     v.setTextSize(14);
     v.setMinHeight(dp(48));
+    v.setBackground(controlBackground(false));
+    v.setPadding(dp(14), dp(6), dp(14), dp(6));
     v.setOnClickListener(w -> action.run());
     return v;
+  }
+
+  private Button chip(String value, Runnable action) {
+    Button v = button(value, action);
+    v.setTextSize(13);
+    v.setMinWidth(0);
+    v.setMinimumWidth(0);
+    v.setMinHeight(dp(44));
+    v.setMinimumHeight(dp(44));
+    v.setSingleLine(true);
+    v.setPadding(dp(12), 0, dp(12), 0);
+    LinearLayout.LayoutParams layout = new LinearLayout.LayoutParams(-2, dp(44));
+    layout.setMargins(0, 0, dp(6), 0);
+    v.setLayoutParams(layout);
+    return v;
+  }
+
+  private StateListDrawable controlBackground(boolean selected) {
+    StateListDrawable states = new StateListDrawable();
+    GradientDrawable focused = shape(0xff284960, 10);
+    focused.setStroke(dp(2), ACCENT);
+    states.addState(new int[] {android.R.attr.state_focused}, focused);
+    states.addState(new int[] {android.R.attr.state_pressed}, focused);
+    GradientDrawable normal = shape(selected ? 0xff263d53 : PANEL, 10);
+    if (selected) normal.setStroke(dp(1), 0xff6294af);
+    states.addState(new int[] {}, normal);
+    return states;
   }
 
   private GradientDrawable shape(int color, int radius) {

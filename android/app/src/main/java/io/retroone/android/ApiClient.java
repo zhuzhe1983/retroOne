@@ -67,12 +67,21 @@ public final class ApiClient {
 
   /** Mutations never follow redirects: method, body and player scope must remain explicit. */
   public JSONObject post(URI target, JSONObject payload, int limit) throws Exception {
+    return mutate("POST", target, payload, limit);
+  }
+
+  public JSONObject put(URI target, JSONObject payload, int limit) throws Exception {
+    return mutate("PUT", target, payload, limit);
+  }
+
+  private JSONObject mutate(String method, URI target, JSONObject payload, int limit)
+      throws Exception {
     URI uri = config.resolve(target.toString());
     HttpURLConnection c = (HttpURLConnection) uri.toURL().openConnection();
     c.setConnectTimeout(12000);
     c.setReadTimeout(30000);
     c.setInstanceFollowRedirects(false);
-    c.setRequestMethod("POST");
+    c.setRequestMethod(method);
     c.setRequestProperty("Content-Type", "application/json; charset=utf-8");
     if (!config.authorization.isEmpty())
       c.setRequestProperty("Authorization", config.authorization);

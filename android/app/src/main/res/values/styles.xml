@@ -1,11 +1,19 @@
 <resources>
     <style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item>
-        <item name="android:colorAccent">#66D8C0</item>
+        <item name="android:colorAccent">#A3DFFF</item>
         <item name="android:windowLightStatusBar">false</item>
-        <item name="android:statusBarColor">#101722</item>
-        <item name="android:navigationBarColor">#101722</item>
+        <item name="android:statusBarColor">#0D192B</item>
+        <item name="android:navigationBarColor">#0D192B</item>
         <item name="android:windowActionModeOverlay">true</item>
-        <item name="android:windowBackground">#101722</item>
+        <item name="android:windowBackground">#0D192B</item>
+        <item name="android:alertDialogTheme">@style/RetroDialog</item>
+    </style>
+    <style name="RetroDialog" parent="android:style/Theme.Material.Dialog.Alert">
+        <item name="android:windowBackground">@drawable/dialog_surface</item>
+        <item name="android:colorAccent">#A3DFFF</item>
+        <item name="android:colorBackground">#192B40</item>
+        <item name="android:textColorPrimary">#EDF4FA</item>
+        <item name="android:textColorSecondary">#9EB1C6</item>
     </style>
 </resources>

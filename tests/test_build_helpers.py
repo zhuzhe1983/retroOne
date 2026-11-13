@@ -12,6 +12,15 @@ from scripts import fetch_runtime as runtime
 from scripts.check_public_source import violations
 
 
+def test_android_distribution_checksum_has_sha256_length():
+    root = Path(__file__).resolve().parents[1]
+    properties = dict(line.split('=', 1) for line in
+                      (root / 'android/gradle/wrapper/gradle-wrapper.properties').read_text().splitlines()
+                      if '=' in line and not line.startswith('#'))
+    import re
+    assert re.fullmatch(r'[0-9a-f]{64}', properties['distributionSha256Sum'])
+
+
 def test_android_wrapper_exemption_is_exact_and_hash_pinned(tmp_path):
     path = 'android/gradle/wrapper/gradle-wrapper.jar'
     target = tmp_path / path

@@ -74,6 +74,10 @@ public final class MainActivity extends Activity {
   private final Map<String, TextView> popupLabels = new LinkedHashMap<>();
   private final Map<String, ProgressBar> popupProgress = new LinkedHashMap<>();
   private boolean pspInstalled, resumed;
+  private String localSort = "downloaded", localSignature = "";
+  private LocalContentView localContent;
+  private SaveSyncFlow saveSync;
+  private final Set<String> localMetadataRequested = new HashSet<>();
 
   private final class LocalButton {
     final ServerConfig source;
@@ -97,8 +101,10 @@ public final class MainActivity extends Activity {
       new Runnable() {
         public void run() {
           if (!destroyed && resumed) {
-            refreshDownloads();
+            if (root.isAttachedToWindow()) refreshDownloads();
             if ("downloads".equals(tab)) renderDownloads(false);
+            if ("local".equals(tab) && localContent != null) localContent.refresh(false);
+            if ("library".equals(tab) && "downloaded".equals(scope)) refreshLocalGames();
             handler.postDelayed(this, 800);
           }
         }
@@ -108,11 +114,14 @@ public final class MainActivity extends Activity {
   public void onCreate(Bundle state) {
     super.onCreate(state);
     store = RetroApplication.from(this).downloads;
+    pspInstalled = !Emulators.installed(this).isEmpty();
     try {
       config = RetroApplication.from(this).credentials.current();
     } catch (Exception ignored) {
     }
     readLibraryPreferences();
+    localSort = getPreferences(0).getString("local.sort", "downloaded");
+    if (!java.util.Arrays.asList(LocalGames.SORTS).contains(localSort)) localSort = "downloaded";
     seenDownloads.addAll(
         getPreferences(0).getStringSet("seen.downloads", java.util.Collections.emptySet()));
     if (state != null) {
@@ -146,9 +155,13 @@ public final class MainActivity extends Activity {
     header.addView(brand, new LinearLayout.LayoutParams(-2, dp(44)));
     if (getResources().getConfiguration().screenWidthDp >= 700) {
       headerScopes = row();
-      header.addView(headerScopes);
+      HorizontalScrollView scopesScroll = new HorizontalScrollView(this);
+      scopesScroll.setHorizontalScrollBarEnabled(false);
+      scopesScroll.addView(headerScopes);
+      header.addView(scopesScroll, new LinearLayout.LayoutParams(0, dp(48), 1));
     }
-    header.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
+    if (headerScopes == null)
+      header.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
     downloadBadge = new DownloadBadge(this);
     downloadBadge.setOnClickListener(v -> openDownloadsPopup());
     header.addView(downloadBadge, new LinearLayout.LayoutParams(dp(48), dp(44)));
@@ -233,6 +246,45 @@ public final class MainActivity extends Activity {
     body.removeAllViews();
     images.getQueue().clear();
 
+    if ("local".equals(page)) {
+      localContent =
+          new LocalContentView(
+              this,
+              store,
+              io,
+              new LocalContentView.Actions() {
+                public void play(DownloadStore.Item item) {
+                  launch(item);
+                }
+
+                public void exportGame(DownloadStore.Item item) {
+                  export(item);
+                }
+
+                public void exportSave(SaveLibrary.Entry entry) {
+                  exportSaveBackup(entry.file);
+                }
+
+                public void downloads() {
+                  show("downloads");
+                }
+
+                public void emulator() {
+                  List<Integer> installed = Emulators.installed(MainActivity.this);
+                  if (installed.isEmpty()) {
+                    alert("请先安装 PPSSPP");
+                    return;
+                  }
+                  Intent intent =
+                      getPackageManager()
+                          .getLaunchIntentForPackage(Emulators.PACKAGES[installed.get(0)]);
+                  if (intent != null) startActivity(intent);
+                }
+              });
+      body.addView(localContent, new LinearLayout.LayoutParams(-1, 0, 1));
+      return;
+    }
+
     if ("apps".equals(page)) {
       apps();
       return;
@@ -256,8 +308,8 @@ public final class MainActivity extends Activity {
   private void renderHeaderScopes() {
     if (headerScopes == null) return;
     headerScopes.removeAllViews();
-    String[] values = {"all", "favorites", "recent"};
-    String[] labels = {"游戏库", "★ 收藏", "最近玩过"};
+    String[] values = {"all", "favorites", "recent", "downloaded"};
+    String[] labels = {"游戏库", "★ 收藏", "最近玩过", "已下载"};
     for (int i = 0; i < values.length; i++) {
       String value = values[i];
       Button item =
@@ -277,10 +329,12 @@ public final class MainActivity extends Activity {
     new AlertDialog.Builder(this)
         .setTitle("RetroOne")
         .setItems(
-            new String[] {"游戏库", "应用", "下载管理", "刷新游戏库", "连接与模拟器设置"},
+            new String[] {"游戏库", "应用", "本地内容", "下载管理", "刷新游戏库", "连接与模拟器设置"},
             (d, which) -> {
-              if (which == 3) settingsBase = null;
-              show(new String[] {"library", "apps", "downloads", "library", "settings"}[which]);
+              if (which == 4) settingsBase = null;
+              show(
+                  new String[] {"library", "apps", "local", "downloads", "library", "settings"}
+                      [which]);
             })
         .setNegativeButton("返回", null)
         .show();
@@ -293,15 +347,25 @@ public final class MainActivity extends Activity {
     platformScroll.setHorizontalScrollBarEnabled(false);
     platformScroll.addView(platformStrip);
     navigation.addView(platformScroll, new LinearLayout.LayoutParams(0, dp(52), 1));
-    Button allPlatforms = chip("平台 +", this::choosePlatforms);
+    Button allPlatforms =
+        chip(
+            "平台 +",
+            () -> {
+              if (scope.equals("downloaded")) chooseLocalPlatform();
+              else choosePlatforms();
+            });
     allPlatforms.setContentDescription("更多平台");
-    allPlatforms.setTooltipText("选择、搜索和关注平台；与当前玩家的网页设置同步");
+    allPlatforms.setTooltipText(
+        scope.equals("downloaded") ? "筛选这台设备已有的游戏平台" : "选择、搜索和关注平台；与当前玩家的网页设置同步");
     navigation.addView(allPlatforms);
     body.addView(navigation, new LinearLayout.LayoutParams(-1, dp(52)));
     renderPlatformStrip();
     LinearLayout choices = row();
     if (headerScopes == null) {
-      String label = scope.equals("favorites") ? "★ 收藏" : scope.equals("recent") ? "最近玩过" : "全部游戏";
+      String label =
+          scope.equals("favorites")
+              ? "★ 收藏"
+              : scope.equals("recent") ? "最近玩过" : scope.equals("downloaded") ? "已下载" : "全部游戏";
       choices.addView(
           chip(
               label + " ▾",
@@ -309,16 +373,22 @@ public final class MainActivity extends Activity {
                   new AlertDialog.Builder(this)
                       .setTitle("查看游戏")
                       .setItems(
-                          new String[] {"全部游戏", "我的收藏", "最近玩过"},
+                          new String[] {"全部游戏", "我的收藏", "最近玩过", "已下载"},
                           (d, w) -> {
-                            scope = new String[] {"all", "favorites", "recent"}[w];
+                            scope = new String[] {"all", "favorites", "recent", "downloaded"}[w];
                             writeLibraryPreferences();
                             show("library");
                           })
                       .show()));
       choices.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
     }
-    sortButton = chip(sortLabel(), this::chooseSort);
+    sortButton =
+        chip(
+            scope.equals("downloaded") ? localSortLabel() : sortLabel(),
+            () -> {
+              if (scope.equals("downloaded")) chooseLocalSort();
+              else chooseSort();
+            });
     sortButton.setContentDescription("游戏排序");
     sortButton.setTooltipText("按整个游戏库排序");
     choices.addView(sortButton);
@@ -345,6 +415,12 @@ public final class MainActivity extends Activity {
     grid = column();
     scroll.addView(grid);
     body.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+    if ("downloaded".equals(scope)) {
+      loadLocalPlatforms();
+      localSignature = "";
+      loadPage(0);
+      return;
+    }
     if (config == null) {
       status.setText("连接服务器，打开你的游戏库");
       grid.addView(button("配置服务地址", () -> show("settings")));
@@ -424,7 +500,11 @@ public final class MainActivity extends Activity {
     if (platformStrip == null || !"library".equals(tab)) return;
     platformStrip.removeAllViews();
     addPlatformChip("", "全部平台", false);
-    for (JSONObject p : LibrarySettings.visible(platforms, pinnedPlatforms, platformId)) {
+    List<JSONObject> visible =
+        scope.equals("downloaded")
+            ? platforms
+            : LibrarySettings.visible(platforms, pinnedPlatforms, platformId);
+    for (JSONObject p : visible) {
       String id = p.optString("id");
       addPlatformChip(
           id, PlatformArt.shortName(id, p.optString("name")), pinnedPlatforms.contains(id));
@@ -473,7 +553,7 @@ public final class MainActivity extends Activity {
                       || config == null
                       || !source.base.equals(config.base)) return;
                   settingsBase = null;
-                  if ("library".equals(tab)) {
+                  if ("library".equals(tab) && !"downloaded".equals(scope)) {
                     status.setText("平台偏好未同步 · 点击重试");
                     status.setTooltipText(ApiClient.message(e));
                   }
@@ -489,7 +569,7 @@ public final class MainActivity extends Activity {
     sort = settings.sort;
     direction = settings.direction;
     writeLibraryPreferences();
-    if ("library".equals(tab)) {
+    if ("library".equals(tab) && !"downloaded".equals(scope)) {
       sortButton.setText(sortLabel());
       renderPlatformStrip();
       if (reorder) loadGames(false);
@@ -625,7 +705,176 @@ public final class MainActivity extends Activity {
     loadPage(more ? pageOffset + 60 : 0);
   }
 
+  private String localSortLabel() {
+    return LocalGames.LABELS[java.util.Arrays.asList(LocalGames.SORTS).indexOf(localSort)] + " ▾";
+  }
+
+  private void chooseLocalSort() {
+    new AlertDialog.Builder(this)
+        .setTitle("已下载游戏排序")
+        .setSingleChoiceItems(
+            LocalGames.LABELS,
+            java.util.Arrays.asList(LocalGames.SORTS).indexOf(localSort),
+            (d, w) -> {
+              localSort = LocalGames.SORTS[w];
+              getPreferences(0).edit().putString("local.sort", localSort).apply();
+              d.dismiss();
+              sortButton.setText(localSortLabel());
+              loadPage(0);
+            })
+        .setNegativeButton("返回", null)
+        .show();
+  }
+
+  private void chooseLocalPlatform() {
+    String[] labels = new String[platforms.size() + 1];
+    labels[0] = "全部平台";
+    for (int i = 0; i < platforms.size(); i++)
+      labels[i + 1] =
+          PlatformArt.shortName(
+              platforms.get(i).optString("id"), platforms.get(i).optString("name"));
+    new AlertDialog.Builder(this)
+        .setTitle("本机游戏平台")
+        .setItems(
+            labels,
+            (d, w) -> {
+              platformId = w == 0 ? "" : platforms.get(w - 1).optString("id");
+              renderPlatformStrip();
+              loadPage(0);
+            })
+        .setNegativeButton("返回", null)
+        .show();
+  }
+
+  private void loadLocalPlatforms() {
+    platforms.clear();
+    Set<String> ids = new HashSet<>();
+    for (DownloadStore.Item item : store.all())
+      if (store.present(item) && ids.add(item.platform)) {
+        try {
+          platforms.add(new JSONObject().put("id", item.platform).put("name", item.platform));
+        } catch (Exception ignored) {
+        }
+      }
+    renderPlatformStrip();
+  }
+
+  private String localStamp() {
+    StringBuilder stamp = new StringBuilder();
+    for (DownloadStore.Item item : store.all())
+      if (DownloadStore.READY.equals(item.state))
+        stamp
+            .append(item.id)
+            .append(store.present(item))
+            .append(item.lastPlayed)
+            .append(item.metadata);
+    return stamp.toString();
+  }
+
+  private void refreshLocalGames() {
+    if (!localSignature.equals(localStamp())) {
+      int y = scroll.getScrollY();
+      loadLocalPlatforms();
+      loadLocalPage(pageOffset);
+      scroll.post(() -> scroll.scrollTo(0, y));
+    }
+  }
+
+  private void loadLocalPage(int offset) {
+    requestVersion++;
+    localSignature = localStamp();
+    writeLibraryPreferences();
+    List<DownloadStore.Item> items = LocalGames.select(store, platformId, query, localSort);
+    total = items.size();
+    pageOffset = offset >= total ? Math.max(0, ((total - 1) / 60) * 60) : offset;
+    games.clear();
+    for (int i = pageOffset; i < Math.min(total, pageOffset + 60); i++) {
+      DownloadStore.Item item = items.get(i);
+      JSONObject game = LocalGames.view(item);
+      games.add(game);
+      // Backfill old download covers without making the local list wait for a server response.
+      if (config != null
+          && config.base.equals(item.base)
+          && game.optString("cover_url").isEmpty()
+          && localMetadataRequested.add(item.id)) {
+        ServerConfig source = config;
+        images.execute(
+            () -> {
+              try {
+                JSONObject remote =
+                    new ApiClient(source)
+                        .json(source.api("games/" + ServerConfig.encode(item.game)));
+                store.remember(source, List.of(remote));
+              } catch (Exception ignored) {
+                /* Offline play remains available. */
+              }
+            });
+      }
+    }
+    status.setText("已下载 " + total + " 款 · 第 " + (pageOffset / 60 + 1) + " 页");
+    status.setTooltipText("本机文件，离线可用；切换玩家不改变游戏文件。模拟器存档尚未按玩家隔离。");
+    status.setOnClickListener(v -> loadLocalPage(pageOffset));
+    renderGames(false);
+  }
+
+  private void localGameDetail(DownloadStore.Item item) {
+    LinearLayout content = column();
+    content.setPadding(dp(22), dp(12), dp(22), dp(12));
+    content.addView(
+        text(
+            item.platform.toUpperCase(Locale.ROOT) + " · " + bytes(item.size) + " · 已下载到此设备",
+            15,
+            MUTED));
+    content.addView(text("游戏文件可离线使用。模拟器当前进度由它自己管理。", 13, MUTED));
+    AlertDialog dialog =
+        new AlertDialog.Builder(this)
+            .setTitle(item.title)
+            .setView(content)
+            .setNegativeButton("返回", null)
+            .create();
+    content.addView(
+        button(
+            Emulators.status(this, item, pspInstalled).label,
+            () -> {
+              dialog.dismiss();
+              launch(item);
+            }));
+    content.addView(
+        button(
+            "管理本地内容",
+            () -> {
+              dialog.dismiss();
+              show("local");
+            }));
+    if (config != null
+        && config
+            .base
+            .replaceFirst("/p/[^/]+$", "")
+            .equals(item.base.replaceFirst("/p/[^/]+$", "")))
+      content.addView(button("当前玩家的云存档", () -> cloudSave(config, LocalGames.view(item))));
+    dialog.show();
+  }
+
+  private void exportSaveBackup(java.io.File file) {
+    try {
+      if (!new SaveLibrary(getFilesDir()).safe(file)) throw new java.io.IOException("备份不存在或路径无效");
+      saveExportPath = file.getAbsolutePath();
+      startActivityForResult(
+          new Intent(Intent.ACTION_CREATE_DOCUMENT)
+              .addCategory(Intent.CATEGORY_OPENABLE)
+              .setType("application/zip")
+              .putExtra(Intent.EXTRA_TITLE, "RetroOne-" + file.getName()),
+          41);
+    } catch (Exception e) {
+      alert(ApiClient.message(e));
+    }
+  }
+
   private void loadPage(int offset) {
+    if ("library".equals(tab) && "downloaded".equals(scope)) {
+      loadLocalPage(offset);
+      return;
+    }
     if (config == null || !"library".equals(tab)) return;
     int version = ++requestVersion;
     ServerConfig current = config;
@@ -639,6 +888,7 @@ public final class MainActivity extends Activity {
             JSONArray values = result.getJSONArray("games");
             List<JSONObject> items = new ArrayList<>();
             for (int i = 0; i < values.length(); i++) items.add(values.getJSONObject(i));
+            store.remember(current, items);
             ui(
                 () -> {
                   if (version != requestVersion || !"library".equals(tab)) return;
@@ -678,7 +928,12 @@ public final class MainActivity extends Activity {
     grid.removeAllViews();
     if (games.isEmpty()) {
       grid.addView(
-          text(query.isEmpty() ? "此平台还没有游戏。请在服务端导入自己的收藏。" : "没有匹配的游戏，试试其他名称或平台。", 17, MUTED));
+          text(
+              scope.equals("downloaded")
+                  ? "没有符合筛选的已下载游戏。只显示文件完整的本机副本。"
+                  : query.isEmpty() ? "此平台还没有游戏。请在服务端导入自己的收藏。" : "没有匹配的游戏，试试其他名称或平台。",
+              17,
+              MUTED));
       return;
     }
     int width = getResources().getConfiguration().screenWidthDp - 44;
@@ -687,6 +942,16 @@ public final class MainActivity extends Activity {
     LinearLayout line = null;
     for (int i = 0; i < games.size(); i++) {
       JSONObject game = games.get(i);
+      DownloadStore.Item localItem =
+          game.has("_local_id") ? store.get(game.optString("_local_id")) : null;
+      ServerConfig itemSource = config;
+      if (localItem != null) {
+        try {
+          itemSource = RetroApplication.from(this).credentials.load(localItem.base, localItem.http);
+        } catch (Exception ignored) {
+          itemSource = new ServerConfig(localItem.base, localItem.http, "");
+        }
+      }
       if (i % columns == 0) {
         line = row();
         line.setGravity(Gravity.TOP);
@@ -716,7 +981,7 @@ public final class MainActivity extends Activity {
         image.setScaleType(ImageView.ScaleType.FIT_CENTER);
         cover.addView(image, new FrameLayout.LayoutParams(-1, -1));
         image.setTag(monogram);
-        loadCover(image, coverUrl, config);
+        if (itemSource != null) loadCover(image, coverUrl, itemSource);
       }
       TextView name =
           text((game.optBoolean("favorite") ? "★ " : "") + game.optString("title"), 16, TEXT);
@@ -734,13 +999,18 @@ public final class MainActivity extends Activity {
       Button play = button("", () -> {});
       card.addView(play, new LinearLayout.LayoutParams(-1, dp(44)));
       LocalButton binding =
-          bindLocalButton(config, game.optString("id"), game.optString("title"), play, () -> {});
+          bindLocalButton(
+              itemSource, game.optString("id"), game.optString("title"), play, () -> {});
       updateLocalButton(binding, localItems);
       card.setFocusable(true);
       card.setClickable(true);
       card.setContentDescription(game.optString("title") + "，查看详情");
       card.setForeground(getDrawable(android.R.drawable.list_selector_background));
-      card.setOnClickListener(v -> detail(game));
+      card.setOnClickListener(
+          v -> {
+            if (localItem != null) localGameDetail(localItem);
+            else detail(game);
+          });
     }
     if (line != null)
       for (int i = games.size() % columns; i > 0 && i < columns; i++)
@@ -1343,6 +1613,10 @@ public final class MainActivity extends Activity {
   @Override
   protected void onActivityResult(int request, int result, Intent data) {
     super.onActivityResult(request, result, data);
+    if (request == SaveSyncFlow.PICK_DIRECTORY) {
+      if (saveSync != null) saveSync.selected(result, data);
+      return;
+    }
     if (request == 41) {
       if (result == RESULT_OK && data != null && data.getData() != null && saveExportPath != null) {
         java.io.File backup = new java.io.File(saveExportPath);
@@ -1448,6 +1722,7 @@ public final class MainActivity extends Activity {
   private void launchWith(DownloadStore.Item item, int index) {
     try {
       startActivity(Emulators.intent(this, store.get(item.id), index));
+      store.played(item.id);
     } catch (Exception e) {
       alert(
           e instanceof android.content.ActivityNotFoundException
@@ -1550,7 +1825,7 @@ public final class MainActivity extends Activity {
                 + " 尚未验证可靠直启。其他平台仅提供下载管理。多文件光盘、目录游戏和压缩包不会被自动改造。\n\n"
                 + "本机文件保存在 RetroOne 私有目录，卸载应用会移除这些下载。模拟器独立管理存档；本版没有云存档同步，也不会为不同 RetroOne"
                 + " 玩家隔离同一模拟器的存档。\n\n"
-                + "RetroOne Android 0.2.2 · 自有内容客户端",
+                + "RetroOne Android 0.2.3 · 自有内容客户端",
             14,
             MUTED));
   }
@@ -1700,6 +1975,7 @@ public final class MainActivity extends Activity {
   }
 
   private void cloudSave(ServerConfig source, JSONObject game) {
+    String ownerName = profileName;
     LinearLayout content = column();
     content.setPadding(dp(20), dp(12), dp(20), dp(12));
     TextView info = text("正在读取当前玩家的云存档…", 16, TEXT);
@@ -1743,10 +2019,28 @@ public final class MainActivity extends Activity {
                                           (long) (snapshot.optDouble("updated_at") * 1000)));
                   boolean busy = state.optBoolean("native_active") || state.optBoolean("leased");
                   info.setText(description + (busy ? "\n当前游戏正在运行或同步，请退出后读取备份。" : ""));
-                  Button fetch = button("下载最新存档备份…", () -> {});
+                  Button fetch = button("保存最新云端备份", () -> {});
                   fetch.setEnabled(!busy);
                   content.addView(fetch);
-                  content.addView(text("备份为 PSP 游戏内存档，导出 ZIP。不会自动替换本机进度；自动双向同步尚未开放。", 13, MUTED));
+                  Button sync =
+                      button(
+                          "同步 PPSSPP 存档…",
+                          () -> {
+                            dialog.dismiss();
+                            saveSync = new SaveSyncFlow(this, io, source, game, ownerName);
+                            saveSync.begin();
+                          });
+                  sync.setEnabled(!busy);
+                  content.addView(sync);
+                  content.addView(
+                      button(
+                          "查看本地存档",
+                          () -> {
+                            dialog.dismiss();
+                            show("local");
+                            localContent.showSaves();
+                          }));
+                  content.addView(text("支持 PSP 游戏内存档。同步前请退出模拟器；存在不同进度时，由你选择要使用的版本。", 13, MUTED));
                   fetch.setOnClickListener(
                       v -> {
                         fetch.setEnabled(false);
@@ -1757,44 +2051,13 @@ public final class MainActivity extends Activity {
                                 JSONObject latest = SaveBackup.fetch(source, game.getString("id"));
                                 if (latest.getJSONArray("files").length() == 0)
                                   throw new java.io.IOException("该玩家尚未保存过这款游戏的云端进度");
-                                java.io.File dir =
-                                    new java.io.File(
-                                        getFilesDir(),
-                                        "save-backups/"
-                                            + source.key()
-                                            + "/"
-                                            + ServerConfig.hash(game.getString("id")));
-                                if (!dir.isDirectory() && !dir.mkdirs())
-                                  throw new java.io.IOException("无法创建备份目录");
-                                java.io.File file =
-                                    new java.io.File(
-                                        dir,
-                                        "revision-"
-                                            + latest.getLong("revision")
-                                            + "-"
-                                            + java.util.UUID.randomUUID()
-                                            + ".zip");
-                                SaveBackup.zip(latest, file);
+                                new SaveLibrary(getFilesDir())
+                                    .create(source, ownerName, game, latest);
                                 ui(
                                     () -> {
-                                      info.setText("备份已保存 · 版本 " + latest.optInt("revision"));
+                                      info.setText(
+                                          "已保存到「本地内容 → 存档」 · 版本 " + latest.optInt("revision"));
                                       fetch.setEnabled(true);
-                                      if (!dialog.isShowing()) return;
-                                      saveExportPath = file.getAbsolutePath();
-                                      try {
-                                        startActivityForResult(
-                                            new Intent(Intent.ACTION_CREATE_DOCUMENT)
-                                                .addCategory(Intent.CATEGORY_OPENABLE)
-                                                .setType("application/zip")
-                                                .putExtra(
-                                                    Intent.EXTRA_TITLE,
-                                                    "RetroOne-save-"
-                                                        + latest.optInt("revision")
-                                                        + ".zip"),
-                                            41);
-                                      } catch (android.content.ActivityNotFoundException e) {
-                                        alert("系统没有文件保存界面，备份已保留在本应用内");
-                                      }
                                     });
                               } catch (Exception e) {
                                 ui(

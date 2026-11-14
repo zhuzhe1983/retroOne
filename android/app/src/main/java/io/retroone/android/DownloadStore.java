@@ -23,7 +23,7 @@ final class DownloadStore extends SQLiteOpenHelper {
   final File root;
 
   DownloadStore(Context context) {
-    super(context, "downloads.db", null, 1);
+    super(context, "downloads.db", null, 2);
     root = new File(context.getFilesDir(), "games");
     if (!root.exists() && !root.mkdirs()) throw new IllegalStateException("无法创建本机游戏目录");
   }
@@ -35,12 +35,16 @@ final class DownloadStore extends SQLiteOpenHelper {
             + " game TEXT NOT NULL, title TEXT NOT NULL, platform TEXT NOT NULL, state TEXT NOT"
             + " NULL, bytes INTEGER NOT NULL DEFAULT 0, size INTEGER NOT NULL DEFAULT 0, manifest"
             + " TEXT NOT NULL DEFAULT '', name TEXT NOT NULL DEFAULT '', message TEXT NOT NULL"
-            + " DEFAULT '', created INTEGER NOT NULL)");
+            + " DEFAULT '', created INTEGER NOT NULL, metadata TEXT NOT NULL DEFAULT '{}',"
+            + " last_played INTEGER NOT NULL DEFAULT 0)");
   }
 
   @Override
   public void onUpgrade(SQLiteDatabase db, int old, int next) {
-    throw new IllegalStateException("数据库版本不兼容");
+    if (old < 2) {
+      db.execSQL("ALTER TABLE downloads ADD COLUMN metadata TEXT NOT NULL DEFAULT '{}'");
+      db.execSQL("ALTER TABLE downloads ADD COLUMN last_played INTEGER NOT NULL DEFAULT 0");
+    }
   }
 
   synchronized void recover() {
@@ -66,6 +70,10 @@ final class DownloadStore extends SQLiteOpenHelper {
     values.put("platform", game.getString("platform"));
     values.put("state", QUEUED);
     values.put("created", System.currentTimeMillis());
+    JSONObject metadata = new JSONObject();
+    for (String key : new String[] {"cover_url", "platform_name"})
+      if (game.has(key)) metadata.put(key, game.optString(key));
+    values.put("metadata", metadata.toString());
     getWritableDatabase().insertOrThrow("downloads", null, values);
     return id;
   }
@@ -98,6 +106,42 @@ final class DownloadStore extends SQLiteOpenHelper {
     ContentValues values = new ContentValues();
     values.put("bytes", bytes);
     getWritableDatabase().update("downloads", values, "id=?", new String[] {id});
+  }
+
+  synchronized void played(String id) {
+    ContentValues values = new ContentValues();
+    values.put("last_played", System.currentTimeMillis());
+    getWritableDatabase().update("downloads", values, "id=?", new String[] {id});
+  }
+
+  synchronized void remember(ServerConfig source, List<JSONObject> games) {
+    for (JSONObject game : games) {
+      try {
+        JSONObject metadata = new JSONObject();
+        for (String key : new String[] {"cover_url", "platform_name"})
+          if (game.has(key)) metadata.put(key, game.optString(key));
+        ContentValues values = new ContentValues();
+        values.put("metadata", metadata.toString());
+        getWritableDatabase()
+            .update(
+                "downloads",
+                values,
+                "base=? AND game=?",
+                new String[] {source.base, game.getString("id")});
+      } catch (Exception ignored) {
+        /* Catalog browsing must not lose a valid local file. */
+      }
+    }
+  }
+
+  boolean present(Item item) {
+    if (!READY.equals(item.state)) return false;
+    try {
+      File file = complete(item);
+      return file.isFile() && file.length() == item.size;
+    } catch (IOException ignored) {
+      return false;
+    }
   }
 
   synchronized void manifest(String id, JSONObject json, DownloadManifest manifest) {
@@ -142,9 +186,9 @@ final class DownloadStore extends SQLiteOpenHelper {
   }
 
   static final class Item {
-    final String id, base, game, title, platform, state, manifest, name, message;
+    final String id, base, game, title, platform, state, manifest, name, message, metadata;
     final boolean http;
-    final long bytes, size;
+    final long bytes, size, created, lastPlayed;
 
     Item(Cursor c) {
       id = s(c, "id");
@@ -159,6 +203,9 @@ final class DownloadStore extends SQLiteOpenHelper {
       http = c.getInt(c.getColumnIndexOrThrow("http")) == 1;
       bytes = c.getLong(c.getColumnIndexOrThrow("bytes"));
       size = c.getLong(c.getColumnIndexOrThrow("size"));
+      created = c.getLong(c.getColumnIndexOrThrow("created"));
+      lastPlayed = c.getLong(c.getColumnIndexOrThrow("last_played"));
+      metadata = s(c, "metadata");
     }
 
     private static String s(Cursor c, String key) {

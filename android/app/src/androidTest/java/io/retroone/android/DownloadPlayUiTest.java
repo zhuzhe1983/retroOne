@@ -97,8 +97,11 @@ public class DownloadPlayUiTest {
             .getJSONObject(0);
     String playableId = null, transferId = null;
     Activity activity = null;
+    android.content.SharedPreferences prefs = context.getSharedPreferences("MainActivity", 0);
+    String oldScope = prefs.getString(config.key() + ".scope", "all");
     try {
       app.credentials.save(config);
+      prefs.edit().putString(config.key() + ".scope", "all").commit();
       for (DownloadStore.Item item : app.downloads.all())
         if (item.base.equals(config.base)
             && (item.game.equals(game.getString("id"))
@@ -169,6 +172,7 @@ public class DownloadPlayUiTest {
         shot("play-ppsspp-original-program");
       }
     } finally {
+      prefs.edit().putString(config.key() + ".scope", oldScope).commit();
       if (transferId != null) app.downloads.cancel(transferId);
       // Keep the small original program: PPSSPP may still be reading its granted URI.
       if (old != null) app.credentials.save(old);

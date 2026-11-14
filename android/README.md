@@ -86,3 +86,11 @@ adb -s DEVICE_SERIAL reverse --remove tcp:18780
 
 
 0.2.1 的 `LibraryPreferencesUiTest` 使用同一 `fixtureBase`，从界面关注/取消关注 PSP、切换全库排序、收藏自制测试程序并验证服务端数据；只对独立夹具写入，结束恢复原连接及夹具偏好。`LibraryUiTest` 仍只读生产目录，增加紧凑布局高度、PSP 下载入口与玩家选择检查；宽屏须使用默认热度排序和全部游戏视图。截图留在设备应用的外部私有目录，不纳入公开仓库。
+
+## 0.2.3 存储与同步验收
+
+新增 `LocalContentUiTest`（先运行 `DeviceIntegrationTest` 准备原创下载）：验证离线“已下载”、本机排序、游戏文件删除保留备份，以及不同玩家备份单独移除。验证迁移时可先在 0.2.2 下载夹具，再覆盖安装 0.2.3；不要清空应用数据。
+
+`SaveSyncUiTest` 使用同一 `fixtureBase`，通过测试 APK 专属 DocumentsProvider 验证真实云存档 API 与目录读写：取消、选云端、选本机、比较期间两端分别变化、替换失败回滚、其他游戏文件不变和占用释放。它会给独立夹具游戏写入原创测试字节；**只对独立测试服务与设备运行**。测试 Provider 和授权 Activity 仅在 AndroidTest APK 中，正式 APK 不包含这些入口。实际用户目录仍由 Android 系统选择器授权。
+
+手动同步支持 PSP 游戏内 SAVEDATA，要求先退出 PPSSPP。还没有运行中自动同步或模拟器玩家环境隔离；完整操作与边界见 [使用说明](../docs/android.md#023-已下载本地内容与存档冲突)。

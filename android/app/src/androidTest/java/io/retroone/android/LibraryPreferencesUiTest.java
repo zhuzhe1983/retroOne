@@ -63,7 +63,10 @@ public class LibraryPreferencesUiTest {
     JSONObject originalSettings = LibrarySettings.read(fixture).json();
     boolean wasFavorite = game.optBoolean("favorite");
     Activity activity = null;
+    android.content.SharedPreferences prefs = context.getSharedPreferences("MainActivity", 0);
+    String oldScope = prefs.getString(fixture.key() + ".scope", "all");
     try {
+      prefs.edit().putString(fixture.key() + ".scope", "all").commit();
       api.put(
           fixture.api("settings/library"),
           new JSONObject(
@@ -104,6 +107,7 @@ public class LibraryPreferencesUiTest {
       waitFor("关注 PSP", true);
       assertFalse(LibrarySettings.read(fixture).pins.contains("psp"));
     } finally {
+      prefs.edit().putString(fixture.key() + ".scope", oldScope).commit();
       api.put(fixture.api("settings/library"), originalSettings, 16384);
       api.post(
           fixture.api("games/" + game.getString("id") + "/favorite"),

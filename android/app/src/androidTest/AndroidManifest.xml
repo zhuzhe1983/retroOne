@@ -1,0 +1,11 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application>
+    <activity android:name="io.retroone.android.SaveFixtureGrantActivity" android:exported="true" />
+    <!-- Test APK only: isolated synthetic saves, never the user's PSP directory. -->
+    <provider android:name="io.retroone.android.SaveFixtureProvider"
+        android:authorities="io.retroone.android.test.saves" android:exported="true"
+        android:grantUriPermissions="true" android:permission="android.permission.MANAGE_DOCUMENTS">
+      <intent-filter><action android:name="android.content.action.DOCUMENTS_PROVIDER" /></intent-filter>
+    </provider>
+  </application>
+</manifest>

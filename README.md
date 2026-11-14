@@ -266,7 +266,7 @@ Display preferences are saved separately for each player and browser/device: use
 
 ## Android 本机版本
 
-原生 Android 客户端已放在 [`android/`](android/README.md)：提供 Apps / Games 双视图、可选默认桌面、玩家切换、收藏、最近游玩和全库排序，支持后台下载与校验、暂停和续传，并通过只读 content URI 调用本机 PPSSPP。PSP 云存档可查看并导出备份；Android 自动双向同步与模拟器玩家存档隔离尚未开放。首版验证 PSP 独立 ISO / CSO；PBP、CHD、多文件游戏和其他模拟器的边界见 [Android 使用说明](docs/android.md)。客户端不包含游戏、固件或模拟器，也不改动现有网页与云端服务。
+原生 Android 客户端已放在 [`android/`](android/README.md)：提供 Apps / Games 双视图、可选默认桌面、玩家切换、收藏、最近游玩和全库排序，支持后台下载与校验、暂停和续传，并通过只读 content URI 调用本机 PPSSPP。新增“已下载”筛选和本地游戏／存档备份管理；PSP 可在退出模拟器后手动双向同步，进度不同时选择使用本机或云端版本，替换前保留备份。Android 自动同步与模拟器玩家存档隔离尚未开放。首版验证 PSP 独立 ISO / CSO；PBP、CHD、多文件游戏和其他模拟器的边界见 [Android 使用说明](docs/android.md)。客户端不包含游戏、固件或模拟器，也不改动现有网页与云端服务。
 
 ## 文档与开发
 

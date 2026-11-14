@@ -24,8 +24,12 @@ import android.widget.*;
 import java.net.HttpURLConnection;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -60,10 +64,40 @@ public final class MainActivity extends Activity {
   private boolean destroyed, settingsBusy;
   private String settingsBase;
   private int settingsVersion;
+  private DownloadBadge downloadBadge;
+  private PopupWindow downloadsPopup;
+  private LinearLayout popupTasks;
+  private ScrollView popupScroll;
+  private String popupSignature = "";
+  private final Set<String> seenDownloads = new HashSet<>();
+  private final List<LocalButton> localButtons = new ArrayList<>();
+  private final Map<String, TextView> popupLabels = new LinkedHashMap<>();
+  private final Map<String, ProgressBar> popupProgress = new LinkedHashMap<>();
+  private boolean pspInstalled, resumed;
+
+  private final class LocalButton {
+    final ServerConfig source;
+    final String game, title;
+    final Button button;
+    final Runnable beforePlay;
+    Runnable download;
+    String signature = "";
+
+    LocalButton(
+        ServerConfig source, String game, String title, Button button, Runnable beforePlay) {
+      this.source = source;
+      this.game = game;
+      this.title = title;
+      this.button = button;
+      this.beforePlay = beforePlay;
+    }
+  }
+
   private final Runnable poll =
       new Runnable() {
         public void run() {
-          if (!destroyed) {
+          if (!destroyed && resumed) {
+            refreshDownloads();
             if ("downloads".equals(tab)) renderDownloads(false);
             handler.postDelayed(this, 800);
           }
@@ -79,6 +113,8 @@ public final class MainActivity extends Activity {
     } catch (Exception ignored) {
     }
     readLibraryPreferences();
+    seenDownloads.addAll(
+        getPreferences(0).getStringSet("seen.downloads", java.util.Collections.emptySet()));
     if (state != null) {
       tab = state.getString("tab", "library");
       query = state.getString("query", "");
@@ -113,10 +149,9 @@ public final class MainActivity extends Activity {
       header.addView(headerScopes);
     }
     header.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
-    Button download = chip("↓", () -> show("downloads"));
-    download.setContentDescription("下载管理");
-    download.setTooltipText("下载管理 · 离开页面仍继续下载");
-    header.addView(download, new LinearLayout.LayoutParams(dp(44), dp(44)));
+    downloadBadge = new DownloadBadge(this);
+    downloadBadge.setOnClickListener(v -> openDownloadsPopup());
+    header.addView(downloadBadge, new LinearLayout.LayoutParams(dp(48), dp(44)));
     Button more = chip("⋯", this::navigationMenu);
     more.setContentDescription("更多功能");
     header.addView(more, new LinearLayout.LayoutParams(dp(44), dp(44)));
@@ -138,7 +173,22 @@ public final class MainActivity extends Activity {
     body = column();
     root.addView(body, new LinearLayout.LayoutParams(-1, 0, 1));
     show(tab);
+  }
+
+  @Override
+  protected void onResume() {
+    super.onResume();
+    resumed = true;
+    pspInstalled = !Emulators.installed(this).isEmpty();
+    handler.removeCallbacks(poll);
     handler.post(poll);
+  }
+
+  @Override
+  protected void onPause() {
+    resumed = false;
+    handler.removeCallbacks(poll);
+    super.onPause();
   }
 
   @Override
@@ -161,6 +211,7 @@ public final class MainActivity extends Activity {
   @Override
   protected void onDestroy() {
     destroyed = true;
+    if (downloadsPopup != null) downloadsPopup.dismiss();
     handler.removeCallbacksAndMessages(null);
     io.shutdownNow();
     images.shutdownNow();
@@ -680,22 +731,11 @@ public final class MainActivity extends Activity {
                   + bytes(game.optLong("size")),
               12,
               MUTED));
-      String localLabel = "";
-      for (DownloadStore.Item item : localItems) {
-        if (item.base.equals(config.base)
-            && item.game.equals(game.optString("id"))
-            && !DownloadStore.CANCELED.equals(item.state)) {
-          localLabel =
-              switch (item.state) {
-                case DownloadStore.READY -> "已下载";
-                case DownloadStore.RUNNING, DownloadStore.PREPARING, DownloadStore.QUEUED -> "下载中";
-                case DownloadStore.PAUSED -> "下载已暂停";
-                default -> "下载需重试";
-              };
-          break;
-        }
-      }
-      if (!localLabel.isEmpty()) card.addView(text(localLabel, 12, ACCENT));
+      Button play = button("", () -> {});
+      card.addView(play, new LinearLayout.LayoutParams(-1, dp(44)));
+      LocalButton binding =
+          bindLocalButton(config, game.optString("id"), game.optString("title"), play, () -> {});
+      updateLocalButton(binding, localItems);
       card.setFocusable(true);
       card.setClickable(true);
       card.setContentDescription(game.optString("title") + "，查看详情");
@@ -781,6 +821,13 @@ public final class MainActivity extends Activity {
             .setNegativeButton("返回", null)
             .create();
     dialog.show();
+    Button localAction = button("", () -> {});
+    content.addView(localAction);
+    LocalButton binding =
+        bindLocalButton(
+            source, basic.optString("id"), basic.optString("title"), localAction, dialog::dismiss);
+    updateLocalButton(binding, store.all());
+
     io.execute(
         () -> {
           try {
@@ -847,45 +894,20 @@ public final class MainActivity extends Activity {
                   personal.addView(favorite);
                   personal.addView(button("云存档", () -> cloudSave(source, game)));
                   actions.addView(personal);
-                  DownloadStore.Item local = null;
-                  for (DownloadStore.Item item : store.all())
-                    if (item.base.equals(source.base)
-                        && item.game.equals(game.optString("id"))
-                        && !DownloadStore.CANCELED.equals(item.state)) {
-                      local = item;
-                      break;
-                    }
-                  if (local != null) {
-                    DownloadStore.Item item = local;
-                    boolean direct =
-                        DownloadStore.READY.equals(item.state)
-                            && Emulators.support(item.platform, item.name).isEmpty()
-                            && !Emulators.installed(this).isEmpty();
-                    actions.addView(
-                        button(
-                            direct
-                                ? "启动 PPSSPP"
-                                : DownloadStore.READY.equals(item.state) ? "已下载 · 查看文件" : "查看下载任务",
-                            () -> {
-                              dialog.dismiss();
-                              if (direct) launch(item);
-                              else show("downloads");
-                            }));
-                  } else if (capability.available)
-                    actions.addView(
-                        button(
-                            "↓ 下载到掌机",
-                            () -> {
-                              try {
-                                store.enqueue(source, game);
-                                requestNotifications();
-                                DownloadService.command(this, "start", null);
-                                dialog.dismiss();
-                                show("downloads");
-                              } catch (Exception e) {
-                                alert(ApiClient.message(e));
-                              }
-                            }));
+                  if (capability.available)
+                    binding.download =
+                        () -> {
+                          try {
+                            store.enqueue(source, game);
+                            requestNotifications();
+                            DownloadService.command(this, "start", null);
+                            dialog.dismiss();
+                            openDownloadsPopup();
+                          } catch (Exception e) {
+                            alert(ApiClient.message(e));
+                          }
+                        };
+                  updateLocalButton(binding, store.all());
                   if (!capability.available) {
                     actions.addView(text("此资源暂不支持下载", 15, 0xffffcf9d));
                     actions.addView(text(capability.explanation(), 13, MUTED));
@@ -936,6 +958,263 @@ public final class MainActivity extends Activity {
                 });
           }
         });
+  }
+
+  private LocalButton bindLocalButton(
+      ServerConfig source, String game, String title, Button button, Runnable beforePlay) {
+    LocalButton binding = new LocalButton(source, game, title, button, beforePlay);
+    localButtons.add(binding);
+    return binding;
+  }
+
+  private void updateLocalButton(LocalButton binding, List<DownloadStore.Item> items) {
+    DownloadStore.Item found = null;
+    for (DownloadStore.Item item : items)
+      if (binding.source != null
+          && item.base.equals(binding.source.base)
+          && item.game.equals(binding.game)
+          && !DownloadStore.CANCELED.equals(item.state)) {
+        found = item;
+        break;
+      }
+    Button button = binding.button;
+    LaunchPolicy.State readyState =
+        found != null && DownloadStore.READY.equals(found.state)
+            ? Emulators.status(this, found, pspInstalled)
+            : null;
+    String signature =
+        found == null
+            ? "none:" + (binding.download != null)
+            : found.id
+                + found.state
+                + readyState
+                + (found.size > 0 ? (int) (found.bytes / (double) found.size * 100) : -1);
+    if (signature.equals(binding.signature)) return;
+    binding.signature = signature;
+    button.setVisibility(found == null && binding.download == null ? View.GONE : View.VISIBLE);
+    button.setBackground(controlBackground(false));
+    button.setTextColor(ACCENT);
+    if (found == null) {
+      button.setText("↓ 下载到掌机");
+      button.setContentDescription("下载 " + binding.title);
+      button.setOnClickListener(
+          v -> {
+            if (binding.download != null) binding.download.run();
+          });
+      return;
+    }
+    DownloadStore.Item item = found;
+    if (DownloadStore.READY.equals(item.state)) {
+      LaunchPolicy.State state = readyState;
+      button.setText(state.label);
+      button.setContentDescription(
+          (state == LaunchPolicy.State.PLAYABLE ? "游玩 " : state.label + " ") + binding.title);
+      button.setTooltipText(
+          state == LaunchPolicy.State.PLAYABLE ? "使用本机 PPSSPP" : "已下载 · " + state.label);
+      if (state == LaunchPolicy.State.PLAYABLE) {
+        button.setBackground(shape(ACCENT, 10));
+        button.setTextColor(BG);
+      }
+      button.setOnClickListener(
+          v -> {
+            binding.beforePlay.run();
+            launch(store.get(item.id));
+          });
+    } else {
+      String label =
+          switch (item.state) {
+            case DownloadStore.RUNNING ->
+                "↓ "
+                    + (item.size > 0
+                        ? (int) Math.min(99, item.bytes / (double) item.size * 100) + "%"
+                        : "下载中");
+            case DownloadStore.PREPARING -> "正在准备…";
+            case DownloadStore.QUEUED -> "等待下载";
+            case DownloadStore.PAUSED -> "已暂停 · 继续";
+            default -> "下载失败 · 重试";
+          };
+      button.setText(label);
+      button.setContentDescription(binding.title + "，" + label);
+      button.setOnClickListener(
+          v -> {
+            binding.beforePlay.run();
+            openDownloadsPopup();
+          });
+    }
+  }
+
+  private void refreshDownloads() {
+    List<DownloadStore.Item> items = store.all();
+    DownloadSummary summary = new DownloadSummary();
+    for (DownloadStore.Item item : items)
+      summary.add(item.state, item.bytes, item.size, !seenDownloads.contains(item.id));
+    if (downloadBadge != null) downloadBadge.update(summary);
+    localButtons.removeIf(binding -> !binding.button.isAttachedToWindow());
+    for (LocalButton binding : localButtons) updateLocalButton(binding, items);
+    if (downloadsPopup != null && downloadsPopup.isShowing()) {
+      renderDownloadsPopup(items);
+      acknowledgeDownloads(items);
+    }
+  }
+
+  private void acknowledgeDownloads(List<DownloadStore.Item> items) {
+    boolean changed = false;
+    Set<String> valid = new HashSet<>();
+    for (DownloadStore.Item item : items) {
+      if (!DownloadStore.CANCELED.equals(item.state)) valid.add(item.id);
+      if (DownloadStore.READY.equals(item.state)) changed |= seenDownloads.add(item.id);
+    }
+    changed |= seenDownloads.retainAll(valid);
+    if (changed)
+      getPreferences(0).edit().putStringSet("seen.downloads", new HashSet<>(seenDownloads)).apply();
+  }
+
+  private void openDownloadsPopup() {
+    if (downloadsPopup != null && downloadsPopup.isShowing()) {
+      downloadsPopup.dismiss();
+      return;
+    }
+    LinearLayout content = column();
+    content.setPadding(dp(16), dp(12), dp(16), dp(12));
+    content.setBackground(getDrawable(R.drawable.dialog_surface));
+    LinearLayout heading = row();
+    TextView title = text("下载", 18, TEXT);
+    title.setTypeface(null, Typeface.BOLD);
+    heading.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+    Button close = chip("×", () -> downloadsPopup.dismiss());
+    close.setContentDescription("收起下载浮层");
+    heading.addView(close);
+    content.addView(heading);
+    int maxScrollHeight =
+        dp(Math.max(120, Math.min(320, getResources().getConfiguration().screenHeightDp - 200)));
+    popupScroll =
+        new ScrollView(this) {
+          @Override
+          protected void onMeasure(int width, int height) {
+            super.onMeasure(
+                width, View.MeasureSpec.makeMeasureSpec(maxScrollHeight, View.MeasureSpec.AT_MOST));
+          }
+        };
+    popupTasks = column();
+    popupScroll.addView(popupTasks);
+    content.addView(popupScroll, new LinearLayout.LayoutParams(-1, -2));
+    Button all =
+        chip(
+            "查看全部下载 →",
+            () -> {
+              downloadsPopup.dismiss();
+              show("downloads");
+            });
+    content.addView(all, new LinearLayout.LayoutParams(-1, dp(44)));
+    downloadsPopup =
+        new PopupWindow(
+            content,
+            dp(Math.min(400, getResources().getConfiguration().screenWidthDp - 24)),
+            -2,
+            true);
+    downloadsPopup.setBackgroundDrawable(
+        new android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT));
+    downloadsPopup.setOutsideTouchable(true);
+    downloadsPopup.setElevation(dp(12));
+    popupSignature = "";
+    renderDownloadsPopup(store.all());
+    downloadsPopup.showAsDropDown(downloadBadge, 0, dp(8), Gravity.END);
+    acknowledgeDownloads(store.all());
+    refreshDownloads();
+  }
+
+  private void renderDownloadsPopup(List<DownloadStore.Item> all) {
+    List<DownloadStore.Item> items = new ArrayList<>();
+    for (DownloadStore.Item item : all)
+      if (!DownloadStore.CANCELED.equals(item.state)) items.add(item);
+    items.sort((a, b) -> Integer.compare(downloadPriority(a.state), downloadPriority(b.state)));
+    if (items.size() > 6) items = new ArrayList<>(items.subList(0, 6));
+    StringBuilder signature = new StringBuilder();
+    for (DownloadStore.Item item : items) signature.append(item.id).append(item.state);
+    signature.append(pspInstalled);
+    if (!signature.toString().equals(popupSignature)) {
+      popupSignature = signature.toString();
+      int y = popupScroll.getScrollY();
+      View focused = popupTasks.findFocus();
+      Object tag = focused == null ? null : focused.getTag();
+      popupTasks.removeAllViews();
+      popupLabels.clear();
+      popupProgress.clear();
+      if (items.isEmpty()) popupTasks.addView(text("暂无下载。去游戏库选择一款游戏。", 14, MUTED));
+      for (DownloadStore.Item item : items) {
+        LinearLayout entry = column();
+        entry.setPadding(0, dp(6), 0, dp(12));
+        TextView name = text(item.title, 15, TEXT);
+        name.setMaxLines(2);
+        entry.addView(name);
+        TextView label = text("", 12, MUTED);
+        entry.addView(label);
+        popupLabels.put(item.id, label);
+        ProgressBar progress =
+            new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        progress.setMax(1000);
+        entry.addView(progress, new LinearLayout.LayoutParams(-1, dp(5)));
+        popupProgress.put(item.id, progress);
+        LinearLayout actions = row();
+        entry.addView(actions);
+        if (downloadPriority(item.state) == 0) {
+          actions.addView(
+              tagged(
+                  chip("暂停", () -> DownloadService.command(this, DownloadService.PAUSE, item.id)),
+                  item.id + "pause"));
+        } else if (DownloadStore.PAUSED.equals(item.state)
+            || DownloadStore.FAILED.equals(item.state)) {
+          actions.addView(
+              tagged(
+                  chip(
+                      "继续 / 重试",
+                      () -> {
+                        requestNotifications();
+                        DownloadService.command(this, DownloadService.RESUME, item.id);
+                      }),
+                  item.id + "resume"));
+        } else if (DownloadStore.READY.equals(item.state)) {
+          LaunchPolicy.State state = Emulators.status(this, item, pspInstalled);
+          Button play = chip(state.label, () -> launch(store.get(item.id)));
+          play.setContentDescription(
+              (state == LaunchPolicy.State.PLAYABLE ? "游玩 " : state.label + " ") + item.title);
+          actions.addView(tagged(play, item.id + "play"));
+          if (state != LaunchPolicy.State.PLAYABLE)
+            actions.addView(
+                chip(
+                    "导出",
+                    () -> {
+                      downloadsPopup.dismiss();
+                      export(item);
+                    }));
+        }
+        popupTasks.addView(entry);
+      }
+      if (tag != null) {
+        View target = popupTasks.findViewWithTag(tag);
+        if (target != null) target.requestFocus();
+      }
+      popupScroll.post(() -> popupScroll.scrollTo(0, y));
+    }
+    for (DownloadStore.Item item : items) {
+      TextView label = popupLabels.get(item.id);
+      ProgressBar progress = popupProgress.get(item.id);
+      label.setText(stateLabel(item.state) + " · " + bytes(item.bytes) + " / " + bytes(item.size));
+      label.setTooltipText(item.message);
+      progress.setIndeterminate(
+          DownloadStore.PREPARING.equals(item.state) || DownloadStore.QUEUED.equals(item.state));
+      progress.setProgress(
+          item.size > 0 ? (int) Math.min(1000, item.bytes / (double) item.size * 1000) : 0);
+    }
+  }
+
+  private static int downloadPriority(String state) {
+    return switch (state) {
+      case DownloadStore.RUNNING, DownloadStore.PREPARING, DownloadStore.QUEUED -> 0;
+      case DownloadStore.FAILED -> 1;
+      case DownloadStore.PAUSED -> 2;
+      default -> 3;
+    };
   }
 
   private void requestNotifications() {
@@ -1002,10 +1281,10 @@ public final class MainActivity extends Activity {
                     }),
                 item.id + "resume"));
       else if (DownloadStore.READY.equals(item.state)) {
-        String reason = Emulators.support(item.platform, item.name);
-        if (reason.isEmpty())
-          actions.addView(tagged(button("启动 PPSSPP", () -> launch(item)), item.id + "launch"));
-        else card.addView(text(reason, 13, 0xffffbb88));
+        LaunchPolicy.State support = Emulators.status(this, item, pspInstalled);
+        actions.addView(tagged(button(support.label, () -> launch(item)), item.id + "launch"));
+        if (support == LaunchPolicy.State.UNSUPPORTED || support == LaunchPolicy.State.MANUAL)
+          card.addView(text(Emulators.support(item.platform, item.name), 13, MUTED));
         actions.addView(tagged(button("导出副本…", () -> export(item)), item.id + "export"));
       }
       if (!active)
@@ -1127,7 +1406,28 @@ public final class MainActivity extends Activity {
   }
 
   private void launch(DownloadStore.Item item) {
+    if (item == null) {
+      alert("本机文件记录不存在，请刷新后重试");
+      return;
+    }
+    item = store.get(item.id);
+    if (item == null) {
+      alert("本机文件记录不存在，请刷新后重试");
+      return;
+    }
     List<Integer> installed = Emulators.installed(this);
+    LaunchPolicy.State support = Emulators.status(this, item, !installed.isEmpty());
+    if (support != LaunchPolicy.State.PLAYABLE && support != LaunchPolicy.State.INSTALL) {
+      String reason =
+          support == LaunchPolicy.State.MISSING
+              ? "本机文件不存在或大小变化，请重新下载。"
+              : support == LaunchPolicy.State.INCOMPLETE
+                  ? "请等待下载与校验完成。"
+                  : Emulators.support(item.platform, item.name);
+      alert(reason.isEmpty() ? "此文件暂不能直接启动，请导出后在模拟器中打开。" : reason);
+      return;
+    }
+    if (downloadsPopup != null) downloadsPopup.dismiss();
     if (installed.isEmpty()) {
       alert("未找到可用的 PPSSPP。请从 PPSSPP 官方渠道安装后重试；RetroOne 不附带模拟器、游戏或固件。");
       return;
@@ -1138,9 +1438,10 @@ public final class MainActivity extends Activity {
     }
     String[] labels = new String[installed.size()];
     for (int i = 0; i < labels.length; i++) labels[i] = Emulators.LABELS[installed.get(i)];
+    DownloadStore.Item ready = item;
     new AlertDialog.Builder(this)
         .setTitle("选择模拟器")
-        .setItems(labels, (d, w) -> launchWith(item, installed.get(w)))
+        .setItems(labels, (d, w) -> launchWith(ready, installed.get(w)))
         .show();
   }
 
@@ -1249,7 +1550,7 @@ public final class MainActivity extends Activity {
                 + " 尚未验证可靠直启。其他平台仅提供下载管理。多文件光盘、目录游戏和压缩包不会被自动改造。\n\n"
                 + "本机文件保存在 RetroOne 私有目录，卸载应用会移除这些下载。模拟器独立管理存档；本版没有云存档同步，也不会为不同 RetroOne"
                 + " 玩家隔离同一模拟器的存档。\n\n"
-                + "RetroOne Android 0.2.1 · 自有内容客户端",
+                + "RetroOne Android 0.2.2 · 自有内容客户端",
             14,
             MUTED));
   }

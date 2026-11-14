@@ -60,6 +60,7 @@ USB 转发会随断开连接而消失。本次 RK3588 验收中，USB reverse �
 其他真机测试类（相同 `fixtureBase`）：
 
 - `io.retroone.android.DownloadLifecycleTest`：32 MiB 原创字节流，暂停、续传、返回桌面后完成；完成后只移除该测试副本。
+- `io.retroone.android.DownloadPlayUiTest`：真实点击下载、完成后卡片自动出现“游玩”、右上角浮层暂停续传、切换 Apps 后进度持续显示；加 `-e launchPpsspp true` 时点击浮层“游玩”并检查原创 PSP 程序实际渲染。仅在独立测试设备或已退出当前游戏的设备上执行。
 - `io.retroone.android.RecoveryTest`：先单独运行 `-e phase prepare`，结束后 Android 会终止被测进程；再单独运行 `-e phase recover`，确认持久队列转为暂停并从已校验分片继续。不要在两次调用间清除数据。
 - `DeviceIntegrationTest` 的 `-e verifyInput true` 是可选的键盘 Z→PSP CROSS 检查，需要模拟器具备相应映射。本机注入按键未通过这一检查，不能据此声称手柄已验证；默认测试仅断言程序画面正确。
 

@@ -20,13 +20,26 @@ final class Emulators {
   static final String[] LABELS = {"PPSSPP", "PPSSPP Gold（未实机验证）", "PPSSPP Legacy（未实机验证）"};
 
   static String support(String platform, String name) {
-    if (!"psp".equals(platform)) return "此平台尚未接入经过验证的 Android 模拟器；可保存服务允许下载的独立文件";
-    String lower = name.toLowerCase(Locale.ROOT);
-    if (lower.endsWith(".pbp"))
-      return "PBP 暂不支持直接启动：PPSSPP 1.20.4 对本应用的 content URI 存在目录解析问题。可下载保留，不会假装启动成功";
-    if (!(lower.endsWith(".iso") || lower.endsWith(".cso")))
-      return "当前直启仅开放已验证传递方式的 PSP ISO / CSO；CHD、PBP 和压缩包可下载，但尚未接入可靠直启";
-    return "";
+    return LaunchPolicy.formatReason(platform, name);
+  }
+
+  static LaunchPolicy.State status(Context context, DownloadStore.Item item, boolean installed) {
+    if (item == null) return LaunchPolicy.State.MISSING;
+    boolean present = false;
+    if (DownloadStore.READY.equals(item.state)) {
+      try {
+        File file = RetroApplication.from(context).downloads.complete(item);
+        present = file.isFile() && file.length() == item.size;
+      } catch (IOException ignored) {
+      }
+    }
+    return LaunchPolicy.assess(
+        item.platform,
+        item.name,
+        item.size,
+        DownloadStore.READY.equals(item.state),
+        present,
+        installed);
   }
 
   static List<Integer> installed(Context context) {
@@ -45,6 +58,8 @@ final class Emulators {
   }
 
   static Intent intent(Context context, DownloadStore.Item item, int emulator) throws IOException {
+    if (item == null) throw new IOException("本机文件记录不存在，请刷新后重试");
+    if (emulator < 0 || emulator >= PACKAGES.length) throw new IOException("模拟器选择无效");
     if (!DownloadStore.READY.equals(item.state)) throw new IOException("文件尚未完整下载并校验");
     String reason = support(item.platform, item.name);
     if (!reason.isEmpty()) throw new IOException(reason);

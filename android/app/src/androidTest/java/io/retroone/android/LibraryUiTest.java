@@ -153,8 +153,8 @@ public class LibraryUiTest {
       waitText("PSP · 使用已安装的 PPSSPP");
       assertTrue(
           find("↓ 下载到掌机", null) != null
-              || find("启动 PPSSPP", null) != null
-              || find("查看下载任务", null) != null);
+              || find("▶ 游玩", null) != null
+              || find("已暂停 · 继续", null) != null);
       screenshot(context, "psp-download.png");
       assertTrue(
           find("返回", "android.widget.Button").performAction(AccessibilityNodeInfo.ACTION_CLICK));

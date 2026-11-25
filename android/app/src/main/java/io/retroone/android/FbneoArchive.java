@@ -19,21 +19,92 @@ final class FbneoArchive {
 
   static final String DAT = "0031b6557d493bc52d601e25b640e8a2d830bd6c78d4f3fff227463d2c62ae88";
 
+  static final long MAX_ARCHIVE_BYTES = 512L * 1024 * 1024;
+  static final int MAX_ENTRIES = 4096;
+  static final long MAX_DIRECTORY_BYTES = 4L * 1024 * 1024;
+
+  /** Bound memory before ZipFile parses the central directory. No archive bytes are rewritten. */
+  static int checkLayout(File archive) throws IOException {
+    try (RandomAccessFile file = new RandomAccessFile(archive, "r")) {
+      long size = file.length();
+      if (size > MAX_ARCHIVE_BYTES) throw new IOException("ZIP 超过自动校验的 512 MiB 物理大小上限，请手动导入");
+      if (size < 22 || file.readInt() != 0x504b0304)
+        throw new IOException("仅接入标准 ZIP；带前缀、自解压或空归档请手动导入");
+      byte[] tail = new byte[(int) Math.min(size, 65557)];
+      long tailOffset = size - tail.length;
+      file.seek(tailOffset);
+      file.readFully(tail);
+      int end = -1;
+      for (int i = tail.length - 22; i >= 0; i--) {
+        if (u32(tail, i) == 0x06054b50L && i + 22 + u16(tail, i + 20) == tail.length) {
+          end = i;
+          break;
+        }
+      }
+      if (end < 0) throw new IOException("ZIP 结束记录无效或不完整");
+      int count = u16(tail, end + 10);
+      long length = u32(tail, end + 12), offset = u32(tail, end + 16);
+      if (u16(tail, end + 4) != 0
+          || u16(tail, end + 6) != 0
+          || count == 0xffff
+          || length == 0xffffffffL
+          || offset == 0xffffffffL) throw new IOException("ZIP64 或多卷 ZIP 暂需手动导入");
+      if (count == 0 || count > MAX_ENTRIES || count != u16(tail, end + 8))
+        throw new IOException("ZIP 条目数量超出当前校验范围或计数不一致（包括目录）");
+      long directoryEnd = offset + length;
+      if (length > MAX_DIRECTORY_BYTES
+          || offset < 4
+          || length < count * 46L
+          || directoryEnd != tailOffset + end)
+        throw new IOException("ZIP 中央目录过大或范围不一致；ZIP64 等扩展暂需手动导入");
+      file.seek(offset);
+      byte[] header = new byte[46];
+      for (int i = 0; i < count; i++) {
+        if (Thread.currentThread().isInterrupted()) throw new IOException("校验已取消");
+        if (file.getFilePointer() + header.length > directoryEnd)
+          throw new IOException("ZIP 中央目录条目不完整");
+        file.readFully(header);
+        if (u32(header, 0) != 0x02014b50L
+            || u16(header, 34) != 0
+            || u32(header, 20) == 0xffffffffL
+            || u32(header, 24) == 0xffffffffL
+            || u32(header, 42) >= offset
+            || (u16(header, 8) & 1) != 0) throw new IOException("ZIP 中央目录无效，或含 ZIP64／加密／多卷条目");
+        long next = file.getFilePointer() + u16(header, 28) + u16(header, 30) + u16(header, 32);
+        if (next > directoryEnd || u16(header, 28) == 0) throw new IOException("ZIP 中央目录条目长度无效");
+        file.seek(next);
+      }
+      if (file.getFilePointer() != directoryEnd) throw new IOException("ZIP 中央目录实际条目与声明数量不一致");
+      return count;
+    }
+  }
+
+  private static int u16(byte[] bytes, int at) {
+    return (bytes[at] & 255) | ((bytes[at + 1] & 255) << 8);
+  }
+
+  private static long u32(byte[] bytes, int at) {
+    return (long) u16(bytes, at) | ((long) u16(bytes, at + 2) << 16);
+  }
+
   static String identify(File archive, JSONObject index) throws Exception {
     if (!DAT.equals(index.getString("source_sha256"))) throw new IOException("ROM 集索引版本无效");
+    int expectedEntries = checkLayout(archive);
     List<String> signatures = new ArrayList<>();
     Set<String> names = new HashSet<>();
     long total = 0;
     byte[] buffer = new byte[65536];
     try (ZipFile zip = new ZipFile(archive)) {
+      if (zip.size() != expectedEntries) throw new IOException("ZIP 条目数量已变化");
+      int entryCount = 0;
       Enumeration<? extends ZipEntry> entries = zip.entries();
       while (entries.hasMoreElements()) {
         ZipEntry entry = entries.nextElement();
-        if (entry.isDirectory()) continue;
         String name = entry.getName();
-        if (!names.add(name)
-            || names.size() > 4096
-            || name.contains("/")
+        if (++entryCount > MAX_ENTRIES || !names.add(name))
+          throw new IOException("ZIP 条目过多或重复（包括目录）");
+        if (entry.isDirectory()) continue;
+        if (name.contains("/")
             || name.contains("\\")
             || name.equals("..")
             || entry.getSize() < 0

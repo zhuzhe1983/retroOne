@@ -124,7 +124,7 @@ adb -s DEVICE_SERIAL shell am instrument -w \
   io.retroone.android.test/androidx.test.runner.AndroidJUnitRunner
 ```
 
-只接受 READY 的 NSP/XCI；不自动选择游戏，不下载、不复制镜像，不配置密钥/固件。使用 `dev.eden.eden_emulator/org.yuzu.yuzu_emu.activities.EmulationActivity` 的 `ACTION_VIEW` 和单文件只读授权。测试通过表示已发出启动请求，需另外核对真实画面、按键和日志；没有据此把 Switch 标为客户端可直启。模拟器自行管理运行记录与存档，诊断不会主动结束已有模拟器进程。
+只接受 READY 的 NSP/XCI；不自动选择游戏，不下载、不复制镜像，不配置密钥/固件。使用 `dev.eden.eden_emulator/org.yuzu.yuzu_emu.activities.EmulationActivity` 的 `ACTION_VIEW` 和单文件只读授权。测试通过表示已发出启动请求，需另外核对真实画面、按键和日志；不能据此认定任何 Switch 游戏都兼容；0.2.5 正式入口与独立诊断的验证范围分别记录。模拟器自行管理运行记录与存档，诊断不会主动结束已有模拟器进程。
 
 探针显式授予 Eden 对这个稳定 URI 的只读访问，并默认保留进程 15 秒（`edenWaitMs` 可设 5000–45000）。为避免游戏按需读取时突然失去权限，成功派发后保留该文件授权；保存并退出 Eden 后用同一任务 UUID 回收：
 
@@ -154,4 +154,4 @@ adb -s DEVICE_SERIAL shell am instrument -w \
 
 `app/src/main/assets/fbneo-sets.json` 只包含 ROM 集标识、父集／BIOS 关联及 CRC/size 多重集的 SHA-256，不包含任何 ROM 字节、固件或密钥。来源为 [官方 DAT 固定提交 2e6605c4](https://github.com/libretro/FBNeo/blob/2e6605c4a08b86455e3aee03294fe35e7618fa91/dats/FinalBurn%20Neo%20%28ClrMame%20Pro%20XML%2C%20Arcade%20only%29.dat)，原文件 SHA-256 为 `0031b6557d493bc52d601e25b640e8a2d830bd6c78d4f3fff227463d2c62ae88`。索引附上游完整 [许可证](app/src/main/assets/fbneo-license.txt)，适用范围见该文件；APK 不附带 FBNeo 核心。
 
-可用 `python3 android/tools/build_fbneo_index.py /path/to/reviewed.dat android/app/src/main/assets/fbneo-sets.json` 重建；生成器拒绝不同摘要，更新前需审阅新 DAT 与核心版本。严格匹配可能保守拒绝缺可选 PLD 的有效游戏，界面会说明需核对，不将其误判为下载损坏。官方背景：[FBNeo ROM 集与依赖说明](https://docs.libretro.com/library/fbneo/)。
+可用 `python3 android/tools/build_fbneo_index.py /path/to/reviewed.dat android/app/src/main/assets/fbneo-sets.json` 重建；生成器拒绝不同摘要，更新前需审阅新 DAT 与核心版本。打开 `ZipFile` 前先以有界读取核对标准 ZIP、EOCD、全部中央目录记录与计数；限制物理大小 512 MiB、全部条目 4096、中央目录 4 MiB，拒绝 ZIP64／多卷／加密／前缀。JVM 回归包含稀疏超大文件、大量目录、伪造计数、超大目录记录与截断。严格匹配可能保守拒绝缺可选 PLD 的有效游戏，界面会说明需核对，不将其误判为下载损坏。官方背景：[FBNeo ROM 集与依赖说明](https://docs.libretro.com/library/fbneo/)。

@@ -200,6 +200,7 @@ final class CartridgePolicy {
     try (RandomAccessFile in = new RandomAccessFile(file, "r")) {
       byte[] head = read(in, 0, (int) Math.min(512, size));
       rejectForeignContent(value, head);
+      rejectKnownSegaContent(value, in, head, size);
       switch (value.id) {
         case "gb", "gbc" -> validateGameBoy(value, head, size);
         case "gba" -> validateGba(value, head, size);
@@ -208,13 +209,7 @@ final class CartridgePolicy {
           // Match Genesis Plus GX's 512-byte copier-header / 16 KiB SMD block layout.
           // Its loader does not require AA BB 06; inspect only the logical header, never rewrite.
           if (!ascii(head, 0x100, "SEGA") && size >= 16896 && size % 16384 == 512) {
-            byte[] odd = read(in, 512, 256);
-            byte[] even = read(in, 512 + 8192, 256);
-            head = new byte[512];
-            for (int i = 0; i < 256; i++) {
-              head[i * 2] = even[i];
-              head[i * 2 + 1] = odd[i];
-            }
+            head = smdHeader(in);
             payloadSize -= 512;
             rejectForeignContent(value, head);
           }
@@ -252,6 +247,35 @@ final class CartridgePolicy {
     if (!value.id.equals("gba") && gbaHeader(head)) throw checkError(value, "内容含 GBA 平台头部");
     if (!value.id.equals("gb") && !value.id.equals("gbc") && recognizableGameBoyHeader(head))
       throw checkError(value, "内容含 GB / GBC 平台头部");
+  }
+
+  private static void rejectKnownSegaContent(
+      Spec value, RandomAccessFile in, byte[] head, long size) throws IOException {
+    // These are explicit signatures only. A bank-aligned, headerless HuCard or homebrew
+    // must not be assigned to another console merely because its vectors look plausible.
+    if (!value.id.equals("mastersystem") && !value.id.equals("gamegear")) {
+      long prefix = size % 8192 == 512 ? 512 : 0;
+      for (long position : new long[] {0x1ff0, 0x3ff0, 0x7ff0}) {
+        if (prefix + position + 16 <= size && ascii(read(in, prefix + position, 16), 0, "TMR SEGA"))
+          throw checkError(value, "内容含 SMS / GG 平台标识");
+      }
+    }
+    if (!value.id.equals("megadrive")
+        && !ascii(head, 0x100, "SEGA")
+        && size >= 16896
+        && size % 16384 == 512
+        && ascii(smdHeader(in), 0x100, "SEGA")) throw checkError(value, "内容含 SMD 交织布局的 MD 平台标识");
+  }
+
+  private static byte[] smdHeader(RandomAccessFile in) throws IOException {
+    byte[] odd = read(in, 512, 256);
+    byte[] even = read(in, 512 + 8192, 256);
+    byte[] logical = new byte[512];
+    for (int i = 0; i < 256; i++) {
+      logical[i * 2] = even[i];
+      logical[i * 2 + 1] = odd[i];
+    }
+    return logical;
   }
 
   private static void validateGameBoy(Spec value, byte[] head, long size) throws IOException {

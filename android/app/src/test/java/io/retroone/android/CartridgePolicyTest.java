@@ -208,6 +208,50 @@ public class CartridgePolicyTest {
   }
 
   @Test
+  public void explicitSega8HeadersRejectEveryForeignPlatformIncludingCopierHeaders()
+      throws Exception {
+    for (int length : new int[] {8192, 16384, 32768}) {
+      for (boolean gameGear : new boolean[] {false, true}) {
+        byte[] rom = new byte[length];
+        rom[0] = (byte) 0xf3;
+        put(rom, length - 16, "TMR SEGA");
+        rom[length - 1] =
+            (byte) ((gameGear ? 0x60 : 0x40) + (length == 8192 ? 10 : length == 16384 ? 11 : 12));
+        for (int prefix : new int[] {0, 512}) {
+          byte[] source = new byte[length + prefix];
+          System.arraycopy(rom, 0, source, prefix, length);
+          acceptUnchanged(gameGear ? "gamegear" : "mastersystem", source);
+          for (CartridgePolicy.Spec target : CartridgePolicy.all()) {
+            if (!target.id.equals("mastersystem") && !target.id.equals("gamegear"))
+              rejectUnchanged(target.id, source, "SMS / GG 平台标识");
+          }
+        }
+      }
+    }
+  }
+
+  @Test
+  public void explicitInterleavedMdSignatureRejectsForeignPlatformsWithoutGuessingHeaderlessImages()
+      throws Exception {
+    byte[] logical = Arrays.copyOf(md(true), 16384);
+    put32(logical, 0x1a4, logical.length - 1);
+    byte[] smd = interleave(logical);
+    acceptUnchanged("megadrive", smd);
+    for (CartridgePolicy.Spec target : CartridgePolicy.all()) {
+      if (!target.id.equals("megadrive")) rejectUnchanged(target.id, smd, "SMD 交织布局的 MD 平台标识");
+    }
+    // No console signature: do not infer a platform solely from length or reset vectors.
+    Arrays.fill(logical, 0x100, 0x110, (byte) 0);
+    logical[0x1ffe] = 0;
+    logical[0x1fff] = (byte) 0xe0;
+    byte[] unmarked = new byte[logical.length + 512];
+    System.arraycopy(logical, 0, unmarked, 512, logical.length);
+    acceptUnchanged("mastersystem", unmarked);
+    acceptUnchanged("gamegear", unmarked);
+    acceptUnchanged("pce", unmarked);
+  }
+
+  @Test
   public void snesAcceptsHeaderedLoRomAndHiRomAndOriginalHeaderlessPrograms() throws Exception {
     byte[] lorom = snes(32768, 0x7fc0, 0x20);
     acceptUnchanged("snes", lorom);
@@ -340,6 +384,17 @@ public class CartridgePolicyTest {
       put32(bytes, 0x1a4, bytes.length - 1);
     }
     return bytes;
+  }
+
+  private static byte[] interleave(byte[] logical) {
+    byte[] encoded = new byte[logical.length + 512];
+    for (int block = 0; block < logical.length; block += 16384) {
+      for (int i = 0; i < 8192; i++) {
+        encoded[512 + block + i] = logical[block + i * 2 + 1];
+        encoded[512 + block + 8192 + i] = logical[block + i * 2];
+      }
+    }
+    return encoded;
   }
 
   private static byte[] snes(int size, int header, int mapMode) {

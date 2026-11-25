@@ -114,6 +114,30 @@ public class CartridgeArchiveTest {
   }
 
   @Test
+  public void renamedSegaPayloadsInsideZipAreRejectedAndLeaveNoExtractedCopy() throws Exception {
+    for (String platform : new String[] {"mastersystem", "gamegear"}) {
+      byte[] sega = rom(platform);
+      System.arraycopy("TMR SEGA".getBytes(StandardCharsets.US_ASCII), 0, sega, 0x7ff0, 8);
+      sega[0x7fff] = platform.equals("mastersystem") ? (byte) 0x4c : (byte) 0x6c;
+      sega[0x1fff] = (byte) 0xe0; // Would otherwise satisfy the limited HuCard vector check.
+      rejectUnchanged(zip(Map.of("renamed.pce", sega)), "pce", "SMS / GG 平台标识");
+    }
+    byte[] logical = rom("megadrive");
+    System.arraycopy("SEGA MEGA DRIVE".getBytes(StandardCharsets.US_ASCII), 0, logical, 0x100, 15);
+    byte[] smd = new byte[logical.length + 512];
+    for (int block = 0; block < logical.length; block += 16384) {
+      for (int i = 0; i < 8192; i++) {
+        smd[512 + block + i] = logical[block + i * 2 + 1];
+        smd[512 + block + 8192 + i] = logical[block + i * 2];
+      }
+    }
+    for (String platform : new String[] {"pce", "mastersystem", "gamegear"}) {
+      String extension = CartridgePolicy.spec(platform).extensions.get(0);
+      rejectUnchanged(zip(Map.of("renamed" + extension, smd)), platform, "SMD 交织布局的 MD 平台标识");
+    }
+  }
+
+  @Test
   public void unsafeAndDuplicateNamesNeverEscapeTheControlledCache() throws Exception {
     for (String path :
         new String[] {

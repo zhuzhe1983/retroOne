@@ -258,7 +258,9 @@ final class RetroArch {
             "pending-" + UUID.randomUUID() + ".tmp");
     DocumentFile staged = created == null ? null : DocumentFile.fromSingleUri(context, created);
     if (staged == null) throw new IOException("共享目录无法写入");
+    Uri cleanupUri = created;
     boolean complete = false;
+    Exception failure = null;
     try {
       try (InputStream in = new FileInputStream(source);
           OutputStream out = context.getContentResolver().openOutputStream(staged.getUri(), "wt")) {
@@ -268,12 +270,30 @@ final class RetroArch {
       try (InputStream in = context.getContentResolver().openInputStream(staged.getUri())) {
         if (!hash.equals(digest(in, source.length()))) throw new IOException("启动副本校验失败");
       }
-      if (!staged.renameTo(name)) throw new IOException("无法启用启动副本");
-      String path = validatedPath(staged, name);
+      // SingleDocumentFile deliberately does not implement renameTo(). The provider may
+      // return a different document ID, so all further checks and cleanup use that URI.
+      Uri renamed =
+          DocumentsContract.renameDocument(context.getContentResolver(), staged.getUri(), name);
+      if (renamed == null) throw new IOException("无法启用启动副本");
+      cleanupUri = renamed;
+      DocumentFile ready = DocumentFile.fromSingleUri(context, renamed);
+      if (ready == null) throw new IOException("无法读取重命名后的启动副本");
+      String path = validatedPath(ready, name);
       complete = true;
       return path;
+    } catch (Exception e) {
+      failure = e;
+      throw e;
     } finally {
-      if (!complete) staged.delete();
+      if (!complete) {
+        try {
+          if (!DocumentsContract.deleteDocument(context.getContentResolver(), cleanupUri))
+            throw new IOException("未能清理本次启动临时副本");
+        } catch (Exception cleanupFailure) {
+          if (failure != null) failure.addSuppressed(cleanupFailure);
+          else throw cleanupFailure;
+        }
+      }
     }
   }
 

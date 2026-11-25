@@ -266,7 +266,7 @@ Display preferences are saved separately for each player and browser/device: use
 
 ## Android 本机版本
 
-原生 Android 客户端已放在 [`android/`](android/README.md)：提供 Apps / Games 双视图、可选默认桌面、玩家切换、收藏、最近游玩和全库排序，支持后台下载与校验、暂停和续传，并通过只读 content URI 调用本机 PPSSPP。新增“已下载”筛选和本地游戏／存档备份管理；PSP 可在退出模拟器后手动双向同步，进度不同时选择使用本机或云端版本，替换前保留备份。Android 自动同步与模拟器玩家存档隔离尚未开放。0.2.5 接入 NES / RetroArch、Switch NSP / XCI / Eden 和 FBNeo 独立 ZIP：NES 首次需共享目录授权与原创探针确认；街机需匹配官方 ROM 集并确认实际画面与输入；Switch 以“用 Eden 启动”入口区分启动能力与游戏兼容性。PSP 继续使用原有 PPSSPP ISO / CSO 接口。PBP、CHD、多文件游戏和其他模拟器的边界见 [Android 使用说明](docs/android.md)。客户端不包含游戏、固件或模拟器，也不改动现有网页与云端服务。
+原生 Android 客户端已放在 [`android/`](android/README.md)：提供 Apps / Games 双视图、可选默认桌面、玩家切换、收藏、最近游玩和全库排序，支持后台下载与校验、暂停和续传，并通过只读 content URI 调用本机 PPSSPP。新增“已下载”筛选和本地游戏／存档备份管理；PSP 可在退出模拟器后手动双向同步，进度不同时选择使用本机或云端版本，替换前保留备份。Android 自动同步与模拟器玩家存档隔离尚未开放。0.2.6 扩展 SFC、GB/GBC、GBA、MD、SMS、GG、PCE 卡带与单 ROM ZIP；各平台需确认原创测试画面及按键。NES 既有配置保留，街机使用官方 ROM 集核验或明确标注的精确 MOD 兼容配置。Switch NSP / XCI 通过“用 Eden 启动”入口区分启动能力与游戏兼容性。PSP 继续使用原有 PPSSPP ISO / CSO 接口。PBP、CHD、多文件游戏和其他模拟器的边界见 [Android 使用说明](docs/android.md)。客户端不包含游戏、固件或模拟器，也不改动现有网页与云端服务。
 
 ## 文档与开发
 

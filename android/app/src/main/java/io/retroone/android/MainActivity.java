@@ -80,6 +80,7 @@ public final class MainActivity extends Activity {
   private RetroArchFlow retroArchFlow;
   private EdenFlow edenFlow;
   private FbneoFlow fbneoFlow;
+  private CartridgeFlow cartridgeFlow;
   private final Set<String> localMetadataRequested = new HashSet<>();
 
   private final class LocalButton {
@@ -130,6 +131,7 @@ public final class MainActivity extends Activity {
             });
     edenFlow = new EdenFlow(this, this::emulatorsChanged);
     fbneoFlow = new FbneoFlow(this, io, this::emulatorsChanged, retroArchFlow);
+    cartridgeFlow = new CartridgeFlow(this, io, this::emulatorsChanged, retroArchFlow);
     pspInstalled = !Emulators.installed(this).isEmpty();
     try {
       config = RetroApplication.from(this).credentials.current();
@@ -214,6 +216,7 @@ public final class MainActivity extends Activity {
     retroArchFlow.onResume();
     edenFlow.onResume();
     fbneoFlow.onResume();
+    cartridgeFlow.onResume();
   }
 
   @Override
@@ -222,6 +225,7 @@ public final class MainActivity extends Activity {
     retroArchFlow.onPause();
     edenFlow.onPause();
     fbneoFlow.onPause();
+    cartridgeFlow.onPause();
     handler.removeCallbacks(poll);
     super.onPause();
   }
@@ -1214,9 +1218,11 @@ public final class MainActivity extends Activity {
                                     ? "使用 RetroArch / FinalBurn Neo · 先检查 ROM 集与核心"
                                     : RetroArchPolicy.supports(game.optString("platform"))
                                         ? "NES · 使用 RetroArch ARM64 / FCEUmm（需完成一次启动测试）"
-                                        : Emulators.installed(this).isEmpty()
-                                            ? "下载后安装 PPSSPP 即可启动"
-                                            : "PSP · 使用已安装的 PPSSPP",
+                                        : CartridgePolicy.supports(game.optString("platform"))
+                                            ? "使用 RetroArch · 需完成当前平台的核心与启动测试"
+                                            : Emulators.installed(this).isEmpty()
+                                                ? "下载后安装 PPSSPP 即可启动"
+                                                : "PSP · 使用已安装的 PPSSPP",
                             13,
                             ACCENT));
                   }
@@ -1313,7 +1319,10 @@ public final class MainActivity extends Activity {
                   ? "使用 RetroArch · FinalBurn Neo"
                   : RetroArchPolicy.supports(item.platform)
                       ? "使用 RetroArch · FCEUmm"
-                      : "使用本机 PPSSPP")
+                      : CartridgePolicy.supports(item.platform)
+                          ? "使用 RetroArch · "
+                              + CartridgeFlow.coreLabel(CartridgePolicy.spec(item.platform))
+                          : "使用本机 PPSSPP")
               : "已下载 · " + state.label);
       if (state == LaunchPolicy.State.PLAYABLE) {
         button.setBackground(shape(ACCENT, 10));
@@ -1752,6 +1761,7 @@ public final class MainActivity extends Activity {
         && (support == LaunchPolicy.State.PLAYABLE
             || support == LaunchPolicy.State.INSTALL_RETROARCH
             || support == LaunchPolicy.State.CHECK_FBNEO
+            || support == LaunchPolicy.State.OPEN_ARCADE_COMPAT
             || support == LaunchPolicy.State.REVIEW_FBNEO)) {
       if (downloadsPopup != null) downloadsPopup.dismiss();
       fbneoFlow.play(item);
@@ -1764,6 +1774,15 @@ public final class MainActivity extends Activity {
             || support == LaunchPolicy.State.VERIFY_RETROARCH)) {
       if (downloadsPopup != null) downloadsPopup.dismiss();
       retroArchFlow.play(item);
+      return;
+    }
+    if (CartridgePolicy.supports(item.platform)
+        && (support == LaunchPolicy.State.PLAYABLE
+            || support == LaunchPolicy.State.INSTALL_RETROARCH
+            || support == LaunchPolicy.State.CONFIGURE_CARTRIDGE
+            || support == LaunchPolicy.State.VERIFY_CARTRIDGE)) {
+      if (downloadsPopup != null) downloadsPopup.dismiss();
+      cartridgeFlow.play(item);
       return;
     }
     if (support != LaunchPolicy.State.PLAYABLE && support != LaunchPolicy.State.INSTALL) {
@@ -1895,16 +1914,17 @@ public final class MainActivity extends Activity {
     if (installed.isEmpty()) emulator.append("无可用 PPSSPP");
     form.addView(text(emulator.toString(), 15, ACCENT));
     form.addView(button("NES · RetroArch 设置", retroArchFlow::show));
+    form.addView(button("经典卡带 · SFC / GB / GBA / MD 等设置", cartridgeFlow::show));
     form.addView(button("街机 · FinalBurn Neo 设置", fbneoFlow::show));
     form.addView(button("Switch · Eden 设置", edenFlow::show));
     form.addView(
         text(
             "当前接入 PSP 独立 ISO / CSO 的 PPSSPP 启动接口。PBP 存在实测路径兼容问题；CHD 尚未验证可靠直启。NES 的 .nes 文件可通过"
                 + " RetroArch ARM64 / FCEUmm 启动，需一次目录授权和测试。FBNeo ZIP 需精确匹配完整 ROM 集；Switch NSP / XCI"
-                + " 可交给已配置的 Eden 启动。其他平台仍待适配。\n\n"
-                + "下载原件保存在 RetroOne 私有目录，卸载会移除。NES / FBNeo 另有共享启动副本。PSP 支持手动双向云存档同步；其他平台存档由对应模拟器"
+                + " 可交给已配置的 Eden 启动。SFC、GB/GBC、GBA、MD、SMS、GG、PCE 独立卡带需分别完成核心测试。其他格式仍需单独适配。\n\n"
+                + "下载原件保存在 RetroOne 私有目录，卸载会移除。RetroArch 游戏另有共享启动副本。PSP 支持手动双向云存档同步；其他平台存档由对应模拟器"
                 + " 管理。当前不会为不同 RetroOne 玩家隔离同一模拟器的存档。\n\n"
-                + "RetroOne Android 0.2.5 · 自有内容客户端",
+                + "RetroOne Android 0.2.6 · 自有内容客户端",
             14,
             MUTED));
   }

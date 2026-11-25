@@ -4,10 +4,13 @@ import argparse
 import os
 from pathlib import Path
 import sys
+import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from create_psp_fixture import build, build_iso, build_cso
 from create_nes_fixture import build as build_nes
+from create_handheld_sega_fixtures import build_all as build_handheld_sega
+from create_snes_pce_fixtures import build_all as build_snes_pce
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
@@ -26,6 +29,14 @@ def main():
     nes=roms/'library/nes';nes.mkdir(parents=True,exist_ok=True)
     for name, alternate in [('RetroOne-NES-Self-Test.nes', False), ('RetroOne-NES-Alternate.nes', True)]:
         (nes/name).write_bytes(build_nes(alternate))
+    with zipfile.ZipFile(nes/'RetroOne-NES-Zip-Test.zip', 'w', zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr('原创测试/RetroOne.nes', build_nes(False))
+    for platform, (name, payload) in {**build_handheld_sega(), **build_snes_pce()}.items():
+        cartridge = roms/'library'/platform
+        cartridge.mkdir(parents=True, exist_ok=True)
+        (cartridge/('RetroOne-Cart-' + platform + '-Self-Test' + Path(name).suffix)).write_bytes(payload)
+        with zipfile.ZipFile(cartridge/('RetroOne-Cart-' + platform + '-Zip-Test.zip'), 'w', zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr('原创测试/' + name, payload)
     # Large deterministic non-playable bytes exercise multiple Range requests and pauses.
     transfer=psp/'Transfer-Only-Not-A-Game.iso'
     if not transfer.exists():

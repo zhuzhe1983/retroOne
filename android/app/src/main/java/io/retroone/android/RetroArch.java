@@ -17,7 +17,7 @@ import java.util.Arrays;
 import java.util.UUID;
 import org.json.JSONObject;
 
-/** NES only. A granted shared directory bridges RetroArch's native-path launch API. */
+/** A granted shared directory bridges RetroArch's native-path launch API. */
 final class RetroArch {
   private final Context context;
   private final SharedPreferences preferences;
@@ -46,11 +46,18 @@ final class RetroArch {
   }
 
   String corePath(String platform) throws PackageManager.NameNotFoundException {
-    if (!platform.equals("nes") && !platform.equals("fbneo"))
-      throw new IllegalArgumentException("Unsupported core");
+    CartridgePolicy.Spec cartridge = CartridgePolicy.spec(platform);
+    if (!platform.equals("nes")
+        && !platform.equals("fbneo")
+        && !platform.equals("mame2003plus")
+        && cartridge == null) throw new IllegalArgumentException("Unsupported core");
     return context.getPackageManager().getApplicationInfo(RetroArchPolicy.PACKAGE, 0).dataDir
         + "/cores/"
-        + (platform.equals("fbneo") ? "fbneo_libretro_android.so" : RetroArchPolicy.CORE);
+        + (platform.equals("mame2003plus")
+            ? "mame2003_plus_libretro_android.so"
+            : platform.equals("fbneo")
+                ? "fbneo_libretro_android.so"
+                : cartridge != null ? cartridge.core : RetroArchPolicy.CORE);
   }
 
   String externalFilesPath() {
@@ -256,7 +263,9 @@ final class RetroArch {
         || !RetroArchPolicy.formatReason(item.name).isEmpty())
       throw new IOException("此格式尚未适配 NES 直启");
     if (!verified()) throw new IOException("请先完成 NES 启动测试");
-    return stage(verifiedDownload(item));
+    CartridgeArchive.Extracted extracted =
+        CartridgeArchive.prepare(verifiedDownload(item), item.name, "nes", context.getCacheDir());
+    return stage(extracted.file);
   }
 
   File verifiedDownload(DownloadStore.Item item) throws Exception {
@@ -308,6 +317,24 @@ final class RetroArch {
       hash = digest(in, source.length());
     }
     return stageDocument(source, folder(), RetroArchPolicy.fileName(hash), directoryLabel(), hash);
+  }
+
+  String stageCartridge(File source, CartridgePolicy.Spec spec, String originalName)
+      throws Exception {
+    if (spec == null) throw new IOException("此卡带平台尚未适配");
+    String reason = CartridgePolicy.formatReason(spec.id, originalName);
+    if (!reason.isEmpty()) throw new IOException(reason);
+    CartridgePolicy.validateFile(spec, source);
+    String hash;
+    try (InputStream in = new FileInputStream(source)) {
+      hash = digest(in, source.length());
+    }
+    return stageDocument(
+        source,
+        folder(),
+        CartridgePolicy.stagedName(spec, hash, originalName),
+        directoryLabel(),
+        hash);
   }
 
   private String stageDocument(
@@ -383,13 +410,17 @@ final class RetroArch {
 
   Intent intent(String path, String platform) throws Exception {
     if (!installed()) throw new IOException("未找到可用的 RetroArch ARM64");
-    if (!configured()
-        || !path.startsWith(directoryLabel() + "/")
-        || !path.substring(directoryLabel().length() + 1)
-            .matches(
-                platform.equals("fbneo")
-                    ? "fb-[a-f0-9]{64}/[A-Za-z0-9_-]{1,64}\\.zip"
-                    : "ro-[a-f0-9]{64}\\.nes")) throw new IOException("启动路径必须是已授权目录中的校验副本");
+    if (!configured() || path == null || !path.startsWith(directoryLabel() + "/"))
+      throw new IOException("启动路径必须是已授权目录中的校验副本");
+    String relative = path.substring(directoryLabel().length() + 1);
+    CartridgePolicy.Spec cartridge = CartridgePolicy.spec(platform);
+    boolean valid =
+        (platform.equals("fbneo") || platform.equals("mame2003plus"))
+            ? relative.matches("fb-[a-f0-9]{64}/[A-Za-z0-9_-]{1,64}\\.zip")
+            : platform.equals("nes")
+                ? relative.matches("ro-[a-f0-9]{64}\\.nes")
+                : cartridge != null && CartridgePolicy.isStagedName(cartridge, relative);
+    if (!valid) throw new IOException("启动路径必须是当前平台在已授权目录中的校验副本");
     // Load RetroArch's default global config; save/input paths come from that config.
     return withEnvironment(
         new Intent(Intent.ACTION_MAIN)

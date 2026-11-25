@@ -52,6 +52,7 @@ public class NativeAdapterDeviceTest {
     String path = adapter.prepare(item);
     assertTrue(path.endsWith("/" + expected + ".zip"));
     assertEquals(path, adapter.prepare(item));
+    assertNull("This check is only for official FBNeo sets", adapter.compatibility(item));
     Intent intent = adapter.retroarch.intent(path, "fbneo");
     assertTrue(intent.getStringExtra("LIBRETRO").endsWith("/cores/fbneo_libretro_android.so"));
     assertEquals(adapter.retroarch.configPath(), intent.getStringExtra("CONFIGFILE"));
@@ -62,6 +63,33 @@ public class NativeAdapterDeviceTest {
     } catch (java.io.IOException expectedFailure) {
     }
     if (opt("launchFbneo")) context().startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+  }
+
+  @Test
+  public void explicitCompatibilityArchiveAndEnvironment() throws Exception {
+    org.junit.Assume.assumeTrue(opt("arcadeCompatProbe"));
+    DownloadStore.Item item = task("fbneoTaskId");
+    java.io.File source = RetroApplication.from(context()).downloads.complete(item);
+    long bytes = source.length(), modified = source.lastModified();
+    ArcadeCompatProfile.Profile profile = ArcadeCompatProfile.match(source);
+    assertNotNull("Only the exact reviewed MOD archive may be used", profile);
+    Fbneo adapter = new Fbneo(context());
+    String path = adapter.prepare(item);
+    assertEquals(path, adapter.prepare(item));
+    assertEquals("mame2003plus", adapter.launchPlatform(item));
+    assertEquals(profile.id, adapter.compatibility(item).id);
+    assertEquals(LaunchPolicy.State.OPEN_ARCADE_COMPAT, Emulators.status(context(), item, false));
+    Intent intent = adapter.retroarch.intent(path, adapter.launchPlatform(item));
+    assertTrue(intent.getStringExtra("LIBRETRO").endsWith("/cores/" + profile.core));
+    assertEquals(adapter.retroarch.configPath(), intent.getStringExtra("CONFIGFILE"));
+    assertFalse(intent.hasExtra("QUITFOCUS"));
+    assertEquals(bytes, source.length());
+    assertEquals(modified, source.lastModified());
+    assertEquals(profile.id, ArcadeCompatProfile.match(source).id);
+    assertEquals(
+        DownloadStore.READY, RetroApplication.from(context()).downloads.get(item.id).state);
+    if (opt("launchArcadeCompat"))
+      context().startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
   }
 
   @Test

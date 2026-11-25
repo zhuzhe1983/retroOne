@@ -42,7 +42,8 @@ final class FbneoFlow {
     if (SystemClock.elapsedRealtime() - started < 6000) {
       new AlertDialog.Builder(activity)
           .setTitle("继续启动街机游戏")
-          .setMessage("RetroArch 切换内容时可能先退出旧实例。可再启动一次；若仍返回，请检查 FinalBurn Neo 核心和归档版本。")
+          .setMessage(
+              "RetroArch 切换内容时可能先退出旧实例。可再启动一次；若仍返回，请检查 " + adapter.launchLabel(item) + " 核心和归档版本。")
           .setPositiveButton("再次启动", (d, w) -> play(item))
           .setNeutralButton("检查设置", (d, w) -> show())
           .setNegativeButton("取消", null)
@@ -76,12 +77,15 @@ final class FbneoFlow {
     new AlertDialog.Builder(activity)
         .setTitle("街机 · FinalBurn Neo")
         .setMessage(
-            "请在 RetroArch 安装 FinalBurn Neo 核心，并保存默认全局配置。更新核心后请重新验证。\n\n"
+            "普通 ROM 集使用 FinalBurn Neo；已核验的特定 MOD 使用独立 MAME2003-Plus"
+                + " 兼容配置，启动时会明确提示。请安装对应核心，并保存默认全局配置；更新后需重新验证。\n\n"
                 + core
                 + "\n\n共享目录："
                 + adapter.retroarch.directoryLabel()
-                + "\n\n逐个核对 ZIP 内容与官方 DAT；只直启唯一匹配的独立完整集。未知 MOD、缺失父集／BIOS或版本不符会明确报错，原下载保持不变。"
-                + "\n\n首次启动后需确认真实画面和输入。存档由 RetroArch 管理，尚无街机云同步或玩家隔离。")
+                + "\n\n"
+                + "普通集逐个核对 ZIP 与官方 DAT；关联集需手动检查。兼容 MOD 仅按精确归档摘要和成员校验匹配，不根据标题判断。未知 MOD"
+                + " 仍需核对，原下载保持不变。\n\n"
+                + "首次启动后需确认真实画面和输入。存档由 RetroArch 管理，尚无街机云同步或玩家隔离。")
         .setPositiveButton("选择共享目录", (d, w) -> nesFlow.chooseSharedDirectory(this::show))
         .setNeutralButton(
             "打开核心设置",
@@ -153,13 +157,18 @@ final class FbneoFlow {
                   return;
                 }
                 if (!resumed) return;
+                changed.run();
                 String last =
                     activity.getSharedPreferences("retroarch", 0).getString("lastLaunch", "");
                 if (!adapter.verified(item) || (!last.isEmpty() && !last.equals(result))) {
                   new AlertDialog.Builder(activity)
-                      .setTitle("启动 FinalBurn Neo")
+                      .setTitle("启动 " + adapter.launchLabel(item))
                       .setMessage(
-                          "ROM 集已精确匹配："
+                          (adapter.compatibility(item) == null
+                                  ? "ROM 集已精确匹配："
+                                  : "这是已核验摘要的 MOD，使用 MAME2003-Plus 兼容模式，不是 FBNeo 原版 DAT"
+                                      + " 匹配。仅在副本中调整内部文件名，ROM 字节不变。\n\n"
+                                      + "兼容 ROM 集：")
                               + new java.io.File(result).getName()
                               + "。请确认核心已安装，并在 RetroArch 保存上一局。切换时若先返回，可再次启动。\n\n存档暂不与云端同步，也不按玩家隔离。")
                       .setPositiveButton("已保存，启动", (d, w) -> open(item, result))
@@ -179,7 +188,7 @@ final class FbneoFlow {
       started = SystemClock.elapsedRealtime();
       awaiting = true;
       paused = false;
-      activity.startActivity(adapter.retroarch.intent(path, "fbneo"));
+      activity.startActivity(adapter.retroarch.intent(path, adapter.launchPlatform(item)));
       RetroApplication.from(activity).downloads.played(item.id);
       activity.getSharedPreferences("retroarch", 0).edit().putString("lastLaunch", path).apply();
     } catch (Exception e) {

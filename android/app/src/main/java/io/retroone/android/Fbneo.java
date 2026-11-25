@@ -23,6 +23,7 @@ final class Fbneo {
     if (!LaunchPolicy.formatReason("fbneo", item.name).isEmpty()) return LaunchPolicy.State.MANUAL;
     if (!retroarch.installed()) return LaunchPolicy.State.INSTALL_RETROARCH;
     if (!issue(item).isEmpty()) return LaunchPolicy.State.REVIEW_FBNEO;
+    if (compatibility(item) != null) return LaunchPolicy.State.OPEN_ARCADE_COMPAT;
     return verified(item) ? LaunchPolicy.State.PLAYABLE : LaunchPolicy.State.CHECK_FBNEO;
   }
 
@@ -36,6 +37,10 @@ final class Fbneo {
               + retroarch.corePath("fbneo")
               + ":"
               + FbneoArchive.DAT
+              + ":"
+              + ArcadeCompatProfile.VERSION
+              + ":"
+              + retroarch.corePath("mame2003plus")
               + ":"
               + item.id
               + ":"
@@ -52,6 +57,22 @@ final class Fbneo {
   boolean verified(DownloadStore.Item item) {
     String current = fingerprint(item);
     return !current.isEmpty() && current.equals(prefs.getString("verified." + item.id, ""));
+  }
+
+  ArcadeCompatProfile.Profile compatibility(DownloadStore.Item item) {
+    String current = fingerprint(item);
+    return !current.isEmpty() && current.equals(prefs.getString("compatFp." + item.id, ""))
+        ? ArcadeCompatProfile.profile(prefs.getString("compat." + item.id, ""))
+        : null;
+  }
+
+  String launchPlatform(DownloadStore.Item item) {
+    return compatibility(item) == null ? "fbneo" : "mame2003plus";
+  }
+
+  String launchLabel(DownloadStore.Item item) {
+    ArcadeCompatProfile.Profile profile = compatibility(item);
+    return profile == null ? "FinalBurn Neo" : profile.label;
   }
 
   void confirm(DownloadStore.Item item, String fingerprint) throws IOException {
@@ -85,6 +106,18 @@ final class Fbneo {
     try {
       set = FbneoArchive.identify(file, index());
     } catch (FbneoArchive.MatchException e) {
+      ArcadeCompatProfile.Profile compatible = ArcadeCompatProfile.match(file);
+      if (compatible != null) {
+        File converted = ArcadeCompatProfile.prepare(file, context.getCacheDir());
+        String staged = retroarch.stageArchive(converted, compatible.set);
+        prefs
+            .edit()
+            .putString("compat." + item.id, compatible.id)
+            .putString("compatFp." + item.id, fingerprint(item))
+            .apply();
+        clearIssue(item);
+        return staged;
+      }
       prefs
           .edit()
           .putString("issueFp." + item.id, fingerprint(item))
@@ -92,6 +125,7 @@ final class Fbneo {
           .apply();
       throw e;
     }
+    prefs.edit().remove("compat." + item.id).remove("compatFp." + item.id).apply();
     clearIssue(item);
     return retroarch.stageArchive(file, set);
   }

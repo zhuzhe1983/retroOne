@@ -19,7 +19,7 @@ public class RetroArchPolicyTest {
         LaunchPolicy.State.MISSING,
         RetroArchPolicy.assess("game.nes", true, false, true, true, true));
     assertEquals(
-        LaunchPolicy.State.MANUAL,
+        LaunchPolicy.State.PLAYABLE,
         RetroArchPolicy.assess("game.zip", true, true, true, true, true));
     assertEquals(
         LaunchPolicy.State.MANUAL,

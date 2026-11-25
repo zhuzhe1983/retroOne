@@ -24,6 +24,8 @@ jobs:
         run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;35.0.0"'
       - name: Check public sources
         run: python3 scripts/check_public_source.py
+      - name: Check original cartridge fixture generators
+        run: python3 -m unittest discover -s android/tools/tests -v
       - name: Build and check (no device, ROMs or credentials)
         run: ./android/gradlew -p android --no-daemon assembleDebug assembleDebugAndroidTest testDebugUnitTest lintDebug
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

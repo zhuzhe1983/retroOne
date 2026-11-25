@@ -184,7 +184,13 @@ public class RetroArchDeviceTest {
     ServerConfig fixture = new ServerConfig(base, true, "");
     ApiClient api = new ApiClient(fixture);
     String lastPath = null;
-    for (String name : new String[] {"RetroOne-NES-Self-Test", "RetroOne-NES-Alternate"}) {
+    String[] names =
+        "true".equals(InstrumentationRegistry.getArguments().getString("nesZip"))
+            ? new String[] {
+              "RetroOne-NES-Self-Test", "RetroOne-NES-Alternate", "RetroOne-NES-Zip-Test"
+            }
+            : new String[] {"RetroOne-NES-Self-Test", "RetroOne-NES-Alternate"};
+    for (String name : names) {
       org.json.JSONArray games =
           api.json(fixture.api("games?q=" + ServerConfig.encode(name))).getJSONArray("games");
       assertEquals(1, games.length());

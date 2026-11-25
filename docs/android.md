@@ -1,6 +1,27 @@
 # Android 本机游戏库
 
-RetroOne Android 0.2.5 已提供可构建的原生客户端，支持连接服务、按平台浏览与搜索、全库排序、玩家收藏与最近游玩、分页查看封面和详情、后台下载、暂停与续传、离线查看本机文件，以及调用 PPSSPP、Eden 或经过设置与测试的 RetroArch ARM64。APK、构建和设备测试命令见 [Android 工程说明](../android/README.md)。
+RetroOne Android 0.2.6 已提供可构建的原生客户端，支持连接服务、按平台浏览与搜索、全库排序、玩家收藏与最近游玩、分页查看封面和详情、后台下载、暂停与续传、离线查看本机文件，以及调用 PPSSPP、Eden 或经过设置与测试的 RetroArch ARM64。APK、构建和设备测试命令见 [Android 工程说明](../android/README.md)。
+
+## 0.2.6 经典卡带与街机兼容配置
+
+在 **⋯ → 连接与模拟器设置 → 经典卡带** 中选择平台，安装对应核心，再运行该平台的原创测试程序。既有 NES 与共享目录设置可继续使用；新增平台各自确认画面与动作键，不能用 NES 的结果代替。Android 不允许其他应用直接读取 RetroArch 私有核心目录，因此界面区分应用未安装、共享目录待设置和平台待测试；不会只检测到 RetroArch 就宣称核心已就绪。
+
+| 平台 | RetroArch ARM64 核心 | 独立卡带格式 | 原创探针的 RetroArch 按键 |
+| --- | --- | --- | --- |
+| SFC / SNES | snes9x | .sfc / .smc | B |
+| GB / GBC | gambatte | .gb / .gbc（GBC 也可载入 .gb） | A |
+| GBA | mgba | .gba | A |
+| MD / Genesis | genesis_plus_gx | .md / .gen / .bin / .smd | Y（MD 原生 A） |
+| SMS / GG | genesis_plus_gx | .sms / .gg | A（原生 II） |
+| PCE | mednafen_pce_fast | .pce HuCard | A（原生 I） |
+
+上述平台及 NES 也接受**仅含一份对应 ROM 的 ZIP**：下载分片校验后，有界检查 ZIP 结构和条目，流式核对实际大小与 CRC、卡带头，再提取到受控缓存并创建 SHA-256 命名的共享副本。原 ZIP 保留，内部文件名不会被用作写出路径。多游戏混装、嵌套压缩或多文件依赖不自动处理；SMD 交织内容保留原字节，交给 Genesis Plus GX 读取。普通卡带不需要额外 BIOS；可选启动 BIOS 沿用用户设置，PCE CD、SuperGrafx、FDS、Mega CD、32X 等不在这次范围内。
+
+测试程序源码与图案为原创，构建时生成，不包含商业游戏。GB/GBC/GBA 的厂商 logo 区域留空，用于核心内置启动／跳过 BIOS 的诊断；若已自行启用外部启动 BIOS，请核对核心设置，RetroOne 不会自动修改。按住动作键后色条变化、松开恢复；GB 为灰度变化。更新核心后需重新测试所有使用该核心的平台，设置页提供入口。普通游戏仍可能因 mapper、特殊芯片或自身格式不兼容，需要逐款确认。
+
+圆桌骑士的一个特定 MOD 新增 **MAME2003-Plus 兼容模式**：仅匹配已核验的完整归档 SHA-256，并核对全部 23 个成员；在独立副本中转换 13 个内部文件名，ROM 字节不变，原 ZIP 不动。按钮和启动提示明确标注 MOD 与所用核心。它不是 FBNeo 原版 DAT 匹配，也不会放行其他未知改版；需要额外安装 `mame2003_plus_libretro_android.so`，首次仍需确认真实画面、投币和输入。
+
+八个平台的原创探针已在本机隔离 libretro 核心实际运行，均能显示文字／色条并响应按下与松开；这些结果不代替 RK3588 正式入口验收。0.2.6 真机回归正在进行。新增平台与兼容模式的存档仍由 RetroArch 管理，尚无云同步或 RetroOne 玩家隔离；PSP、Eden 的现有流程保持不变。
 
 ## 0.2.5 Switch 与街机启动
 

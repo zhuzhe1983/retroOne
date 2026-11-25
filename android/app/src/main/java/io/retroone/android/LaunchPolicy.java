@@ -14,9 +14,12 @@ final class LaunchPolicy {
     OPEN_EDEN("用 Eden 启动"),
     CHECK_FBNEO("检查街机启动"),
     REVIEW_FBNEO("ROM 版本待核对"),
+    OPEN_ARCADE_COMPAT("用 MAME 兼容模式启动"),
     INSTALL_RETROARCH("安装 RetroArch"),
     CONFIGURE_RETROARCH("设置 NES 模拟器"),
     VERIFY_RETROARCH("测试 NES 启动"),
+    CONFIGURE_CARTRIDGE("设置卡带模拟器"),
+    VERIFY_CARTRIDGE("测试平台启动"),
     MANUAL("手动导入"),
     UNSUPPORTED("待适配"),
     MISSING("文件不可用"),
@@ -35,6 +38,8 @@ final class LaunchPolicy {
           ? ""
           : "FBNeo 目前仅接入独立 ZIP ROM 集，不自动解压或重命名其他格式。";
     if (RetroArchPolicy.supports(platform)) return RetroArchPolicy.formatReason(name);
+    if (CartridgePolicy.supports(platform))
+      return CartridgeArchive.isZipName(name) ? "" : CartridgePolicy.formatReason(platform, name);
     if (!"psp".equals(platform)) return "此平台尚未适配 Android 模拟器直接启动。文件可以保留或导出，暂不能从 RetroOne 直接游玩。";
     String lower = name.toLowerCase(Locale.ROOT);
     if (lower.endsWith(".pbp")) return "PBP 暂不支持直接启动：PPSSPP 对本应用文件地址存在目录解析问题，请导出后手动打开。";

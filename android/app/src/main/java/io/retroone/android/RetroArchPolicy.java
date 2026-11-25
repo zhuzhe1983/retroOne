@@ -14,9 +14,9 @@ final class RetroArchPolicy {
   }
 
   static String formatReason(String name) {
-    return name.toLowerCase(Locale.ROOT).endsWith(".nes")
+    return name.toLowerCase(Locale.ROOT).endsWith(".nes") || CartridgeArchive.isZipName(name)
         ? ""
-        : "NES 目前仅支持独立 .nes 文件；压缩包、FDS 和其他格式请手动导入对应模拟器。";
+        : "NES 支持独立 .nes 或仅含一份 NES ROM 的 ZIP；FDS、多游戏包和其他格式请手动导入对应模拟器。";
   }
 
   static LaunchPolicy.State assess(

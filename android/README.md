@@ -158,6 +158,8 @@ adb -s DEVICE_SERIAL shell am instrument -w \
 
 ## 0.2.6 卡带与精确 MOD 兼容验收
 
+0.2.6 r3 的 88 项 JVM 测试、18 项 Python 测试、双 APK 构建和 lint 通过；RK3588 已完成正式入口的卡带、NeoGeo、精确 MOD 与 FBNeo 样本测试，以及离线 NES、Home 返回和 PSP 启动回归。逐款范围及数据保全例外见[真机验收记录](../docs/android.md#rk3588-实测范围)：14 个实际 PSP 存档摘要相同，唯一 `.nomedia` 标记变为空文件，严格的全目录摘要比较未通过；未把它改写成全部一致。
+
 `create_handheld_sega_fixtures.py`、`create_snes_pce_fixtures.py` 从原创源码生成八个平台的测试程序，构建时自动打入 APK。可单独运行 `python3 android/tools/create_handheld_sega_fixtures.py /tmp/retroone-handheld-probes` 与 `python3 android/tools/create_snes_pce_fixtures.py /tmp/retroone-snes-pce-probes`；已有目录默认拒绝覆盖，`--replace` 只覆盖固定产物。两个 `build_all()` 供隔离 API 夹具使用。生成器不下载 ROM/BIOS，GB/GBC/GBA logo 区域为空，验收使用核心内置启动或跳过 BIOS；不会自动改变用户设置。
 
 `CartridgeDeviceTest` 的入口：

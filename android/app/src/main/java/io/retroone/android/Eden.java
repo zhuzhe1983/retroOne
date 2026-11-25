@@ -85,11 +85,13 @@ final class Eden {
   }
 
   Intent intent(Uri uri) {
+    // Keep Eden outside RetroOne's singleTask stack; reopening our launcher would otherwise
+    // clear the emulation Activity even while its native process still exists.
     Intent intent =
         new Intent(Intent.ACTION_VIEW)
             .setComponent(new ComponentName(PACKAGE, ACTIVITY))
             .setDataAndType(uri, "application/octet-stream")
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);
     intent.setClipData(ClipData.newRawUri("RetroOne Switch game", uri));
     return intent;
   }

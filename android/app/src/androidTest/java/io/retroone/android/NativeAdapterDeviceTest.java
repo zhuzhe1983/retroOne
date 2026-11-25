@@ -99,6 +99,7 @@ public class NativeAdapterDeviceTest {
           item,
           intent -> {
             assertEquals(uri, intent.getData());
+            assertTrue((intent.getFlags() & Intent.FLAG_ACTIVITY_NEW_TASK) != 0);
             assertNull(intent.getData().getQuery());
             assertEquals(
                 0,

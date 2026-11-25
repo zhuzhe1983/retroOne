@@ -11,7 +11,7 @@ import org.json.*;
  * Matches complete ZIP member bytes against a pinned official DAT, never titles or guessed names.
  */
 final class FbneoArchive {
-  static final class MatchException extends IOException {
+  static class MatchException extends IOException {
     MatchException(String message) {
       super(message);
     }
@@ -88,6 +88,7 @@ final class FbneoArchive {
   }
 
   static String identify(File archive, JSONObject index) throws Exception {
+    if (index.optInt("schema_version") == 2) return FbneoRomSet.resolve(archive, null, index).set;
     if (!DAT.equals(index.getString("source_sha256"))) throw new IOException("ROM 集索引版本无效");
     int expectedEntries = checkLayout(archive);
     List<String> signatures = new ArrayList<>();

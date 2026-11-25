@@ -152,9 +152,9 @@ adb -s DEVICE_SERIAL shell am instrument -w \
 
 ### FBNeo 索引来源
 
-`app/src/main/assets/fbneo-sets.json` 只包含 ROM 集标识、父集／BIOS 关联及 CRC/size 多重集的 SHA-256，不包含任何 ROM 字节、固件或密钥。来源为 [官方 DAT 固定提交 2e6605c4](https://github.com/libretro/FBNeo/blob/2e6605c4a08b86455e3aee03294fe35e7618fa91/dats/FinalBurn%20Neo%20%28ClrMame%20Pro%20XML%2C%20Arcade%20only%29.dat)，原文件 SHA-256 为 `0031b6557d493bc52d601e25b640e8a2d830bd6c78d4f3fff227463d2c62ae88`。索引附上游完整 [许可证](app/src/main/assets/fbneo-license.txt)，适用范围见该文件；APK 不附带 FBNeo 核心。
+`app/src/main/assets/fbneo-sets.json` 只包含 ROM 集标识、成员名称／CRC／大小、父集／BIOS 关联及 CRC/size 多重集的 SHA-256，不包含任何 ROM 字节、固件或密钥。来源为 [官方 DAT 固定提交 2e6605c4](https://github.com/libretro/FBNeo/blob/2e6605c4a08b86455e3aee03294fe35e7618fa91/dats/FinalBurn%20Neo%20%28ClrMame%20Pro%20XML%2C%20Arcade%20only%29.dat)，原文件 SHA-256 为 `0031b6557d493bc52d601e25b640e8a2d830bd6c78d4f3fff227463d2c62ae88`。索引附上游完整 [许可证](app/src/main/assets/fbneo-license.txt)，适用范围见该文件；APK 不附带 FBNeo 核心。
 
-可用 `python3 android/tools/build_fbneo_index.py /path/to/reviewed.dat android/app/src/main/assets/fbneo-sets.json` 重建；生成器拒绝不同摘要，更新前需审阅新 DAT 与核心版本。打开 `ZipFile` 前先以有界读取核对标准 ZIP、EOCD、全部中央目录记录与计数；限制物理大小 512 MiB、全部条目 4096、中央目录 4 MiB，拒绝 ZIP64／多卷／加密／前缀。JVM 回归包含稀疏超大文件、大量目录、伪造计数、超大目录记录与截断。严格匹配可能保守拒绝缺可选 PLD 的有效游戏，界面会说明需核对，不将其误判为下载损坏。官方背景：[FBNeo ROM 集与依赖说明](https://docs.libretro.com/library/fbneo/)。
+可用 `python3 android/tools/build_fbneo_index.py /path/to/reviewed.dat android/app/src/main/assets/fbneo-sets.json --neogeo-source /path/to/d_neogeo.cpp` 重建；NeoGeo 的必需／可选标志来自同一固定提交的 `neogeoRomDesc`，源码 SHA-256 为 `7e51b413aab7da1965ba2d003d0b76fd7e5dfac5a9f82ea356fc74b0680602b7`。生成器拒绝不同摘要，更新前需审阅新 DAT 与核心版本。打开 `ZipFile` 前先以有界读取核对标准 ZIP、EOCD、全部中央目录记录与计数；限制物理大小 512 MiB、全部条目 4096、中央目录 4 MiB，拒绝 ZIP64／多卷／加密／前缀。JVM 回归包含稀疏超大文件、大量目录、伪造计数、超大目录记录与截断。严格匹配可能保守拒绝缺可选 PLD 的有效游戏，界面会说明需核对，不将其误判为下载损坏。官方背景：[FBNeo ROM 集与依赖说明](https://docs.libretro.com/library/fbneo/)。
 
 ## 0.2.6 卡带与精确 MOD 兼容验收
 
@@ -162,12 +162,26 @@ adb -s DEVICE_SERIAL shell am instrument -w \
 
 `CartridgeDeviceTest` 的入口：
 
+- `#zipExtractionPublishesAndReusesOnAndroid`：把九个原创探针临时打成 ZIP，在应用私有缓存验证真实提取、重命名发布、重复复用、异常已有副本不覆盖及 pending 清理。不访问服务或共享目录，不改验证状态，结束只清理这次独立测试目录。此项用于回归 Android SELinux 禁止硬链接的问题。
 - `#originalCartridgeAssets`：检查所有已打包原创程序的基本结构，不启动模拟器。
 - `#authorizedCartridgeRoundTrip -e cartridgeFolder true -e cartridgePlatform snes`：使用应用中明确授权的共享目录，验证该平台副本创建／复用、核心路径、六项启动环境、其他平台路径拒绝，以及不改变 NES 确认。仅加 `-e launchCartridge true` 才实际派发启动；需另看画面和输入，测试本身不设置“已确认”。平台参数可为 `snes/gb/gbc/gba/megadrive/mastersystem/gamegear/pce`。
 - `#fixtureDownloadAndStage -e cartridgeDownload true -e cartridgePlatform snes -e fixtureBase http://TEST_HOST:18780/p/player1`：先在正式设置页面确认这个平台的原创探针。仅对独立夹具下载 `RetroOne-Cart-平台-Self-Test`，分片校验后创建并复用共享副本；不更改当前服务连接。加 `-e cartridgeZip true` 改为下载唯一 ROM 的 ZIP 夹具。运行后通过本地内容界面精确移除这些测试下载，保留正常取消历史。
 
-NES 的原 `fixtureDownloadStagesWithoutChangingConnection` 增加可选 `-e nesZip true`，在两款原探针外增加一份单 ROM ZIP；已有 NES 验证状态继续使用。ZIP 解析采用 CP437 处理未标记 UTF-8 的旧档案，带 UTF-8 标记的条目仍按 UTF-8；文件名只做后缀及安全路径检查，不作为输出路径。实际 CRC、大小和卡带头均需通过；缓存目录采用原子发布并核对已有字节。真机须覆盖实际解包，不能以纯 JVM 结果代替 Android 文件系统验证。
+NES 的原 `fixtureDownloadStagesWithoutChangingConnection` 增加可选 `-e nesZip true`，在两款原探针外增加一份单 ROM ZIP；已有 NES 验证状态继续使用。ZIP 解析采用 CP437 处理未标记 UTF-8 的旧档案，带 UTF-8 标记的条目仍按 UTF-8；文件名只做后缀及安全路径检查，不作为输出路径。实际 CRC、大小和卡带头均需通过；缓存目录采用同目录重命名发布（不覆盖、进程内串行），并核对已有字节；不使用 Android SELinux 禁止的硬链接。真机须覆盖实际解包，不能以纯 JVM 结果代替 Android 文件系统验证。
 
 圆桌兼容配置新增 `NativeAdapterDeviceTest#explicitCompatibilityArchiveAndEnvironment -e arcadeCompatProbe true -e fbneoTaskId UUID`：只接受 `ArcadeCompatProfile` 内固定 SHA-256 对应的 MOD，确认副本复用、MAME2003-Plus 核心和原件不变；仅加 `-e launchArcadeCompat true` 才启动。它不属于 `explicitUnmatchedArchivePreserved` 的负例；后者仍用于没有专用兼容配置的未知归档。正式入口必须明确显示兼容模式，首次仍需真实画面和投币／动作确认。
 
 所有真机操作由持有设备的会话统一执行，先保存并退出已有游戏，不清应用数据、不强杀其他会话。普通平台的 BIOS 范围以 [Snes9x](https://docs.libretro.com/library/snes9x/)、[Gambatte](https://docs.libretro.com/library/gambatte/)、[mGBA](https://docs.libretro.com/library/mgba/)、[Genesis Plus GX](https://docs.libretro.com/library/genesis_plus_gx/) 和 [PCE Fast](https://docs.libretro.com/library/beetle_pce_fast/) 官方说明为依据；本次 PCE 仅 HuCard，不含 CD 或 SuperGrafx。
+
+
+NeoGeo 的正式流程先通过系统文件选择器导入用户自己的 BIOS，再从游戏入口准备副本。可选设备检查：
+
+```sh
+adb -s DEVICE_SERIAL shell am instrument -w -r \
+  -e class io.retroone.android.NativeAdapterDeviceTest#explicitNeoGeoBiosAndArchive \
+  -e neoGeoAdapterProbe true -e fbneoTaskId DOWNLOADED_TASK_UUID \
+  -e expectedSet mslug -e expectedMerged false \
+  io.retroone.android.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+合并 KOF97 样本改为 `expectedSet kof97`、`expectedMerged true`。测试复核实际成员、BIOS、失败／取消导入保留旧选择、共享副本复用及连接／下载原件不变，不派发模拟器，也不把内容匹配标成可玩。正式游玩须另测画面、投币、开始与动作。BIOS 私有副本按 SHA-256 命名；共享 bundle 的路径同时包含游戏与 BIOS 摘要，避免更换 BIOS 后污染旧会话，旧副本保留供退出模拟器后清理。所有样本、BIOS 和设备证据仅保留在本地忽略目录，不进入仓库或公开产物。

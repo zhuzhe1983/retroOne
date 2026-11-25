@@ -128,6 +128,66 @@ public class CartridgeDeviceTest {
     assertEquals(oldHttp, app.credentials.http());
   }
 
+  @Test
+  public void zipExtractionPublishesAndReusesOnAndroid() throws Exception {
+    Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+    File scratch =
+        java.nio.file.Files.createTempDirectory(context.getCacheDir().toPath(), "zip-publish-test-")
+            .toFile();
+    try {
+      java.util.List<String> platforms = new java.util.ArrayList<>();
+      platforms.add("nes");
+      for (CartridgePolicy.Spec spec : CartridgePolicy.all()) platforms.add(spec.id);
+      for (String platform : platforms) {
+        String asset =
+            platform.equals("nes")
+                ? "retroone-nes-probe.nes"
+                : CartridgePolicy.spec(platform).probeAsset;
+        byte[] bytes;
+        try (java.io.InputStream in = context.getAssets().open(asset)) {
+          bytes = ApiClient.read(in, 4 * 1024 * 1024);
+        }
+        File zip = new File(scratch, platform + ".zip");
+        try (java.util.zip.ZipOutputStream out =
+            new java.util.zip.ZipOutputStream(new java.io.FileOutputStream(zip))) {
+          out.putNextEntry(new java.util.zip.ZipEntry("fixture/" + asset));
+          out.write(bytes);
+          out.closeEntry();
+        }
+        byte[] original = java.nio.file.Files.readAllBytes(zip.toPath());
+        CartridgeArchive.Extracted extracted =
+            CartridgeArchive.prepare(zip, zip.getName(), platform, scratch);
+        assertTrue(extracted.fromArchive);
+        assertArrayEquals(bytes, java.nio.file.Files.readAllBytes(extracted.file.toPath()));
+        assertEquals(
+            extracted.file, CartridgeArchive.prepare(zip, zip.getName(), platform, scratch).file);
+        assertArrayEquals(original, java.nio.file.Files.readAllBytes(zip.toPath()));
+        byte[] wrong = bytes.clone();
+        wrong[wrong.length - 1] ^= 1;
+        java.nio.file.Files.write(extracted.file.toPath(), wrong);
+        try {
+          CartridgeArchive.prepare(zip, zip.getName(), platform, scratch);
+          fail("Changed cache overwritten");
+        } catch (IOException expected) {
+          assertTrue(expected.getMessage(), expected.getMessage().contains("不会覆盖"));
+        }
+        assertArrayEquals(wrong, java.nio.file.Files.readAllBytes(extracted.file.toPath()));
+      }
+      String[] pending =
+          new File(scratch, "cartridge-roms").list((d, n) -> n.startsWith("pending-"));
+      assertNotNull(pending);
+      assertEquals(0, pending.length);
+    } finally {
+      // Only this test's unique private scratch tree is removed; no real downloads or probes.
+      try (java.util.stream.Stream<java.nio.file.Path> paths =
+          java.nio.file.Files.walk(scratch.toPath())) {
+        for (java.nio.file.Path path :
+            paths.sorted(java.util.Comparator.reverseOrder()).toArray(java.nio.file.Path[]::new))
+          java.nio.file.Files.deleteIfExists(path);
+      }
+    }
+  }
+
   private CartridgePolicy.Spec selected() {
     String platform = InstrumentationRegistry.getArguments().getString("cartridgePlatform", "");
     CartridgePolicy.Spec spec = CartridgePolicy.spec(platform);

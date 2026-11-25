@@ -225,11 +225,12 @@ final class CartridgeArchive {
     if (cacheDir == null || !cacheDir.isDirectory()) throw new IOException("应用缓存目录不可用");
     File directory = new File(cacheDir, "cartridge-roms");
     if (Files.isSymbolicLink(directory.toPath())) throw new IOException("卡带缓存目录不能是符号链接");
-    if (!directory.isDirectory() && !directory.mkdir()) throw new IOException("无法创建卡带缓存目录");
+    if (!directory.isDirectory() && !directory.mkdir() && !directory.isDirectory())
+      throw new IOException("无法创建卡带缓存目录");
     return directory;
   }
 
-  private static void publish(
+  private static synchronized void publish(
       File pending,
       File ready,
       String hash,
@@ -238,10 +239,14 @@ final class CartridgeArchive {
       boolean nes,
       CartridgePolicy.Spec spec)
       throws Exception {
+    // Cancellation may arrive while waiting to enter this monitor.
+    interrupted();
     try {
-      // A same-directory hard link publishes a complete inode atomically and fails if a target
-      // already exists. Unlike ATOMIC_MOVE, it can never replace an unexpected target on Unix.
-      Files.createLink(ready.toPath(), pending.toPath());
+      // Android SELinux forbids app-data hard links. Same-directory move publishes the closed
+      // file; no REPLACE_EXISTING/ATOMIC_MOVE (the latter may overwrite on Unix). This monitor
+      // serializes all publishers in our single-process, app-private cache.
+      interrupted();
+      Files.move(pending.toPath(), ready.toPath());
     } catch (FileAlreadyExistsException exists) {
       if (!Files.isRegularFile(ready.toPath(), LinkOption.NOFOLLOW_LINKS) || ready.length() != size)
         throw new IOException("已有卡带缓存异常；请清理该副本后重试，不会覆盖", exists);
@@ -263,6 +268,7 @@ final class CartridgeArchive {
     } catch (UnsupportedOperationException unsupported) {
       throw new IOException("缓存文件系统不支持安全发布卡带副本", unsupported);
     }
+    interrupted();
   }
 
   /**

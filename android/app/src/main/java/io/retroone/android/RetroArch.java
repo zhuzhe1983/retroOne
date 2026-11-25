@@ -283,13 +283,25 @@ final class RetroArch {
   }
 
   String stageArchive(File source, String set) throws Exception {
+    return stageArchive(source, set, null);
+  }
+
+  String stageArchive(File source, String set, File bios) throws Exception {
     if (!set.matches("[A-Za-z0-9_-]{1,64}")) throw new IOException("ROM 集名称无效");
     String hash;
     try (InputStream in = new FileInputStream(source)) {
       hash = digest(in, source.length());
     }
     DocumentFile parent = folder();
-    String childName = "fb-" + hash;
+    String biosHash = "";
+    if (bios != null) {
+      try (InputStream in = new FileInputStream(bios)) {
+        biosHash = digest(in, bios.length());
+      }
+    }
+    String childName =
+        "fb-"
+            + (bios == null ? hash : ServerConfig.hash("fbneo-bundle-v1:" + hash + ":" + biosHash));
     DocumentFile child = findChild(parent, childName);
     if (child == null) {
       Uri uri =
@@ -303,6 +315,7 @@ final class RetroArch {
     String path = directoryLabel() + "/" + childName;
     if (child == null || !child.isDirectory() || !nativePath(child.getUri()).equals(path))
       throw new IOException("无法准备街机启动目录");
+    if (bios != null) stageDocument(bios, child, "neogeo.zip", path, biosHash);
     return stageDocument(source, child, set + ".zip", path, hash);
   }
 

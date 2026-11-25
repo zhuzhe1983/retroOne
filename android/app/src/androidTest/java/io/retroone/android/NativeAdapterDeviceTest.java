@@ -93,6 +93,57 @@ public class NativeAdapterDeviceTest {
   }
 
   @Test
+  public void explicitNeoGeoBiosAndArchive() throws Exception {
+    org.junit.Assume.assumeTrue(opt("neoGeoAdapterProbe"));
+    DownloadStore.Item item = task("fbneoTaskId");
+    Context context = context();
+    Fbneo adapter = new Fbneo(context);
+    java.io.File file = RetroApplication.from(context).downloads.complete(item);
+    FbneoRomSet.Match inspected = FbneoRomSet.inspect(file, adapter.index());
+    assertTrue(inspected.neoGeo);
+    String expected = InstrumentationRegistry.getArguments().getString("expectedSet", "");
+    assertEquals(expected, inspected.set);
+    assertEquals(opt("expectedMerged"), inspected.merged);
+    java.io.File bios = adapter.bios.file();
+    assertNotNull("Import your own BIOS using the official app UI first", bios);
+    String before = adapter.bios.fingerprint();
+    FbneoRomSet.Bios valid = FbneoRomSet.verifyBios(bios, adapter.index());
+    assertEquals(valid.sha256, FbneoRomSet.resolve(inspected, bios, adapter.index()).biosSha256);
+    // Failed and cancelled imports must preserve the selected BIOS and file.
+    try (java.io.InputStream invalid = new java.io.ByteArrayInputStream(new byte[] {1, 2, 3})) {
+      try {
+        adapter.bios.importFile(invalid, adapter.index(), new FbneoBios.Cancellation());
+        fail();
+      } catch (java.io.IOException expectedFailure) {
+      }
+    }
+    try (java.io.InputStream original = new java.io.FileInputStream(bios)) {
+      FbneoBios.Cancellation cancelled = new FbneoBios.Cancellation();
+      cancelled.cancel();
+      try {
+        adapter.bios.importFile(original, adapter.index(), cancelled);
+        fail();
+      } catch (java.io.IOException expectedFailure) {
+        assertTrue(expectedFailure.getMessage().contains("取消"));
+      }
+    }
+    assertEquals(before, adapter.bios.fingerprint());
+    String base = RetroApplication.from(context).credentials.base();
+    String path = adapter.prepare(item);
+    assertEquals(path, adapter.prepare(item));
+    assertTrue(path.endsWith("/" + expected + ".zip"));
+    assertEquals(
+        adapter.retroarch.configPath(),
+        adapter.retroarch.intent(path, "fbneo").getStringExtra("CONFIGFILE"));
+    assertEquals(inspected.archiveSha256, FbneoRomSet.inspect(file, adapter.index()).archiveSha256);
+    assertEquals(valid.sha256, FbneoRomSet.verifyBios(adapter.bios.file(), adapter.index()).sha256);
+    assertEquals(base, RetroApplication.from(context).credentials.base());
+    assertEquals(DownloadStore.READY, RetroApplication.from(context).downloads.get(item.id).state);
+    assertEquals(before, adapter.bios.fingerprint());
+    // This checks preparation only; use the formal Play UI to assess frame, sound and input.
+  }
+
+  @Test
   public void explicitUnmatchedArchivePreserved() throws Exception {
     org.junit.Assume.assumeTrue(opt("fbneoMismatchProbe"));
     DownloadStore.Item item = task("fbneoTaskId");

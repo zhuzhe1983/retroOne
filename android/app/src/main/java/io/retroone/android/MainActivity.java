@@ -1660,6 +1660,10 @@ public final class MainActivity extends Activity {
   @Override
   protected void onActivityResult(int request, int result, Intent data) {
     super.onActivityResult(request, result, data);
+    if (request == FbneoFlow.PICK_BIOS) {
+      fbneoFlow.selectedBios(result, data);
+      return;
+    }
     if (request == RetroArchFlow.PICK_DIRECTORY) {
       retroArchFlow.selected(result, data);
       return;
@@ -1761,6 +1765,7 @@ public final class MainActivity extends Activity {
         && (support == LaunchPolicy.State.PLAYABLE
             || support == LaunchPolicy.State.INSTALL_RETROARCH
             || support == LaunchPolicy.State.CHECK_FBNEO
+            || support == LaunchPolicy.State.CONFIGURE_NEOGEO
             || support == LaunchPolicy.State.OPEN_ARCADE_COMPAT
             || support == LaunchPolicy.State.REVIEW_FBNEO)) {
       if (downloadsPopup != null) downloadsPopup.dismiss();

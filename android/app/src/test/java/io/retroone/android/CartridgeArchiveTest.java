@@ -302,6 +302,70 @@ public class CartridgeArchiveTest {
     }
   }
 
+  @Test
+  public void cancellationWhileWaitingToPublishDoesNotPublishOrReturnAFile() throws Exception {
+    File source = zip(Map.of("original.nes", nes()));
+    byte[] original = Files.readAllBytes(source.toPath());
+    File cache = temporary.newFolder();
+    AtomicReference<Throwable> failure = new AtomicReference<>();
+    AtomicReference<CartridgeArchive.Extracted> result = new AtomicReference<>();
+    Thread worker =
+        new Thread(
+            () -> {
+              try {
+                result.set(CartridgeArchive.prepare(source, "original.zip", "nes", cache));
+              } catch (Throwable e) {
+                failure.set(e);
+              }
+            });
+    try {
+      synchronized (CartridgeArchive.class) {
+        worker.start();
+        long until = System.nanoTime() + 5_000_000_000L;
+        while (worker.isAlive()
+            && worker.getState() != Thread.State.BLOCKED
+            && System.nanoTime() < until) Thread.sleep(1);
+        assertEquals(
+            "Worker must reach the actual publication monitor",
+            Thread.State.BLOCKED,
+            worker.getState());
+        worker.interrupt();
+      }
+      worker.join(5000);
+      assertFalse(worker.isAlive());
+      assertNull(result.get());
+      assertTrue(String.valueOf(failure.get()), failure.get() instanceof IOException);
+      assertTrue(failure.get().getMessage().contains("取消"));
+      assertEquals(0, new File(cache, "cartridge-roms").list().length);
+      assertArrayEquals(original, Files.readAllBytes(source.toPath()));
+    } finally {
+      worker.interrupt();
+      worker.join(5000);
+    }
+  }
+
+  @Test
+  public void simultaneousPublishersReuseOneCompleteFile() throws Exception {
+    File source = zip(Map.of("original.nes", nes()));
+    File cache = temporary.newFolder();
+    java.util.concurrent.ExecutorService executor =
+        java.util.concurrent.Executors.newFixedThreadPool(4);
+    try {
+      java.util.List<java.util.concurrent.Future<CartridgeArchive.Extracted>> results =
+          new java.util.ArrayList<>();
+      for (int i = 0; i < 4; i++)
+        results.add(
+            executor.submit(() -> CartridgeArchive.prepare(source, "game.zip", "nes", cache)));
+      File expected = results.get(0).get(10, java.util.concurrent.TimeUnit.SECONDS).file;
+      for (java.util.concurrent.Future<CartridgeArchive.Extracted> result : results)
+        assertEquals(expected, result.get(10, java.util.concurrent.TimeUnit.SECONDS).file);
+      assertArrayEquals(nes(), Files.readAllBytes(expected.toPath()));
+      assertEquals(1, expected.getParentFile().list().length);
+    } finally {
+      executor.shutdownNow();
+    }
+  }
+
   private File zip(Map<String, byte[]> entries) throws Exception {
     return zip(entries, StandardCharsets.UTF_8, false);
   }

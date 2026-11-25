@@ -6,10 +6,16 @@ import android.content.Intent;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
+import android.widget.Button;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.TextView;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.concurrent.ExecutorService;
 
 final class FbneoFlow {
+  static final int PICK_BIOS = 44;
   private final Activity activity;
   private final ExecutorService io;
   private final Runnable changed;
@@ -68,42 +74,134 @@ final class FbneoFlow {
   }
 
   void show() {
-    String core;
+    if (activity.isDestroyed() || activity.isFinishing()) return;
+    LinearLayout content = new LinearLayout(activity);
+    content.setOrientation(LinearLayout.VERTICAL);
+    int pad = (int) (20 * activity.getResources().getDisplayMetrics().density);
+    content.setPadding(pad, pad / 2, pad, pad / 2);
+    TextView status = new TextView(activity);
+    status.setText(
+        "普通街机使用 FinalBurn Neo；特定已验证 MOD 使用 MAME2003-Plus。请先安装对应核心并保存默认配置。\n\n共享目录："
+            + adapter.retroarch.directoryLabel()
+            + "\n\n"
+            + adapter.bios.label());
+    content.addView(status);
+    AlertDialog dialog =
+        new AlertDialog.Builder(activity).setTitle("街机设置").setNegativeButton("返回", null).create();
+    button(
+        content,
+        "选择共享目录",
+        () -> {
+          dialog.dismiss();
+          nesFlow.chooseSharedDirectory(this::show);
+        });
+    button(
+        content,
+        "导入 NeoGeo BIOS",
+        () -> {
+          dialog.dismiss();
+          chooseBios();
+        });
+    button(
+        content,
+        "打开核心设置",
+        () -> {
+          try {
+            Intent intent =
+                activity.getPackageManager().getLaunchIntentForPackage(RetroArchPolicy.PACKAGE);
+            dialog.dismiss();
+            if (intent == null) {
+              nesFlow.show();
+              return;
+            }
+            adapter.reset();
+            changed.run();
+            activity.startActivity(intent);
+          } catch (Exception e) {
+            error(e);
+          }
+        });
+    TextView note = new TextView(activity);
+    note.setText("ROM 和 BIOS 按内容核验，首次启动仍需确认真实画面和输入。原文件保持不变，存档由 RetroArch 管理，暂不支持街机云同步或玩家隔离。");
+    note.setPadding(0, pad / 2, 0, 0);
+    content.addView(note);
+    ScrollView scroll = new ScrollView(activity);
+    scroll.addView(content);
+    dialog.setView(scroll);
+    dialog.show();
+  }
+
+  private void button(LinearLayout content, String title, Runnable action) {
+    Button button = new Button(activity);
+    button.setText(title);
+    button.setOnClickListener(v -> action.run());
+    content.addView(button);
+  }
+
+  private void chooseBios() {
+    if (busy) return;
     try {
-      core = adapter.retroarch.corePath("fbneo");
+      Intent intent =
+          new Intent(Intent.ACTION_OPEN_DOCUMENT)
+              .addCategory(Intent.CATEGORY_OPENABLE)
+              .setType("*/*")
+              .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+      activity.startActivityForResult(intent, PICK_BIOS);
     } catch (Exception e) {
-      core = "请先安装官方 RetroArch ARM64";
+      error(e);
     }
-    new AlertDialog.Builder(activity)
-        .setTitle("街机 · FinalBurn Neo")
-        .setMessage(
-            "普通 ROM 集使用 FinalBurn Neo；已核验的特定 MOD 使用独立 MAME2003-Plus"
-                + " 兼容配置，启动时会明确提示。请安装对应核心，并保存默认全局配置；更新后需重新验证。\n\n"
-                + core
-                + "\n\n共享目录："
-                + adapter.retroarch.directoryLabel()
-                + "\n\n"
-                + "普通集逐个核对 ZIP 与官方 DAT；关联集需手动检查。兼容 MOD 仅按精确归档摘要和成员校验匹配，不根据标题判断。未知 MOD"
-                + " 仍需核对，原下载保持不变。\n\n"
-                + "首次启动后需确认真实画面和输入。存档由 RetroArch 管理，尚无街机云同步或玩家隔离。")
-        .setPositiveButton("选择共享目录", (d, w) -> nesFlow.chooseSharedDirectory(this::show))
-        .setNeutralButton(
-            "打开核心设置",
-            (d, w) -> {
-              try {
-                Intent intent =
-                    activity.getPackageManager().getLaunchIntentForPackage(RetroArchPolicy.PACKAGE);
-                if (intent == null) {
-                  nesFlow.show();
+  }
+
+  void selectedBios(int result, Intent data) {
+    if (result != Activity.RESULT_OK || data == null || data.getData() == null || busy) return;
+    android.net.Uri uri = data.getData();
+    if (!"content".equals(uri.getScheme())) {
+      error(new IOException("请通过文件选择器选择 BIOS ZIP"));
+      return;
+    }
+    busy = true;
+    FbneoBios.Cancellation cancelled = new FbneoBios.Cancellation();
+    AlertDialog progress =
+        new AlertDialog.Builder(activity)
+            .setMessage("正在校验 NeoGeo BIOS…")
+            .setCancelable(false)
+            .setNegativeButton("取消", (d, w) -> cancelled.cancel())
+            .show();
+    io.execute(
+        () -> {
+          Exception problem = null;
+          try (InputStream in = activity.getContentResolver().openInputStream(uri)) {
+            if (in == null) throw new IOException("无法读取所选 BIOS 文件");
+            adapter.bios.importFile(in, adapter.index(), cancelled);
+          } catch (Exception e) {
+            problem = e;
+          }
+          Exception failure = problem;
+          handler.post(
+              () -> {
+                busy = false;
+                if (activity.isDestroyed() || activity.isFinishing()) return;
+                progress.dismiss();
+                changed.run();
+                if (cancelled.isCancelled()) return;
+                if (failure != null) {
+                  error(failure);
                   return;
                 }
-                adapter.reset();
-                changed.run();
-                activity.startActivity(intent);
-              } catch (Exception e) {
-                error(e);
-              }
-            })
+                new AlertDialog.Builder(activity)
+                    .setTitle("BIOS 已导入")
+                    .setMessage("必需文件已校验。现在可以重新启动 NeoGeo 游戏；原 ZIP 和 RetroArch 全局设置保持不变。")
+                    .setPositiveButton("知道了", null)
+                    .show();
+              });
+        });
+  }
+
+  private void missingBios(String message) {
+    new AlertDialog.Builder(activity)
+        .setTitle("需要 NeoGeo BIOS")
+        .setMessage(message + "\n\n选择你自己已有的 neogeo.zip；只读校验并保存启动副本。")
+        .setPositiveButton("选择 BIOS ZIP", (d, w) -> chooseBios())
         .setNegativeButton("返回", null)
         .show();
   }
@@ -116,6 +214,10 @@ final class FbneoFlow {
     }
     String issue = adapter.issue(item);
     if (!issue.isEmpty()) {
+      if (adapter.needsBios(item)) {
+        missingBios(issue);
+        return;
+      }
       new AlertDialog.Builder(activity)
           .setTitle("ROM 版本待核对")
           .setMessage(issue)
@@ -153,7 +255,9 @@ final class FbneoFlow {
                 progress.dismiss();
                 if (failure != null) {
                   changed.run();
-                  error(failure);
+                  if (failure instanceof FbneoRomSet.MissingBiosException)
+                    missingBios(ApiClient.message(failure));
+                  else error(failure);
                   return;
                 }
                 if (!resumed) return;
@@ -165,12 +269,11 @@ final class FbneoFlow {
                       .setTitle("启动 " + adapter.launchLabel(item))
                       .setMessage(
                           (adapter.compatibility(item) == null
-                                  ? "ROM 集已精确匹配："
-                                  : "这是已核验摘要的 MOD，使用 MAME2003-Plus 兼容模式，不是 FBNeo 原版 DAT"
-                                      + " 匹配。仅在副本中调整内部文件名，ROM 字节不变。\n\n"
-                                      + "兼容 ROM 集：")
-                              + new java.io.File(result).getName()
-                              + "。请确认核心已安装，并在 RetroArch 保存上一局。切换时若先返回，可再次启动。\n\n存档暂不与云端同步，也不按玩家隔离。")
+                                  ? adapter.launchDetails(item)
+                                  : "这是已核验摘要的 MOD，使用 MAME2003-Plus 兼容模式。仅副本内部文件名作兼容调整，ROM 字节不变。")
+                              + "\n\n"
+                              + "请确认核心已安装，并在 RetroArch 保存上一局。切换时若先返回，可再次启动。\n\n"
+                              + "存档暂不与云端同步，也不按玩家隔离。")
                       .setPositiveButton("已保存，启动", (d, w) -> open(item, result))
                       .setNegativeButton("取消", null)
                       .show();

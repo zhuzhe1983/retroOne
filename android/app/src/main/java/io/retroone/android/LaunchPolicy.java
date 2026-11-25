@@ -14,6 +14,7 @@ final class LaunchPolicy {
     OPEN_EDEN("用 Eden 启动"),
     CHECK_FBNEO("检查街机启动"),
     REVIEW_FBNEO("ROM 版本待核对"),
+    CONFIGURE_NEOGEO("配置 NeoGeo BIOS"),
     OPEN_ARCADE_COMPAT("用 MAME 兼容模式启动"),
     INSTALL_RETROARCH("安装 RetroArch"),
     CONFIGURE_RETROARCH("设置 NES 模拟器"),

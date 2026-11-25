@@ -42,9 +42,15 @@ final class RetroArch {
   }
 
   String corePath() throws PackageManager.NameNotFoundException {
+    return corePath("nes");
+  }
+
+  String corePath(String platform) throws PackageManager.NameNotFoundException {
+    if (!platform.equals("nes") && !platform.equals("fbneo"))
+      throw new IllegalArgumentException("Unsupported core");
     return context.getPackageManager().getApplicationInfo(RetroArchPolicy.PACKAGE, 0).dataDir
         + "/cores/"
-        + RetroArchPolicy.CORE;
+        + (platform.equals("fbneo") ? "fbneo_libretro_android.so" : RetroArchPolicy.CORE);
   }
 
   String externalFilesPath() {
@@ -250,6 +256,10 @@ final class RetroArch {
         || !RetroArchPolicy.formatReason(item.name).isEmpty())
       throw new IOException("此格式尚未适配 NES 直启");
     if (!verified()) throw new IOException("请先完成 NES 启动测试");
+    return stage(verifiedDownload(item));
+  }
+
+  File verifiedDownload(DownloadStore.Item item) throws Exception {
     if (!DownloadStore.READY.equals(item.state)) throw new IOException("请等待下载完成");
     File file = RetroApplication.from(context).downloads.complete(item);
     if (!file.isFile() || file.length() != item.size) throw new IOException("下载文件不存在或大小已变化");
@@ -260,7 +270,31 @@ final class RetroArch {
       if (Transfer.verifiedPrefix(input, manifest, () -> Thread.currentThread().isInterrupted())
           != item.size) throw new IOException("下载文件校验失败，请重新下载");
     }
-    return stage(file);
+    return file;
+  }
+
+  String stageArchive(File source, String set) throws Exception {
+    if (!set.matches("[A-Za-z0-9_-]{1,64}")) throw new IOException("ROM 集名称无效");
+    String hash;
+    try (InputStream in = new FileInputStream(source)) {
+      hash = digest(in, source.length());
+    }
+    DocumentFile parent = folder();
+    String childName = "fb-" + hash;
+    DocumentFile child = findChild(parent, childName);
+    if (child == null) {
+      Uri uri =
+          DocumentsContract.createDocument(
+              context.getContentResolver(),
+              parent.getUri(),
+              DocumentsContract.Document.MIME_TYPE_DIR,
+              childName);
+      child = uri == null ? null : DocumentFile.fromSingleUri(context, uri);
+    }
+    String path = directoryLabel() + "/" + childName;
+    if (child == null || !child.isDirectory() || !nativePath(child.getUri()).equals(path))
+      throw new IOException("无法准备街机启动目录");
+    return stageDocument(source, child, set + ".zip", path, hash);
   }
 
   private String stage(File source) throws Exception {
@@ -273,13 +307,17 @@ final class RetroArch {
     try (InputStream in = new FileInputStream(source)) {
       hash = digest(in, source.length());
     }
-    DocumentFile directory = folder();
-    String name = RetroArchPolicy.fileName(hash);
+    return stageDocument(source, folder(), RetroArchPolicy.fileName(hash), directoryLabel(), hash);
+  }
+
+  private String stageDocument(
+      File source, DocumentFile directory, String name, String expectedDirectory, String hash)
+      throws Exception {
     DocumentFile existing = findChild(directory, name);
     if (existing != null) {
       try (InputStream in = context.getContentResolver().openInputStream(existing.getUri())) {
         if (existing.isFile() && hash.equals(digest(in, source.length())))
-          return validatedPath(existing, name);
+          return validatedPath(existing, name, expectedDirectory);
       }
       // Never replace an unexpected file, even inside our own managed directory.
       throw new IOException("共享副本已被修改，请移走此副本后重试：" + name);
@@ -312,7 +350,7 @@ final class RetroArch {
       cleanupUri = renamed;
       DocumentFile ready = DocumentFile.fromSingleUri(context, renamed);
       if (ready == null) throw new IOException("无法读取重命名后的启动副本");
-      String path = validatedPath(ready, name);
+      String path = validatedPath(ready, name, expectedDirectory);
       complete = true;
       return path;
     } catch (Exception e) {
@@ -331,25 +369,33 @@ final class RetroArch {
     }
   }
 
-  private String validatedPath(DocumentFile file, String name) throws IOException {
+  private String validatedPath(DocumentFile file, String name, String expectedDirectory)
+      throws IOException {
     String path = nativePath(file.getUri());
-    if (!name.equals(file.getName()) || !path.equals(directoryLabel() + "/" + name))
+    if (!name.equals(file.getName()) || !path.equals(expectedDirectory + "/" + name))
       throw new IOException("启动副本的实际路径与预期不符");
     return path;
   }
 
   Intent intent(String path) throws Exception {
+    return intent(path, "nes");
+  }
+
+  Intent intent(String path, String platform) throws Exception {
     if (!installed()) throw new IOException("未找到可用的 RetroArch ARM64");
     if (!configured()
         || !path.startsWith(directoryLabel() + "/")
-        || !path.substring(directoryLabel().length() + 1).matches("ro-[a-f0-9]{64}\\.nes"))
-      throw new IOException("启动路径必须是已授权目录中的校验副本");
+        || !path.substring(directoryLabel().length() + 1)
+            .matches(
+                platform.equals("fbneo")
+                    ? "fb-[a-f0-9]{64}/[A-Za-z0-9_-]{1,64}\\.zip"
+                    : "ro-[a-f0-9]{64}\\.nes")) throw new IOException("启动路径必须是已授权目录中的校验副本");
     // Load RetroArch's default global config; save/input paths come from that config.
     return withEnvironment(
         new Intent(Intent.ACTION_MAIN)
             .setComponent(new ComponentName(RetroArchPolicy.PACKAGE, RetroArchPolicy.ACTIVITY))
             .putExtra("ROM", path)
-            .putExtra("LIBRETRO", corePath()));
+            .putExtra("LIBRETRO", corePath(platform)));
   }
 
   private static void copy(InputStream in, OutputStream out) throws IOException {

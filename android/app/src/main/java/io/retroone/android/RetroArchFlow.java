@@ -23,6 +23,7 @@ final class RetroArchFlow {
   private final Handler handler = new Handler(Looper.getMainLooper());
   private final Runnable changed;
   private AlertDialog dialog;
+  private Runnable directoryDone;
   private boolean busy, resumed, launchPaused, awaitingReturn, launchedProbe;
   private String launchedId;
   private long launchedAt;
@@ -161,6 +162,11 @@ final class RetroArchFlow {
     dialog.show();
   }
 
+  void chooseSharedDirectory(Runnable done) {
+    directoryDone = done;
+    pick();
+  }
+
   private void pick() {
     try {
       Intent pick =
@@ -181,7 +187,10 @@ final class RetroArchFlow {
   }
 
   void selected(int result, Intent data) {
-    if (result != Activity.RESULT_OK || data == null || data.getData() == null) return;
+    if (result != Activity.RESULT_OK || data == null || data.getData() == null) {
+      directoryDone = null;
+      return;
+    }
     run(
         "正在授权共享目录…",
         () -> {
@@ -190,7 +199,10 @@ final class RetroArchFlow {
         },
         ignored -> {
           changed.run();
-          show();
+          Runnable done = directoryDone;
+          directoryDone = null;
+          if (done == null) show();
+          else done.run();
         });
   }
 

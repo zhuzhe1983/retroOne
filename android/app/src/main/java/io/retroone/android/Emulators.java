@@ -33,6 +33,8 @@ final class Emulators {
       } catch (IOException ignored) {
       }
     }
+    if ("switch".equals(item.platform)) return new Eden(context).status(item, present);
+    if ("fbneo".equals(item.platform)) return new Fbneo(context).status(item, present);
     if (RetroArchPolicy.supports(item.platform)) {
       RetroArch adapter = new RetroArch(context);
       return RetroArchPolicy.assess(

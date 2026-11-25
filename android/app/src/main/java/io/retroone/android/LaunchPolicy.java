@@ -10,6 +10,10 @@ final class LaunchPolicy {
   enum State {
     PLAYABLE("▶ 游玩"),
     INSTALL("安装 PPSSPP"),
+    INSTALL_EDEN("安装 Eden"),
+    OPEN_EDEN("用 Eden 启动"),
+    CHECK_FBNEO("检查街机启动"),
+    REVIEW_FBNEO("ROM 版本待核对"),
     INSTALL_RETROARCH("安装 RetroArch"),
     CONFIGURE_RETROARCH("设置 NES 模拟器"),
     VERIFY_RETROARCH("测试 NES 启动"),
@@ -25,6 +29,11 @@ final class LaunchPolicy {
   }
 
   static String formatReason(String platform, String name) {
+    if ("switch".equals(platform)) return Eden.formatReason(name);
+    if ("fbneo".equals(platform))
+      return name.toLowerCase(Locale.ROOT).endsWith(".zip")
+          ? ""
+          : "FBNeo 目前仅接入独立 ZIP ROM 集，不自动解压或重命名其他格式。";
     if (RetroArchPolicy.supports(platform)) return RetroArchPolicy.formatReason(name);
     if (!"psp".equals(platform)) return "此平台尚未适配 Android 模拟器直接启动。文件可以保留或导出，暂不能从 RetroOne 直接游玩。";
     String lower = name.toLowerCase(Locale.ROOT);

@@ -1,6 +1,6 @@
 # RetroOne Android
 
-原生 Android 客户端：浏览自己的 RetroOne 游戏库，把独立游戏文件下载到本机，再交给已安装的 PPSSPP，或完成设置与测试的 RetroArch ARM64 / FCEUmm（NES）。不会启动服务端云游戏，也不附带游戏、模拟器、BIOS、固件或密钥。
+原生 Android 客户端：浏览自己的 RetroOne 游戏库，把独立游戏文件下载到本机，再交给已安装的 PPSSPP、Eden，或完成设置与测试的 RetroArch ARM64（NES / FBNeo）。不会启动服务端云游戏，也不附带游戏、模拟器、BIOS、固件或密钥。
 
 使用步骤、兼容范围及真机验证见 [Android 使用与开发说明](../docs/android.md)。
 
@@ -113,7 +113,7 @@ adb -s DEVICE_SERIAL shell am instrument -w \
 
 `-e class io.retroone.android.RetroArchDeviceTest#diagnosticContentUriLaunch -e probeRetroArchUri true` 只用于诊断普通 content URI 的兼容性（带 ClipData 只读授权）。正式适配使用经过授权的共享原生路径；该诊断只报告 Intent 发出，不宣称内容运行。请先结束自己正在进行的 RetroArch 游戏。
 
-### Eden URI 诊断（尚未开放正式启动入口）
+### Eden URI 独立诊断
 
 测试 APK 中的 `EdenUriProbeTest` 可验证 Eden 对单文件 FileProvider URI 的支持。先在 Eden 保存并退出当前游戏，再明确指定一个已完成下载的 Switch 任务 UUID：
 
@@ -136,3 +136,22 @@ adb -s DEVICE_SERIAL shell am instrument -w \
 ```
 
 首个即时结束的探针曾出现 FileProvider Permission Denial；因此 Intent 派发成功不能当成文件已读或游戏已运行。
+
+## 0.2.5 原生适配验收
+
+正式 UI 新增 Switch / Eden 和街机 / FinalBurn Neo 入口，使用流程与限制见 [Android 使用说明](../docs/android.md#025-switch-与街机启动)。Eden 的 `resumeIntent` 不带 data 或选定游戏 extras，避免 v0.2.1 把同款恢复当作 ROM swap；这与冷启动的只读 URI 不同。实现依据：[Eden v0.2.1 EmulationActivity](https://git.eden-emu.dev/eden-emu/eden/src/tag/v0.2.1/src/android/app/src/main/java/org/yuzu/yuzu_emu/activities/EmulationActivity.kt)。
+
+`NativeAdapterDeviceTest` 每个设备用例独立运行。真实游戏测试必须显式指定已下载任务 UUID，不自动选择游戏，不改连接、固件或存档：
+
+- `#edenResumeCannotRequestRomSwap`：只断言恢复 Intent 无 URI、游戏 extras 或 grant，不启动应用。
+- `#edenDispatchFailureRevokesOnlyNewReadGrant -e edenFailureProbe true -e edenTaskId UUID`：先保存退出 Eden，并通过设置回收旧授权。故意在派发前抛启动异常，确认新只读权和持久记录均回收，不会实际开始游戏。已有授权时拒绝执行，避免干扰后台游戏。
+- `#explicitFbneoArchiveAndEnvironment -e fbneoAdapterProbe true -e fbneoTaskId UUID -e expectedSet SET`：按官方索引识别、校验和复用共享副本，核对核心与默认配置。仅显式添加 `-e launchFbneo true` 才发启动 Intent；需另外检查画面和输入。
+- `#explicitUnmatchedArchivePreserved -e fbneoMismatchProbe true -e fbneoTaskId UUID`：只针对明确选定的未匹配改版归档，验证拒绝直启且下载原件状态、大小和时间不变；会保存本机核对提示。
+
+所有方法均位于 `io.retroone.android.NativeAdapterDeviceTest`，使用前文相同的 instrumentation runner。不得把跳过、Intent 派发或仅模拟器前台计作游戏运行通过。
+
+### FBNeo 索引来源
+
+`app/src/main/assets/fbneo-sets.json` 只包含 ROM 集标识、父集／BIOS 关联及 CRC/size 多重集的 SHA-256，不包含任何 ROM 字节、固件或密钥。来源为 [官方 DAT 固定提交 2e6605c4](https://github.com/libretro/FBNeo/blob/2e6605c4a08b86455e3aee03294fe35e7618fa91/dats/FinalBurn%20Neo%20%28ClrMame%20Pro%20XML%2C%20Arcade%20only%29.dat)，原文件 SHA-256 为 `0031b6557d493bc52d601e25b640e8a2d830bd6c78d4f3fff227463d2c62ae88`。索引附上游完整 [许可证](app/src/main/assets/fbneo-license.txt)，适用范围见该文件；APK 不附带 FBNeo 核心。
+
+可用 `python3 android/tools/build_fbneo_index.py /path/to/reviewed.dat android/app/src/main/assets/fbneo-sets.json` 重建；生成器拒绝不同摘要，更新前需审阅新 DAT 与核心版本。严格匹配可能保守拒绝缺可选 PLD 的有效游戏，界面会说明需核对，不将其误判为下载损坏。官方背景：[FBNeo ROM 集与依赖说明](https://docs.libretro.com/library/fbneo/)。

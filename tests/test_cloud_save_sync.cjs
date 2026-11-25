@@ -120,8 +120,13 @@ test('unuploaded local deletion is a change, not a virgin save space',async()=>{
 });
 
 async function settleUntil(predicate) {
-    for(let i=0;i<100;i++){if(predicate())return;await new Promise(resolve=>setImmediate(resolve));}
-    assert.fail('condition did not settle');
+    // WebCrypto runs outside the JS event loop. A hundred setImmediate turns can
+    // finish in a few milliseconds on CI before that work gets CPU time.
+    const deadline=performance.now()+5000;
+    while(!predicate()) {
+        assert.ok(performance.now()<deadline,'condition did not settle within 5 seconds');
+        await new Promise(resolve=>setTimeout(resolve,1));
+    }
 }
 test('unstarted native-busy page can cancel and preserve dirty local outbox',async()=>{
     const x=setup();x.api._test.replaceFiles(x.FS,file('pending local'));

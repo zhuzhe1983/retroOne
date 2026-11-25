@@ -89,7 +89,7 @@ final class RetroArchFlow {
             }
           });
     } else {
-      text(content, "1 · 在 RetroArch 安装 Nintendo - NES / Famicom (FCEUmm) 核心，并允许它读取共享存储。");
+      text(content, "1 · 在 RetroArch 安装 FCEUmm 核心，允许读取共享存储，并保存默认全局配置。测试前从其菜单退出应用。");
       button(
           content,
           "打开 RetroArch",
@@ -135,6 +135,9 @@ final class RetroArchFlow {
                   .setMessage(
                       "核心路径：\n"
                           + adapter.corePath()
+                          + "\n\n默认全局配置：\n"
+                          + adapter.configPath()
+                          + "\n\n由 RetroArch 读取这个文件里的按键、画面和存档目录；本应用不改写配置。当前未适配另存位置或按核心独立配置。"
                           + "\n\n"
                           + "Android 不允许跨应用检查私有核心文件，安装应用并不代表核心已就绪。测试由你确认，具体游戏兼容性仍取决于核心。更新 RetroArch"
                           + " 或更换目录后需重新测试。\n\n"

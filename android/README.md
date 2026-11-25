@@ -109,7 +109,7 @@ adb -s DEVICE_SERIAL shell am instrument -w \
   io.retroone.android.test/androidx.test.runner.AndroidJUnitRunner
 ```
 
-这检查应用探针的固定 SHA-256、FileProvider 不能越过专用目录、SAF 写入与二次复用同一副本，以及启动 Intent 不修改模拟器配置。默认不启动模拟器；显式添加 `-e launchRetroArch true` 才启动，必须另外核对蓝条画面和 A 键变色，不能把测试返回成功当成游戏已经运行。
+这检查应用探针的固定 SHA-256、FileProvider 不能越过专用目录、SAF 写入与二次复用同一副本，以及启动 Intent 的六项环境参数指向已安装的 RetroArch、默认全局配置和当前系统输入法。配置路径应为目标模拟器的路径，不能误用 RetroOne 自己的 dataDir / APK。RetroOne 不改写配置内容。默认不启动模拟器；先从 RetroArch 菜单退出旧实例，显式添加 `-e launchRetroArch true` 才启动，必须另外核对蓝条画面和 A 键变色，不能把测试返回成功当成游戏已经运行。
 
 `-e class io.retroone.android.RetroArchDeviceTest#diagnosticContentUriLaunch -e probeRetroArchUri true` 只用于诊断普通 content URI 的兼容性（带 ClipData 只读授权）。正式适配使用经过授权的共享原生路径；该诊断只报告 Intent 发出，不宣称内容运行。请先结束自己正在进行的 RetroArch 游戏。
 

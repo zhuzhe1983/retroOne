@@ -63,6 +63,7 @@ public class RetroArchDeviceTest {
             .putExtra("LIBRETRO", adapter.corePath())
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);
     launch.setClipData(ClipData.newRawUri("Original NES probe", uri));
+    adapter.withEnvironment(launch);
     context.startActivity(launch);
     android.util.Log.i(
         "RetroOneTest", "Content URI dispatched; inspect emulator for actual success/failure.");
@@ -84,7 +85,20 @@ public class RetroArchDeviceTest {
     assertEquals(path, launch.getStringExtra("ROM"));
     assertEquals(adapter.corePath(), launch.getStringExtra("LIBRETRO"));
     assertFalse(launch.hasExtra("QUITFOCUS"));
-    assertFalse(launch.hasExtra("CONFIGFILE"));
+    android.content.pm.ApplicationInfo target =
+        context.getPackageManager().getApplicationInfo(RetroArchPolicy.PACKAGE, 0);
+    String storage = android.os.Environment.getExternalStorageDirectory().getAbsolutePath();
+    String external = storage + "/Android/data/" + RetroArchPolicy.PACKAGE + "/files";
+    assertEquals(external + "/retroarch.cfg", launch.getStringExtra("CONFIGFILE"));
+    assertEquals(external, launch.getStringExtra("EXTERNAL"));
+    assertEquals(storage, launch.getStringExtra("SDCARD"));
+    assertEquals(target.dataDir, launch.getStringExtra("DATADIR"));
+    assertEquals(target.sourceDir, launch.getStringExtra("APK"));
+    assertNotEquals(context.getApplicationInfo().dataDir, launch.getStringExtra("DATADIR"));
+    String ime =
+        android.provider.Settings.Secure.getString(
+            context.getContentResolver(), android.provider.Settings.Secure.DEFAULT_INPUT_METHOD);
+    assertEquals(ime == null ? "" : ime, launch.getStringExtra("IME"));
     try {
       adapter.intent("/storage/emulated/0/elsewhere.nes");
       fail();

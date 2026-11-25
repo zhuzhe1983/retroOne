@@ -9,6 +9,7 @@ import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Environment;
 import android.provider.DocumentsContract;
+import android.provider.Settings;
 import androidx.documentfile.provider.DocumentFile;
 import java.io.*;
 import java.security.MessageDigest;
@@ -46,6 +47,38 @@ final class RetroArch {
         + RetroArchPolicy.CORE;
   }
 
+  String externalFilesPath() {
+    return new File(
+            Environment.getExternalStorageDirectory(),
+            "Android/data/" + RetroArchPolicy.PACKAGE + "/files")
+        .getAbsolutePath();
+  }
+
+  String configPath() {
+    // This adapter supports the official sideloaded build's default global configuration.
+    // Scoped storage prevents inspecting RetroArch's private preferences/config selection.
+    return new File(externalFilesPath(), "retroarch.cfg").getAbsolutePath();
+  }
+
+  Intent withEnvironment(Intent intent) throws Exception {
+    if (!Environment.MEDIA_MOUNTED.equals(Environment.getExternalStorageState()))
+      throw new IOException("共享存储不可用，无法读取 RetroArch 默认配置");
+    android.content.pm.ApplicationInfo target =
+        context.getPackageManager().getApplicationInfo(RetroArchPolicy.PACKAGE, 0);
+    String ime =
+        Settings.Secure.getString(
+            context.getContentResolver(), Settings.Secure.DEFAULT_INPUT_METHOD);
+    // Match v1.22.2 MainMenuActivity.startRetroActivity, using the target app's paths.
+    // Passing only ROM/core skips these defaults in that version. Do not write the cfg.
+    return intent
+        .putExtra("CONFIGFILE", configPath())
+        .putExtra("IME", ime == null ? "" : ime)
+        .putExtra("DATADIR", target.dataDir)
+        .putExtra("APK", target.sourceDir)
+        .putExtra("SDCARD", Environment.getExternalStorageDirectory().getAbsolutePath())
+        .putExtra("EXTERNAL", externalFilesPath());
+  }
+
   String directoryLabel() {
     return preferences.getString("folderPath", "尚未选择共享目录");
   }
@@ -73,7 +106,8 @@ final class RetroArch {
               + corePath()
               + ":"
               + preferences.getString("folderUri", "")
-              + ":nes-probe-v2");
+              + ":nes-probe-v2:launch-env-v1:"
+              + configPath());
     } catch (PackageManager.NameNotFoundException e) {
       return "";
     }
@@ -310,11 +344,12 @@ final class RetroArch {
         || !path.startsWith(directoryLabel() + "/")
         || !path.substring(directoryLabel().length() + 1).matches("ro-[a-f0-9]{64}\\.nes"))
       throw new IOException("启动路径必须是已授权目录中的校验副本");
-    // Leave all emulator settings, saves and focus behavior under RetroArch's control.
-    return new Intent(Intent.ACTION_MAIN)
-        .setComponent(new ComponentName(RetroArchPolicy.PACKAGE, RetroArchPolicy.ACTIVITY))
-        .putExtra("ROM", path)
-        .putExtra("LIBRETRO", corePath());
+    // Load RetroArch's default global config; save/input paths come from that config.
+    return withEnvironment(
+        new Intent(Intent.ACTION_MAIN)
+            .setComponent(new ComponentName(RetroArchPolicy.PACKAGE, RetroArchPolicy.ACTIVITY))
+            .putExtra("ROM", path)
+            .putExtra("LIBRETRO", corePath()));
   }
 
   private static void copy(InputStream in, OutputStream out) throws IOException {

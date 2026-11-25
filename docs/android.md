@@ -6,7 +6,7 @@ RetroOne Android 0.2.4 已提供可构建的原生客户端，支持连接服务
 
 在 **⋯ → 连接与模拟器设置 → NES · RetroArch 设置** 完成一次设置：
 
-1. 安装官方 RetroArch ARM64（`com.retroarch.aarch64`），在它的核心下载器安装 **Nintendo - NES / Famicom (FCEUmm)**，允许它读取共享存储。RetroOne 不下载或安装模拟器与核心。
+1. 安装官方 RetroArch ARM64（`com.retroarch.aarch64`），在它的核心下载器安装 **Nintendo - NES / Famicom (FCEUmm)**，允许它读取共享存储并保存默认全局配置。测试前从 RetroArch 菜单退出应用；仅切回桌面不会结束旧实例。RetroOne 不下载或安装模拟器与核心。
 2. 选择内部共享存储中的一个文件夹，例如 `ROMs`。客户端通过系统选择器获取持久读写授权，仅在新建的 `RetroOne-Launch-<随机标识>` 子目录创建启动副本。暂不支持 SD 卡、网络文件提供方和 `Android/` 应用数据目录。
 3. 点 **运行 NES 测试**。看到 `RETROONE` 白字和蓝条，按 A 能变红，再返回确认。探针是随构建从本项目 CC0 源码生成的原创小程序，不包含第三方游戏或固件。
 4. 下载独立 `.nes` 文件后，已下载列表、详情和下载浮层会显示 **▶ 游玩**。每次启动先核对原下载分片、NES 头和共享副本的 SHA-256；同样的内容复用同一个副本，离线也能启动。
@@ -15,9 +15,11 @@ RetroOne Android 0.2.4 已提供可构建的原生客户端，支持连接服务
 
 RetroArch **1.22.2** 在已有实例切换到不同 ROM 时会先退出。客户端会先提醒保存，快速返回时提供 **再次启动**；如果先返回系统桌面，请重新打开 RetroOne 并再次游玩。不会强杀模拟器、覆盖其配置或设置离开前台就退出。依据：[官方 Android 外部启动接口](https://docs.libretro.com/guides/cli-intro/)、[1.22.2 的切换实现](https://github.com/libretro/RetroArch/blob/v1.22.2/pkg/android/phoenix/src/com/retroarch/browser/retroactivity/RetroActivityFuture.java)。
 
+启动时按官方 1.22.2 的 [MainMenuActivity 参数约定](https://github.com/libretro/RetroArch/blob/v1.22.2/pkg/android/phoenix/src/com/retroarch/browser/mainmenu/MainMenuActivity.java) 传入 `CONFIGFILE`、`IME`、`DATADIR`、`APK`、`SDCARD`、`EXTERNAL`。数据与 APK 路径取自已安装的 **RetroArch**，默认配置为当前 Android 用户共享存储下的 `Android/data/com.retroarch.aarch64/files/retroarch.cfg`，由 RetroArch 自行读取其中的画面、按键与存档设置。RetroOne 不创建、复制或改写这个配置；尚未适配另存位置、内部存储回退或按核心独立配置。之前仅传 ROM/core 的测试包虽然能显示画面，却未加载已有配置，因此不能认定其按键与存档路径通过；补齐环境后须退出旧实例并重新测试，不会自动迁移或删除此前生成的文件。
+
 NES 存档暂由 RetroArch 管理，**未接入 NES 云存档与玩家隔离**。下载原件和共享启动副本分别保留；从本地内容移除下载或卸载 RetroOne 不会清理共享副本，可退出模拟器后用系统文件管理器清理该专用目录。不会自动改造 ZIP、FDS 或其他平台镜像。PSP 原有启动、手动云存档同步及玩家收藏不变。
 
-本轮构建、31 项 JVM 测试、lint 通过；独立无界面 Android 36.1 设备通过原创探针摘要和窄范围 FileProvider 的仪器测试。RK3588 已覆盖安装 0.2.4，升级前后 16 条下载记录、连接配置及 15 个 PSP 存档摘要不变。RK3588 / Android 13 + RetroArch 1.22.2 + FCEUmm 已验证原创 NES 的原生路径冷启动蓝条画面、切换后的 ALT 绿条画面；客户端完整目录授权、启动和按键结果待真机回传，不能用这些初步画面替代完整链路或所有 NES 游戏兼容性验收。
+本轮构建、31 项 JVM 测试、lint 通过；独立无界面 Android 36.1 设备通过原创探针摘要和窄范围 FileProvider 的仪器测试。RK3588 已覆盖安装 0.2.4，升级前后 16 条下载记录、连接配置及 15 个 PSP 存档摘要不变。RK3588 / Android 13 + RetroArch 1.22.2 + FCEUmm 已验证原创 NES 的原生路径冷启动蓝条画面、切换后的 ALT 绿条画面；r3 的系统目录授权、共享副本重命名/复用和客户端冷启动蓝条画面已通过；补齐默认配置环境后的按键、overlay 和存档路径仍待 r4 真机复验，不能用这些初步画面替代完整链路或所有 NES 游戏兼容性验收。
 
 ## 0.2.3 已下载、本地内容与存档冲突
 

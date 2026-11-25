@@ -119,9 +119,20 @@ adb -s DEVICE_SERIAL shell am instrument -w \
 
 ```sh
 adb -s DEVICE_SERIAL shell am instrument -w \
-  -e class io.retroone.android.EdenUriProbeTest \
+  -e class io.retroone.android.EdenUriProbeTest#explicitReadyTaskReadOnlyUri \
   -e edenUriProbe true -e edenTaskId DOWNLOADED_TASK_UUID \
   io.retroone.android.test/androidx.test.runner.AndroidJUnitRunner
 ```
 
 只接受 READY 的 NSP/XCI；不自动选择游戏，不下载、不复制镜像，不配置密钥/固件。使用 `dev.eden.eden_emulator/org.yuzu.yuzu_emu.activities.EmulationActivity` 的 `ACTION_VIEW` 和单文件只读授权。测试通过表示已发出启动请求，需另外核对真实画面、按键和日志；没有据此把 Switch 标为客户端可直启。模拟器自行管理运行记录与存档，诊断不会主动结束已有模拟器进程。
+
+探针显式授予 Eden 对这个稳定 URI 的只读访问，并默认保留进程 15 秒（`edenWaitMs` 可设 5000–45000）。为避免游戏按需读取时突然失去权限，成功派发后保留该文件授权；保存并退出 Eden 后用同一任务 UUID 回收：
+
+```sh
+adb -s DEVICE_SERIAL shell am instrument -w \
+  -e class io.retroone.android.EdenUriProbeTest#revokeExplicitTaskGrantAfterExit \
+  -e edenUriRevoke true -e edenTaskId DOWNLOADED_TASK_UUID \
+  io.retroone.android.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+首个即时结束的探针曾出现 FileProvider Permission Denial；因此 Intent 派发成功不能当成文件已读或游戏已运行。

@@ -1,6 +1,23 @@
 # Android 本机游戏库
 
-RetroOne Android 0.2.3 已提供可构建的原生客户端，支持连接服务、按平台浏览与搜索、全库排序、玩家收藏与最近游玩、分页查看封面和详情、后台下载、暂停与续传、离线查看本机文件，以及调用已安装的 PPSSPP。APK、构建和设备测试命令见 [Android 工程说明](../android/README.md)。
+RetroOne Android 0.2.4 已提供可构建的原生客户端，支持连接服务、按平台浏览与搜索、全库排序、玩家收藏与最近游玩、分页查看封面和详情、后台下载、暂停与续传、离线查看本机文件，以及调用已安装的 PPSSPP 或经过设置与测试的 RetroArch ARM64 / FCEUmm。APK、构建和设备测试命令见 [Android 工程说明](../android/README.md)。
+
+## 0.2.4 NES 直启与依赖检查
+
+在 **⋯ → 连接与模拟器设置 → NES · RetroArch 设置** 完成一次设置：
+
+1. 安装官方 RetroArch ARM64（`com.retroarch.aarch64`），在它的核心下载器安装 **Nintendo - NES / Famicom (FCEUmm)**，允许它读取共享存储。RetroOne 不下载或安装模拟器与核心。
+2. 选择内部共享存储中的一个文件夹，例如 `ROMs`。客户端通过系统选择器获取持久读写授权，仅在新建的 `RetroOne-Launch-<随机标识>` 子目录创建启动副本。暂不支持 SD 卡、网络文件提供方和 `Android/` 应用数据目录。
+3. 点 **运行 NES 测试**。看到 `RETROONE` 白字和蓝条，按 A 能变红，再返回确认。探针是随构建从本项目 CC0 源码生成的原创小程序，不包含第三方游戏或固件。
+4. 下载独立 `.nes` 文件后，已下载列表、详情和下载浮层会显示 **▶ 游玩**。每次启动先核对原下载分片、NES 头和共享副本的 SHA-256；同样的内容复用同一个副本，离线也能启动。
+
+界面区分应用未安装、目录待授权、启动待验证，不把“安装了 RetroArch”当作“所有游戏可运行”。Android 不允许客户端直接检查另一应用的私有核心目录，因此依赖测试需要本人确认；更新 RetroArch 或改变共享目录后，原确认会失效。单款游戏的 mapper、兼容性和输入仍由核心决定。
+
+RetroArch **1.22.2** 在已有实例切换到不同 ROM 时会先退出。客户端会先提醒保存，快速返回时提供 **再次启动**；如果先返回系统桌面，请重新打开 RetroOne 并再次游玩。不会强杀模拟器、覆盖其配置或设置离开前台就退出。依据：[官方 Android 外部启动接口](https://docs.libretro.com/guides/cli-intro/)、[1.22.2 的切换实现](https://github.com/libretro/RetroArch/blob/v1.22.2/pkg/android/phoenix/src/com/retroarch/browser/retroactivity/RetroActivityFuture.java)。
+
+NES 存档暂由 RetroArch 管理，**未接入 NES 云存档与玩家隔离**。下载原件和共享启动副本分别保留；从本地内容移除下载或卸载 RetroOne 不会清理共享副本，可退出模拟器后用系统文件管理器清理该专用目录。不会自动改造 ZIP、FDS 或其他平台镜像。PSP 原有启动、手动云存档同步及玩家收藏不变。
+
+本轮构建、31 项 JVM 测试、lint 通过；独立无界面 Android 36.1 设备通过原创探针摘要和窄范围 FileProvider 的仪器测试。RK3588 已覆盖安装 0.2.4，升级前后 16 条下载记录、连接配置及 15 个 PSP 存档摘要不变。RK3588 / Android 13 + RetroArch 1.22.2 + FCEUmm 已验证原创 NES 的原生路径冷启动蓝条画面、切换后的 ALT 绿条画面；客户端完整目录授权、启动和按键结果待真机回传，不能用这些初步画面替代完整链路或所有 NES 游戏兼容性验收。
 
 ## 0.2.3 已下载、本地内容与存档冲突
 
@@ -23,7 +40,7 @@ RK3588 / Android 13 已覆盖安装 0.2.3（versionCode 5），没有卸载或�
 - 气泡属于 RetroOne 应用界面，不申请系统悬浮窗权限；进入外部模拟器后由 Android 前台服务通知显示下载状态。
 - 复用已经验证的 PPSSPP 文件授权启动方式，不更改模拟器配置与存档。离线时可从 **⋯ → 下载管理** 启动已完成文件。
 
-适配按“平台、模拟器和文件格式”划分，并不是每款游戏都重写启动代码。后续候选是 [RetroArch Android 外部启动接口](https://docs.libretro.com/guides/cli-intro/)（指定 ROM 与 libretro 核心）和 [Eden Android](https://eden-emu.dev/)（Switch）；**本版未接入这两项**。接入还需验证文件权限、核心与 BIOS/固件、手柄及存档目录；RK3588 上的 Switch 性能须逐款实测。
+适配按“平台、模拟器和文件格式”划分，并不是每款游戏都重写启动代码。0.2.4 新增 NES / RetroArch 适配；[Eden Android](https://eden-emu.dev/)（Switch）仍待接入客户端。后续每个平台都需验证文件权限、核心与 BIOS/固件、手柄及存档目录；RK3588 上的 Switch 性能须逐款实测。
 
 0.2.2 构建、lint、23 项 JVM 测试通过。在独立、无界面的 Android 36.1 测试设备上，完成下载/游玩界面、后台下载生命周期、平台关注/排序/收藏共 3 项仪器测试；“游玩”实际拉起 PPSSPP 并核对原创测试程序的画面像素。测试只使用自建内容。RK3588 正在运行用户游戏，本轮没有覆盖安装；上述结果不能代替新版在该掌机上的安装验收。
 
@@ -53,7 +70,7 @@ RK3588 / Android 13 已覆盖安装 0.2.3（versionCode 5），没有卸载或�
 3. 如果反向代理需要认证，可配置 HTTP Basic 或 Bearer Token。保留已有认证只保留**同一个完整服务地址**的凭据；切换任意新地址不会自动带上旧凭据。通过“读取并切换服务端玩家”选择同源玩家时，会复用当前认证。
 4. 在 **游戏库** 中搜索、选择平台、翻页，打开详情查看服务端是否允许下载。界面会说明不支持的目录、多文件资源、禁用条目或缺失文件。
 5. 点 **下载到掌机**，右上角展开进度浮层；收起后继续选游戏。可从气泡或 **⋯ → 下载管理** 查看准备、排队、下载、暂停、失败或已就绪状态。通知中可暂停全部。离开页面或回到桌面不停止正常前台服务下载；拒绝通知权限不会让下载变成静默系统任务，Android 的运行中应用入口仍可显示它。
-6. 文件完整且分片校验通过后，在卡片、详情或浮层点 **▶ 游玩**，用 PPSSPP 启动支持的 PSP 镜像。其他独立文件可 **导出副本…**，通过系统文件界面选择新文件，再由自己配置的模拟器手动打开。导出时保持应用前台直到显示完成结果。
+6. 文件完整且分片校验通过后，在卡片、详情或浮层点 **▶ 游玩**，用 PPSSPP 启动支持的 PSP 镜像；NES 先按上文完成 RetroArch 设置与测试。其他独立文件可 **导出副本…**，通过系统文件界面选择新文件，再由自己配置的模拟器手动打开。导出时保持应用前台直到显示完成结果。
 
 家庭玩家用于选择服务端游戏库视图，不是安全登录账户。Basic/Bearer 是反向代理认证，不是 MCP 令牌。网页登录、Cookie、OAuth 与客户端证书登录尚未接入。没有认证的服务只应按原项目的可信网络部署方式使用。
 
@@ -61,6 +78,7 @@ RK3588 / Android 13 已覆盖安装 0.2.3（versionCode 5），没有卸载或�
 
 | 内容 | 当前行为与证据 |
 | --- | --- |
+| NES 独立 .nes | 0.2.4 新增 RetroArch ARM64 / FCEUmm；需要共享目录授权与原创探针确认，具体真机验收见上文 |
 | PSP 单文件 ISO | PPSSPP 1.20.4 / Android 13 真机运行原创测试程序通过；不代表任意商业游戏、性能或存档已验证 |
 | PSP 单文件 CSO | 原创压缩镜像执行路径已验证；小于 34 KiB 的极小 CSO 存在 PPSSPP 识别边界，客户端拒绝直启并提示导出 |
 | PSP PBP | 可按服务端规则下载和导出；普通 FileProvider URI 在实测 PPSSPP 中出现目录解析失败，禁止直启 |
@@ -74,7 +92,7 @@ RK3588 / Android 13 已覆盖安装 0.2.3（versionCode 5），没有卸载或�
 
 ## 文件、存档与恢复
 
-- 游戏只保存在应用私有的 `files/games/<随机任务ID>/` 中。服务端文件名必须通过严格校验；不会采用标题、绝对路径或 `Content-Disposition` 作为任意本机路径。
+- 下载原件保存在应用私有的 `files/games/<随机任务ID>/` 中。服务端文件名必须通过严格校验；不会采用标题、绝对路径或 `Content-Disposition` 作为任意本机路径。
 - SQLite 保存任务、来源、版本和状态。凭据单独用 Android Keystore AES-GCM 加密，任务数据库没有凭据。云备份和设备迁移排除应用数据，避免 ROM 或凭据被自动复制。
 - 下载以 `.part` 暂存；续传前重新读取并校验完整分片，截去不完整或损坏的尾部。下载完成、fsync 后才改名并标记就绪。服务端版本变化时保留旧任务并停止，用户明确移除后才能重新下载。
 - 进程中断、系统停止服务或重启设备后，不会自行下载；下次打开应用把未完成任务显示为暂停，点继续后复核本机分片。网络错误、磁盘不足和证书失败会明确报错，不承诺无限自动重试或跨重启后台下载。
@@ -98,7 +116,7 @@ RK3588 / Android 13 已覆盖安装 0.2.3（versionCode 5），没有卸载或�
 
 游戏分页固定每页 60 条，保持视图数量有界。封面只读取同源地址，设响应体和解码大小限制，并使用有界内存缓存；失败时显示平台占位，不伪造封面。未连接时只能查看已下载列表，未实现离线缓存完整远端目录。
 
-主要代码：`ServerConfig` / `ApiClient` 管连接与来源边界，`Credentials` 管加密凭据，`DownloadManifest` / `Transfer` 管传输和校验，`DownloadStore` / `DownloadService` 管持久队列与前台服务，`Emulators` 管格式、包可见性与 URI，`LocalGames` / `LocalContentView` 管设备游戏与备份，`SaveSyncFlow` / `PspSaveDirectory` 管 PSP 手动同步与授权目录，`MainActivity` 管原生界面。
+主要代码：`RetroArch` / `RetroArchPolicy` / `RetroArchFlow` 管 NES 依赖、共享副本和测试设置，`ServerConfig` / `ApiClient` 管连接与来源边界，`Credentials` 管加密凭据，`DownloadManifest` / `Transfer` 管传输和校验，`DownloadStore` / `DownloadService` 管持久队列与前台服务，`Emulators` 管格式、包可见性与 URI，`LocalGames` / `LocalContentView` 管设备游戏与备份，`SaveSyncFlow` / `PspSaveDirectory` 管 PSP 手动同步与授权目录，`MainActivity` 管原生界面。
 
 ## 0.2.0 验证与交付
 

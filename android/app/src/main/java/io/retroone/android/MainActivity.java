@@ -77,6 +77,7 @@ public final class MainActivity extends Activity {
   private String localSort = "downloaded", localSignature = "";
   private LocalContentView localContent;
   private SaveSyncFlow saveSync;
+  private RetroArchFlow retroArchFlow;
   private final Set<String> localMetadataRequested = new HashSet<>();
 
   private final class LocalButton {
@@ -114,6 +115,17 @@ public final class MainActivity extends Activity {
   public void onCreate(Bundle state) {
     super.onCreate(state);
     store = RetroApplication.from(this).downloads;
+    retroArchFlow =
+        new RetroArchFlow(
+            this,
+            io,
+            () -> {
+              popupSignature = "";
+              downloadSignature = "";
+              localSignature = "";
+              for (LocalButton binding : localButtons) binding.signature = "";
+              refreshDownloads();
+            });
     pspInstalled = !Emulators.installed(this).isEmpty();
     try {
       config = RetroApplication.from(this).credentials.current();
@@ -195,11 +207,13 @@ public final class MainActivity extends Activity {
     pspInstalled = !Emulators.installed(this).isEmpty();
     handler.removeCallbacks(poll);
     handler.post(poll);
+    retroArchFlow.onResume();
   }
 
   @Override
   protected void onPause() {
     resumed = false;
+    retroArchFlow.onPause();
     handler.removeCallbacks(poll);
     super.onPause();
   }
@@ -1186,9 +1200,11 @@ public final class MainActivity extends Activity {
                   } else {
                     actions.addView(
                         text(
-                            Emulators.installed(this).isEmpty()
-                                ? "下载后安装 PPSSPP 即可启动"
-                                : "PSP · 使用已安装的 PPSSPP",
+                            RetroArchPolicy.supports(game.optString("platform"))
+                                ? "NES · 使用 RetroArch ARM64 / FCEUmm（需完成一次启动测试）"
+                                : Emulators.installed(this).isEmpty()
+                                    ? "下载后安装 PPSSPP 即可启动"
+                                    : "PSP · 使用已安装的 PPSSPP",
                             13,
                             ACCENT));
                   }
@@ -1199,7 +1215,7 @@ public final class MainActivity extends Activity {
                               alert(
                                   (capability.available
                                           ? (reason.isEmpty()
-                                              ? "支持下载和 PPSSPP 启动，具体游戏兼容性由模拟器决定。"
+                                              ? "支持下载和对应模拟器启动；先安装依赖并完成设置，具体游戏兼容性由模拟器决定。"
                                               : reason)
                                           : capability.explanation())
                                       + "\n\n"
@@ -1280,7 +1296,9 @@ public final class MainActivity extends Activity {
       button.setContentDescription(
           (state == LaunchPolicy.State.PLAYABLE ? "游玩 " : state.label + " ") + binding.title);
       button.setTooltipText(
-          state == LaunchPolicy.State.PLAYABLE ? "使用本机 PPSSPP" : "已下载 · " + state.label);
+          state == LaunchPolicy.State.PLAYABLE
+              ? (RetroArchPolicy.supports(item.platform) ? "使用 RetroArch · FCEUmm" : "使用本机 PPSSPP")
+              : "已下载 · " + state.label);
       if (state == LaunchPolicy.State.PLAYABLE) {
         button.setBackground(shape(ACCENT, 10));
         button.setTextColor(BG);
@@ -1400,7 +1418,11 @@ public final class MainActivity extends Activity {
     items.sort((a, b) -> Integer.compare(downloadPriority(a.state), downloadPriority(b.state)));
     if (items.size() > 6) items = new ArrayList<>(items.subList(0, 6));
     StringBuilder signature = new StringBuilder();
-    for (DownloadStore.Item item : items) signature.append(item.id).append(item.state);
+    for (DownloadStore.Item item : items)
+      signature
+          .append(item.id)
+          .append(item.state)
+          .append(Emulators.status(this, item, pspInstalled));
     signature.append(pspInstalled);
     if (!signature.toString().equals(popupSignature)) {
       popupSignature = signature.toString();
@@ -1613,6 +1635,10 @@ public final class MainActivity extends Activity {
   @Override
   protected void onActivityResult(int request, int result, Intent data) {
     super.onActivityResult(request, result, data);
+    if (request == RetroArchFlow.PICK_DIRECTORY) {
+      retroArchFlow.selected(result, data);
+      return;
+    }
     if (request == SaveSyncFlow.PICK_DIRECTORY) {
       if (saveSync != null) saveSync.selected(result, data);
       return;
@@ -1691,6 +1717,15 @@ public final class MainActivity extends Activity {
     }
     List<Integer> installed = Emulators.installed(this);
     LaunchPolicy.State support = Emulators.status(this, item, !installed.isEmpty());
+    if (RetroArchPolicy.supports(item.platform)
+        && (support == LaunchPolicy.State.PLAYABLE
+            || support == LaunchPolicy.State.INSTALL_RETROARCH
+            || support == LaunchPolicy.State.CONFIGURE_RETROARCH
+            || support == LaunchPolicy.State.VERIFY_RETROARCH)) {
+      if (downloadsPopup != null) downloadsPopup.dismiss();
+      retroArchFlow.play(item);
+      return;
+    }
     if (support != LaunchPolicy.State.PLAYABLE && support != LaunchPolicy.State.INSTALL) {
       String reason =
           support == LaunchPolicy.State.MISSING
@@ -1819,13 +1854,14 @@ public final class MainActivity extends Activity {
     for (int i : installed) emulator.append(Emulators.LABELS[i]).append("  ");
     if (installed.isEmpty()) emulator.append("无可用 PPSSPP");
     form.addView(text(emulator.toString(), 15, ACCENT));
+    form.addView(button("NES · RetroArch 设置", retroArchFlow::show));
     form.addView(
         text(
-            "当前接入 PSP 独立 ISO / CSO 的 PPSSPP 启动接口。PBP 存在实测路径兼容问题；CHD"
-                + " 尚未验证可靠直启。其他平台仅提供下载管理。多文件光盘、目录游戏和压缩包不会被自动改造。\n\n"
-                + "本机文件保存在 RetroOne 私有目录，卸载应用会移除这些下载。模拟器独立管理存档；本版没有云存档同步，也不会为不同 RetroOne"
-                + " 玩家隔离同一模拟器的存档。\n\n"
-                + "RetroOne Android 0.2.3 · 自有内容客户端",
+            "当前接入 PSP 独立 ISO / CSO 的 PPSSPP 启动接口。PBP 存在实测路径兼容问题；CHD 尚未验证可靠直启。NES 的 .nes 文件可通过"
+                + " RetroArch ARM64 / FCEUmm 启动，需一次目录授权和测试。其他平台仍待适配。\n\n"
+                + "下载原件保存在 RetroOne 私有目录，卸载会移除。NES 另有共享启动副本。PSP 支持手动双向云存档同步；NES 存档暂由 RetroArch"
+                + " 管理。当前不会为不同 RetroOne 玩家隔离同一模拟器的存档。\n\n"
+                + "RetroOne Android 0.2.4 · 自有内容客户端",
             14,
             MUTED));
   }

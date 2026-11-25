@@ -10,6 +10,7 @@
         <package android:name="org.ppsspp.ppsspp" />
         <package android:name="org.ppsspp.ppssppgold" />
         <package android:name="org.ppsspp.ppsspplegacy" />
+        <package android:name="com.retroarch.aarch64" />
     </queries>
     <application android:name=".RetroApplication" android:label="RetroOne" android:icon="@drawable/ic_retroone"
         android:theme="@style/AppTheme" android:allowBackup="false" android:dataExtractionRules="@xml/data_extraction_rules" android:supportsRtl="true"

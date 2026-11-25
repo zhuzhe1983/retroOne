@@ -1,12 +1,12 @@
 # RetroOne Android
 
-原生 Android 客户端：浏览自己的 RetroOne 游戏库，把独立游戏文件下载到本机，再交给已安装的 PPSSPP。不会启动服务端云游戏，也不附带游戏、模拟器、BIOS、固件或密钥。
+原生 Android 客户端：浏览自己的 RetroOne 游戏库，把独立游戏文件下载到本机，再交给已安装的 PPSSPP，或完成设置与测试的 RetroArch ARM64 / FCEUmm（NES）。不会启动服务端云游戏，也不附带游戏、模拟器、BIOS、固件或密钥。
 
 使用步骤、兼容范围及真机验证见 [Android 使用与开发说明](../docs/android.md)。
 
 ## 构建
 
-需要 JDK 17 或更新版本、Android SDK Platform 36。项目固定使用 Gradle 8.14.3、Android Gradle Plugin 8.13.2，使用 Java 原生界面和 AndroidX FileProvider。
+需要 JDK 17 或更新版本、Android SDK Platform 36 和 Python 3（仅标准库，用于构建原创 NES 诊断程序）。项目固定使用 Gradle 8.14.3、Android Gradle Plugin 8.13.2，使用 Java 原生界面和 AndroidX FileProvider。
 
 ```sh
 # 在仓库根目录执行；也可以用已有的 JDK 17。
@@ -94,3 +94,34 @@ adb -s DEVICE_SERIAL reverse --remove tcp:18780
 `SaveSyncUiTest` 使用同一 `fixtureBase`，通过测试 APK 专属 DocumentsProvider 验证真实云存档 API 与目录读写：取消、选云端、选本机、比较期间两端分别变化、替换失败回滚、其他游戏文件不变和占用释放。它会给独立夹具游戏写入原创测试字节；**只对独立测试服务与设备运行**。测试 Provider 和授权 Activity 仅在 AndroidTest APK 中，正式 APK 不包含这些入口。实际用户目录仍由 Android 系统选择器授权。
 
 手动同步支持 PSP 游戏内 SAVEDATA，要求先退出 PPSSPP。还没有运行中自动同步或模拟器玩家环境隔离；完整操作与边界见 [使用说明](../docs/android.md#023-已下载本地内容与存档冲突)。
+
+## 0.2.4 NES 验收
+
+`tools/create_nes_fixture.py` 是 CC0 原创 NROM-128 程序生成器：蓝条和 RETROONE 字样，按 A 变红；`--variant alternate` 生成绿条与 RETROONE ALT，用于区分真实游戏切换。Gradle 自动生成应用内探针，二进制只进入构建目录；源码不包含商业 ROM、BIOS 或固件。`fixture_server.py` 已把这两份 NES 加入独立测试库。
+
+首先按 [NES 设置步骤](../docs/android.md#024-nes-直启与依赖检查) 授权目录，确认核心、画面和输入，再运行：
+
+```sh
+adb -s DEVICE_SERIAL install --no-incremental -r android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+adb -s DEVICE_SERIAL shell am instrument -w \
+  -e class io.retroone.android.RetroArchDeviceTest \
+  -e probeRetroArchFolder true \
+  io.retroone.android.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+这检查应用探针的固定 SHA-256、FileProvider 不能越过专用目录、SAF 写入与二次复用同一副本，以及启动 Intent 不修改模拟器配置。默认不启动模拟器；显式添加 `-e launchRetroArch true` 才启动，必须另外核对蓝条画面和 A 键变色，不能把测试返回成功当成游戏已经运行。
+
+`-e class io.retroone.android.RetroArchDeviceTest#diagnosticContentUriLaunch -e probeRetroArchUri true` 只用于诊断普通 content URI 的兼容性（带 ClipData 只读授权）。正式适配使用经过授权的共享原生路径；该诊断只报告 Intent 发出，不宣称内容运行。请先结束自己正在进行的 RetroArch 游戏。
+
+### Eden URI 诊断（尚未开放正式启动入口）
+
+测试 APK 中的 `EdenUriProbeTest` 可验证 Eden 对单文件 FileProvider URI 的支持。先在 Eden 保存并退出当前游戏，再明确指定一个已完成下载的 Switch 任务 UUID：
+
+```sh
+adb -s DEVICE_SERIAL shell am instrument -w \
+  -e class io.retroone.android.EdenUriProbeTest \
+  -e edenUriProbe true -e edenTaskId DOWNLOADED_TASK_UUID \
+  io.retroone.android.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+只接受 READY 的 NSP/XCI；不自动选择游戏，不下载、不复制镜像，不配置密钥/固件。使用 `dev.eden.eden_emulator/org.yuzu.yuzu_emu.activities.EmulationActivity` 的 `ACTION_VIEW` 和单文件只读授权。测试通过表示已发出启动请求，需另外核对真实画面、按键和日志；没有据此把 Switch 标为客户端可直启。模拟器自行管理运行记录与存档，诊断不会主动结束已有模拟器进程。

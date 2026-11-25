@@ -7,6 +7,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from create_psp_fixture import build, build_iso, build_cso
+from create_nes_fixture import build as build_nes
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
@@ -22,6 +23,9 @@ def main():
     if not (psp/'RetroOne-Self-Test.pbp').exists():(psp/'RetroOne-Self-Test.pbp').write_bytes(build())
     for name, factory in [('RetroOne-ISO-Self-Test.iso', build_iso), ('RetroOne-CSO-Self-Test.cso', build_cso)]:
         if not (psp/name).exists():(psp/name).write_bytes(factory())
+    nes=roms/'library/nes';nes.mkdir(parents=True,exist_ok=True)
+    for name, alternate in [('RetroOne-NES-Self-Test.nes', False), ('RetroOne-NES-Alternate.nes', True)]:
+        (nes/name).write_bytes(build_nes(alternate))
     # Large deterministic non-playable bytes exercise multiple Range requests and pauses.
     transfer=psp/'Transfer-Only-Not-A-Game.iso'
     if not transfer.exists():

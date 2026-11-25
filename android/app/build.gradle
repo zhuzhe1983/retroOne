@@ -6,8 +6,8 @@ android {
         applicationId 'io.retroone.android'
         minSdk 26
         targetSdk 35
-        versionCode 5
-        versionName '0.2.3'
+        versionCode 6
+        versionName '0.2.4'
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
@@ -15,6 +15,16 @@ android {
     testOptions { unitTests.returnDefaultValues = true }
     lint { abortOnError true }
 }
+// Only our CC0 diagnostic program is generated; no downloaded game or firmware assets.
+def probeAssets = layout.buildDirectory.dir('generated/nesProbeAssets')
+def generateNesProbe = tasks.register('generateNesProbe', Exec) {
+    inputs.files('../tools/create_nes_fixture.py', '../tools/create_psp_fixture.py')
+    outputs.dir(probeAssets)
+    commandLine 'python3', '../tools/create_nes_fixture.py',
+        probeAssets.get().file('retroone-nes-probe.nes').asFile, '--replace'
+}
+android.sourceSets.main.assets.srcDir(probeAssets)
+tasks.named('preBuild').configure { dependsOn(generateNesProbe) }
 dependencies {
     implementation 'androidx.core:core:1.15.0'
     implementation 'androidx.documentfile:documentfile:1.1.0'

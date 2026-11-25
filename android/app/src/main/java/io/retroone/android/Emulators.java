@@ -33,6 +33,16 @@ final class Emulators {
       } catch (IOException ignored) {
       }
     }
+    if (RetroArchPolicy.supports(item.platform)) {
+      RetroArch adapter = new RetroArch(context);
+      return RetroArchPolicy.assess(
+          item.name,
+          DownloadStore.READY.equals(item.state),
+          present,
+          adapter.installed(),
+          adapter.configured(),
+          adapter.verified());
+    }
     return LaunchPolicy.assess(
         item.platform,
         item.name,
@@ -59,6 +69,7 @@ final class Emulators {
 
   static Intent intent(Context context, DownloadStore.Item item, int emulator) throws IOException {
     if (item == null) throw new IOException("本机文件记录不存在，请刷新后重试");
+    if (!"psp".equals(item.platform)) throw new IOException("此入口仅用于 PSP");
     if (emulator < 0 || emulator >= PACKAGES.length) throw new IOException("模拟器选择无效");
     if (!DownloadStore.READY.equals(item.state)) throw new IOException("文件尚未完整下载并校验");
     String reason = support(item.platform, item.name);

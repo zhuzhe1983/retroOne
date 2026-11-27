@@ -211,7 +211,7 @@ adb -s DEVICE_SERIAL shell am instrument -w -r \
 
 r2 的正式 GameCube 适配器使用官方导出的 MainActivity，只接通 `gamecube/gc` 的单文件 ISO/GCM/RVZ。每款游戏仍需实际确认画面与操作；Wii 尚未开放。已有会话只打开 Dolphin，若出现列表需按系统返回或从最近任务继续，不重发镜像。只有明确保存并退出后才冷启动；冷启动使用新的精确 READ 授权、单 URI ClipData 与 `NEW_TASK | CLEAR_TOP`，退出后再回收授权。格式筛查不解压 RVZ 数据，也不证明游戏完整或可玩。
 
-正式适配器测试默认仅检查 Intent 与无效输入，不启动游戏。对真实下载文件的检查需指定精确 UUID，下列四种旗标必须分开执行，不能与旧 URI 探针同时启用：
+正式适配器测试默认仅检查 Intent 与无效输入，不启动游戏。真实文件检查需指定精确 UUID；`dolphinAdapterProbe / Failure / Launch / Revoke / Lifecycle` 五种旗标互斥，也不能与旧 URI 探针混用。仅在其他模拟器会话已保存退出后运行 instrumentation。
 
 ```sh
 # 只准备和检查，不授权或启动；也不确认该游戏可玩。
@@ -221,22 +221,31 @@ adb -s DEVICE_SERIAL shell am instrument -w -r \
   io.retroone.android.test/androidx.test.runner.AndroidJUnitRunner
 
 # 可单独将上面的旗标替换为 dolphinAdapterFailure，检查注入派发异常后的精确授权回滚。
-# 真实启动前，必须已在 Dolphin 保存、退出上一局，并回收旧探针的授权：
+# 真实启动至退出回收，使用同一次 instrumentation；此前必须已保存退出并回收旧授权。
 adb -s DEVICE_SERIAL shell am instrument -w -r \
-  -e class io.retroone.android.DolphinAdapterDeviceTest \
-  -e dolphinAdapterLaunch true -e dolphinExited true -e dolphinTaskId TASK_UUID \
+  -e class io.retroone.android.DolphinAdapterDeviceTest\#explicitLifecycleWaitsForNativeExitBeforeRevokingInSameInvocation \
+  -e dolphinAdapterLifecycle true -e dolphinExited true -e dolphinTaskId TASK_UUID \
   io.retroone.android.test/androidx.test.runner.AndroidJUnitRunner
 
-# 实际检查画面与输入，并在 Dolphin 正常退出后，另次运行：
+# 测试会在 RetroOneTest 日志中给出本轮随机 nonce，并等待最多 180 秒。
+# 只有设备操作者已保存、执行 Exit Emulation、确认无 EmulationActivity 后，才在另一终端写入：
+adb -s DEVICE_SERIAL shell \
+  "run-as io.retroone.android sh -c 'echo NONCE_FROM_RUNNING_TEST > cache/retroone-dolphin-exit-ack.pending && mv cache/retroone-dolphin-exit-ack.pending cache/retroone-dolphin-exit-ack.txt'"
+
+# 若仅需清理已退出会话的遗留状态，可另次运行；不用于证明跨测试运行保留授权：
 adb -s DEVICE_SERIAL shell am instrument -w -r \
   -e class io.retroone.android.DolphinAdapterDeviceTest \
   -e dolphinAdapterRevoke true -e dolphinExited true -e dolphinTaskId TASK_UUID \
   io.retroone.android.test/androidx.test.runner.AndroidJUnitRunner
 ```
 
-启动测试保留读取授权并观察 15 秒，日志记录实际 URI、目标 UID、READ/WRITE，不输出连接凭据。`OK` 只说明相应代码检查通过，仍需另外检查真实画面、按键、HOME 后手动返回、正常退出及同款冷重开。任何探针都不会自动写入兼容性确认。设备中仍保留授权的下载不能直接移除，需先结束游戏并在客户端设置中回收授权。
+生命周期测试在同次运行中真实派发、检查 READ 已授权，然后等待操作者的退出确认，再检查撤权前后 READ 从允许变为拒绝、WRITE 始终拒绝。它不自动退出模拟器、不自动确认可玩，也不会预先清除 marker；预存 marker 或错误 nonce 会失败。成功只删除本轮确认文件；收到退出确认前超时或失败，会保留 active 记录与现场，不调用适配器回收，但不能保证测试结束后 OS 临时授权仍在。确认后若后续断言失败，以 `lifecycle-after-release` 等日志为准，不能假定授权或 active 记录仍存在。
 
-下面保留 **r1 旧 URI 探针**，用于复现早期接口和清理其遗留授权，不作为正式入口验收。它接收已完成的 `gamecube/gc/wii` 独立 ISO/GCM/RVZ 下载，不安装、下载或选择任意游戏；其中 Wii 仅为探针参数范围，并不代表正式支持。派发后保留精确 URI READ 授权用于延迟读取，观察至少 15 秒；退出游戏后用第二条命令回收。两项不能在同一测试运行中开启。
+**默认 `am instrument` 会在开始和结束时 force-stop 目标应用，并清除其发出/收到的临时 URI 授权。** 因此不能用两次独立测试证明跨运行授权保留。原 `dolphinAdapterLaunch` 只验证派发后的 15 秒窗口，测试结束后不承诺授权持续；实际游玩和退出应优先从正式 UI 验证，或使用上面的同次生命周期测试。`dolphinAdapterRevoke` 若发现 READ 已拒绝，仅记录“遗留状态清理”，不声称观察到主动撤权。依据：[AOSP ActivityManagerService](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/android12L-s1-release/services/core/java/com/android/server/am/ActivityManagerService.java)、[UriGrantsManagerService](https://android.googlesource.com/platform/frameworks/base/+/abacba4c3065c7118d3251f1db6e3594cb3569c4/services/core/java/com/android/server/uri/UriGrantsManagerService.java)。
+
+日志包含实际 URI、目标 UID、READ/WRITE，不输出连接凭据。`OK` 仍不替代真实画面、按键、HOME 手动返回及同款冷重开检查。正式客户端登记为仍授权给 Dolphin 的下载不能直接移除；旧诊断探针独立授权不在该移除保护范围内。
+
+下面保留 **r1 旧 URI 探针**，用于复现早期接口和清理其遗留授权，不作为正式入口验收。它接收已完成的 `gamecube/gc/wii` 独立 ISO/GCM/RVZ 下载，不安装、下载或选择任意游戏；其中 Wii 仅为探针参数范围，并不代表正式支持。它同样受上面的 instrumentation force-stop 影响：15 秒窗口之外不承诺授权保留，不用于连续游玩。退出游戏后可用第二条命令清理遗留授权；两项不能在同次测试中开启。
 
 ```sh
 adb -s DEVICE_SERIAL shell am instrument -w -r \

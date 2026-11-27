@@ -10,6 +10,7 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.ParcelFileDescriptor;
+import android.os.SystemClock;
 import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
 import android.util.Log;
@@ -17,24 +18,31 @@ import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import org.junit.Assume;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
 /**
  * Default tests never dispatch an emulator. Real-file checks require one exact ready GC task UUID
- * and one of dolphinAdapterProbe/Failure/Launch/Revoke=true. Launch and Revoke additionally require
+ * and one of dolphinAdapterProbe/Failure/Launch/Revoke/Lifecycle=true. Launch, Revoke and Lifecycle require
  * dolphinExited=true. No game is automatically confirmed compatible and no old grant is pre-cleared.
  */
 @RunWith(AndroidJUnit4.class)
 public class DolphinAdapterDeviceTest {
   private static final String[] MODES = {
-    "dolphinAdapterProbe", "dolphinAdapterFailure", "dolphinAdapterLaunch", "dolphinAdapterRevoke"
+    "dolphinAdapterProbe", "dolphinAdapterFailure", "dolphinAdapterLaunch", "dolphinAdapterRevoke",
+    "dolphinAdapterLifecycle"
   };
+  private static final String EXIT_MARKER = "retroone-dolphin-exit-ack.txt";
+  private static final long EXIT_TIMEOUT_MS = 180000;
   private static final int READ = Intent.FLAG_GRANT_READ_URI_PERMISSION;
   private static final int WRITE = Intent.FLAG_GRANT_WRITE_URI_PERMISSION;
   private static final String UUID_PATTERN =
@@ -226,13 +234,122 @@ public class DolphinAdapterDeviceTest {
     assertEquals("The saved grant must match this exact file", prepared.uri.toString(), adapter.activeUri());
     int uid = targetUid(adapter);
     evidence("revoke-before-confirmed-exit", prepared.uri, uid);
-    assertReadOnlyGrant(prepared.uri, uid);
+    // Starting a separate instrumentation force-stops its target and can clear its URI grants.
+    // Do not turn already-denied -> denied into evidence of an observed READ revocation.
+    int beforeRead = permission(prepared.uri, uid, READ);
+    assertEquals(PackageManager.PERMISSION_DENIED, permission(prepared.uri, uid, WRITE));
+    if (beforeRead == PackageManager.PERMISSION_GRANTED) assertReadOnlyGrant(prepared.uri, uid);
+    else assertNoPriorGrant(prepared.uri, uid);
     adapter.releaseAfterConfirmedExit();
     evidence("revoke-after-confirmed-exit", prepared.uri, uid);
     assertIdle(adapter);
     assertNoPriorGrant(prepared.uri, uid);
     assertTrue("Releasing a grant must preserve confirmations", confirmations.equals(confirmations()));
     before.assertUnchanged(adapter, item);
+    Log.i("RetroOneTest", beforeRead == PackageManager.PERMISSION_GRANTED
+        ? "Dolphin cleanup observed READ granted -> denied in this invocation."
+        : "Dolphin cleanup found READ already denied: verified stale-record cleanup only;"
+            + " this is NOT evidence of a granted -> denied transition.");
+  }
+
+  @Test
+  public void explicitLifecycleWaitsForNativeExitBeforeRevokingInSameInvocation() throws Exception {
+    optIn("dolphinAdapterLifecycle", true);
+    DownloadStore.Item item = task();
+    Dolphin adapter = new Dolphin(context());
+    assertIdle(adapter);
+    File marker = new File(context().getCacheDir().getCanonicalFile(), EXIT_MARKER);
+    assertTrue("Exit marker must be directly inside the app cache",
+        marker.getAbsoluteFile().equals(marker.getCanonicalFile()));
+    assertFalse("Pre-existing exit marker is never reused or automatically removed",
+        Files.exists(marker.toPath(), LinkOption.NOFOLLOW_LINKS));
+    Preserved before = new Preserved(item);
+    Map<String, ?> confirmations = confirmations();
+    Dolphin.Prepared prepared = adapter.prepare(item);
+    int uid = targetUid(adapter);
+    assertNoPriorGrant(prepared.uri, uid);
+    assertPrepared(adapter, item, prepared);
+    String nonce = UUID.randomUUID().toString();
+    final boolean[] dispatched = {false};
+    evidence("lifecycle-before", prepared.uri, uid);
+    try {
+      adapter.launch(item, prepared, intent -> {
+        try {
+          assertFalse("Exit marker appeared before dispatch",
+              Files.exists(marker.toPath(), LinkOption.NOFOLLOW_LINKS));
+          assertColdIntent(intent, prepared.uri);
+          assertActive(adapter, item, prepared);
+          assertReadOnlyGrant(prepared.uri, uid);
+        } catch (AssertionError error) {
+          throw new IOException("Lifecycle pre-dispatch assertions failed", error);
+        }
+        context().startActivity(intent);
+        dispatched[0] = true;
+      });
+      assertTrue(dispatched[0]);
+      assertReadOnlyGrant(prepared.uri, uid);
+      evidence("lifecycle-dispatched", prepared.uri, uid);
+      Log.i("RetroOneTest", "DolphinLifecycle waiting for explicit native-exit acknowledgement:"
+          + " task=" + item.id + " marker=cache/" + EXIT_MARKER + " nonce=" + nonce
+          + " timeoutSeconds=180. Owner must save/Exit Emulation and verify no EmulationActivity"
+          + " remains before writing this nonce. No second instrumentation may be started.");
+      awaitExitAcknowledgement(marker, nonce);
+      // The marker is the device owner's explicit observation, not an automatic exit detector.
+      assertActive(adapter, item, prepared);
+      assertReadOnlyGrant(prepared.uri, uid);
+      evidence("lifecycle-acknowledged-before-release", prepared.uri, uid);
+      adapter.releaseAfterConfirmedExit();
+      evidence("lifecycle-after-release", prepared.uri, uid);
+      assertIdle(adapter);
+      assertNoPriorGrant(prepared.uri, uid);
+      assertTrue("Lifecycle must not mark gameplay compatibility", confirmations.equals(confirmations()));
+      before.assertUnchanged(adapter, item);
+      assertTrue("Exit acknowledgement changed before exact cleanup", exitAcknowledged(marker, nonce));
+      Files.delete(marker.toPath());
+      Log.i("RetroOneTest", "DolphinLifecycle PASS: observed READ granted before owner-confirmed"
+          + " native exit and granted -> denied at explicit release within one invocation."
+          + " No gameplay confirmation was written.");
+    } finally {
+      evidence(dispatched[0] ? "lifecycle-final-observation" : "lifecycle-not-dispatched",
+          prepared.uri, uid);
+      // No timeout/failure fallback revocation or marker removal. Preserve the active record and
+      // evidence. Android may nevertheless clear grants when default instrumentation force-stops
+      // the target after the run; this cannot promise OS-grant persistence after test termination.
+    }
+  }
+
+  private void awaitExitAcknowledgement(File marker, String nonce) throws Exception {
+    long deadline = SystemClock.elapsedRealtime() + EXIT_TIMEOUT_MS;
+    while (SystemClock.elapsedRealtime() < deadline) {
+      if (Thread.currentThread().isInterrupted()) throw new IOException("Lifecycle observation interrupted");
+      if (exitAcknowledged(marker, nonce)) return;
+      Thread.sleep(250);
+    }
+    throw new IOException("Timed out waiting for explicit native exit; no adapter release was called."
+        + " Active state/marker retained. Framework test shutdown may clear transient URI grants.");
+  }
+
+  private boolean exitAcknowledged(File marker, String nonce) throws IOException {
+    if (!Files.exists(marker.toPath(), LinkOption.NOFOLLOW_LINKS)) return false;
+    if (Files.isSymbolicLink(marker.toPath()) || !marker.isFile()
+        || !marker.getAbsoluteFile().equals(marker.getCanonicalFile()) || marker.length() > 128)
+      throw new IOException("Exit acknowledgement must be one bounded ordinary cache file");
+    // An empty file can be the writer's just-opened destination; retry without accepting it.
+    byte[] bytes;
+    try (java.io.InputStream in = Files.newInputStream(marker.toPath())) {
+      bytes = new byte[129];
+      int count = 0;
+      while (count < bytes.length) {
+        int n = in.read(bytes, count, bytes.length - count);
+        if (n < 0) break;
+        count += n;
+      }
+      if (count > 128) throw new IOException("Exit acknowledgement exceeds 128 bytes");
+      if (count == 0) return false;
+      String value = new String(bytes, 0, count, StandardCharsets.UTF_8).trim();
+      if (!nonce.equals(value)) throw new IOException("Exit acknowledgement nonce does not match this run");
+    }
+    return true;
   }
 
   private Context context() {

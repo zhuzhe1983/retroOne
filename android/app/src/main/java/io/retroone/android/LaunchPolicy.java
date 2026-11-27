@@ -12,6 +12,10 @@ final class LaunchPolicy {
     INSTALL("安装 PPSSPP"),
     INSTALL_EDEN("安装 Eden"),
     OPEN_EDEN("用 Eden 启动"),
+    INSTALL_DOLPHIN("安装 Dolphin"),
+    CHECK_DOLPHIN("试运行 GameCube"),
+    OPEN_DOLPHIN("用 Dolphin 启动"),
+    RETURN_DOLPHIN("打开 Dolphin"),
     CHECK_FBNEO("检查街机启动"),
     REVIEW_FBNEO("ROM 版本待核对"),
     CONFIGURE_NEOGEO("配置 NeoGeo BIOS"),
@@ -35,6 +39,7 @@ final class LaunchPolicy {
   }
 
   static String formatReason(String platform, String name) {
+    if (DolphinImage.supports(platform)) return DolphinImage.formatReason(platform, name);
     if ("switch".equals(platform)) return Eden.formatReason(name);
     if ("fbneo".equals(platform))
       return name.toLowerCase(Locale.ROOT).endsWith(".zip")

@@ -82,6 +82,7 @@ public final class MainActivity extends Activity {
   private FbneoFlow fbneoFlow;
   private CartridgeFlow cartridgeFlow;
   private RuntimeFlow runtimeFlow;
+  private DolphinFlow dolphinFlow;
   private final Set<String> localMetadataRequested = new HashSet<>();
 
   private final class LocalButton {
@@ -134,6 +135,7 @@ public final class MainActivity extends Activity {
     fbneoFlow = new FbneoFlow(this, io, this::emulatorsChanged, retroArchFlow);
     cartridgeFlow = new CartridgeFlow(this, io, this::emulatorsChanged, retroArchFlow);
     runtimeFlow = new RuntimeFlow(this, io, this::emulatorsChanged, retroArchFlow);
+    dolphinFlow = new DolphinFlow(this, io, this::emulatorsChanged);
     pspInstalled = !Emulators.installed(this).isEmpty();
     try {
       config = RetroApplication.from(this).credentials.current();
@@ -220,6 +222,7 @@ public final class MainActivity extends Activity {
     fbneoFlow.onResume();
     cartridgeFlow.onResume();
     runtimeFlow.onResume();
+    dolphinFlow.onResume();
   }
 
   @Override
@@ -230,6 +233,7 @@ public final class MainActivity extends Activity {
     fbneoFlow.onPause();
     cartridgeFlow.onPause();
     runtimeFlow.onPause();
+    dolphinFlow.onPause();
     handler.removeCallbacks(poll);
     super.onPause();
   }
@@ -1218,6 +1222,8 @@ public final class MainActivity extends Activity {
                         text(
                             "switch".equals(game.optString("platform"))
                                 ? "使用 Eden 启动 · 兼容性与速度需逐款确认"
+                                : DolphinImage.supports(game.optString("platform"))
+                                    ? "使用 Dolphin · 首次需确认本款游戏的画面与操作"
                                 : "fbneo".equals(game.optString("platform"))
                                     ? "使用 RetroArch / FinalBurn Neo · 先检查 ROM 集与核心"
                                     : RetroArchPolicy.supports(game.optString("platform"))
@@ -1762,6 +1768,15 @@ public final class MainActivity extends Activity {
     }
     List<Integer> installed = Emulators.installed(this);
     LaunchPolicy.State support = Emulators.status(this, item, !installed.isEmpty());
+    if (DolphinImage.supports(item.platform)
+        && (support == LaunchPolicy.State.INSTALL_DOLPHIN
+            || support == LaunchPolicy.State.CHECK_DOLPHIN
+            || support == LaunchPolicy.State.OPEN_DOLPHIN
+            || support == LaunchPolicy.State.RETURN_DOLPHIN)) {
+      if (downloadsPopup != null) downloadsPopup.dismiss();
+      dolphinFlow.play(item);
+      return;
+    }
     if ("switch".equals(item.platform)
         && (support == LaunchPolicy.State.OPEN_EDEN
             || support == LaunchPolicy.State.INSTALL_EDEN)) {
@@ -1940,14 +1955,16 @@ public final class MainActivity extends Activity {
     form.addView(button("街机 · FinalBurn Neo 设置", fbneoFlow::show));
     form.addView(button("N64 / NDS / PS1 / Dreamcast / Saturn 设置", runtimeFlow::show));
     form.addView(button("Switch · Eden 设置", edenFlow::show));
+    form.addView(button("GameCube · Dolphin 设置", dolphinFlow::show));
     form.addView(
         text(
             "当前接入 PSP 独立 ISO / CSO 的 PPSSPP 启动接口。PBP 存在实测路径兼容问题；CHD 尚未验证可靠直启。NES 的 .nes 文件可通过"
                 + " RetroArch ARM64 / FCEUmm 启动，需一次目录授权和测试。FBNeo ZIP 需精确匹配完整 ROM 集；Switch NSP / XCI"
-                + " 可交给已配置的 Eden 启动。SFC、GB/GBC、GBA、MD、SMS、GG、PCE 独立卡带需分别完成核心测试。其他格式仍需单独适配。\n\n"
+                + " 可交给已配置的 Eden 启动。GameCube 单文件 ISO / GCM / RVZ 可用 Dolphin 逐款试运行，Wii 尚未开放。"
+                + "SFC、GB/GBC、GBA、MD、SMS、GG、PCE 独立卡带需分别完成核心测试。其他格式仍需单独适配。\n\n"
                 + "下载原件保存在 RetroOne 私有目录，卸载会移除。RetroArch 游戏另有共享启动副本。PSP 支持手动双向云存档同步；其他平台存档由对应模拟器"
                 + " 管理。当前不会为不同 RetroOne 玩家隔离同一模拟器的存档。\n\n"
-                + "RetroOne Android 0.2.6 · 自有内容客户端",
+                + "RetroOne Android 0.2.7 · 自有内容客户端",
             14,
             MUTED));
   }

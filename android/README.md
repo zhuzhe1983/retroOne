@@ -209,7 +209,34 @@ adb -s DEVICE_SERIAL shell am instrument -w -r \
   io.retroone.android.test/androidx.test.runner.AndroidJUnitRunner
 ```
 
-Dolphin 使用官方导出的 MainActivity。探针仅接收已完成的 `gamecube/gc/wii` 独立 ISO/GCM/RVZ 下载，不安装、下载或选择任意游戏。派发后保留精确 URI READ 授权用于延迟读取，观察至少 15 秒；退出游戏后用第二条命令回收。两项不能在同一测试运行中开启。
+r2 的正式 GameCube 适配器使用官方导出的 MainActivity，只接通 `gamecube/gc` 的单文件 ISO/GCM/RVZ。每款游戏仍需实际确认画面与操作；Wii 尚未开放。已有会话只打开 Dolphin，若出现列表需按系统返回或从最近任务继续，不重发镜像。只有明确保存并退出后才冷启动；冷启动使用新的精确 READ 授权、单 URI ClipData 与 `NEW_TASK | CLEAR_TOP`，退出后再回收授权。格式筛查不解压 RVZ 数据，也不证明游戏完整或可玩。
+
+正式适配器测试默认仅检查 Intent 与无效输入，不启动游戏。对真实下载文件的检查需指定精确 UUID，下列四种旗标必须分开执行，不能与旧 URI 探针同时启用：
+
+```sh
+# 只准备和检查，不授权或启动；也不确认该游戏可玩。
+adb -s DEVICE_SERIAL shell am instrument -w -r \
+  -e class io.retroone.android.DolphinAdapterDeviceTest \
+  -e dolphinAdapterProbe true -e dolphinTaskId TASK_UUID \
+  io.retroone.android.test/androidx.test.runner.AndroidJUnitRunner
+
+# 可单独将上面的旗标替换为 dolphinAdapterFailure，检查注入派发异常后的精确授权回滚。
+# 真实启动前，必须已在 Dolphin 保存、退出上一局，并回收旧探针的授权：
+adb -s DEVICE_SERIAL shell am instrument -w -r \
+  -e class io.retroone.android.DolphinAdapterDeviceTest \
+  -e dolphinAdapterLaunch true -e dolphinExited true -e dolphinTaskId TASK_UUID \
+  io.retroone.android.test/androidx.test.runner.AndroidJUnitRunner
+
+# 实际检查画面与输入，并在 Dolphin 正常退出后，另次运行：
+adb -s DEVICE_SERIAL shell am instrument -w -r \
+  -e class io.retroone.android.DolphinAdapterDeviceTest \
+  -e dolphinAdapterRevoke true -e dolphinExited true -e dolphinTaskId TASK_UUID \
+  io.retroone.android.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+启动测试保留读取授权并观察 15 秒，日志记录实际 URI、目标 UID、READ/WRITE，不输出连接凭据。`OK` 只说明相应代码检查通过，仍需另外检查真实画面、按键、HOME 后手动返回、正常退出及同款冷重开。任何探针都不会自动写入兼容性确认。设备中仍保留授权的下载不能直接移除，需先结束游戏并在客户端设置中回收授权。
+
+下面保留 **r1 旧 URI 探针**，用于复现早期接口和清理其遗留授权，不作为正式入口验收。它接收已完成的 `gamecube/gc/wii` 独立 ISO/GCM/RVZ 下载，不安装、下载或选择任意游戏；其中 Wii 仅为探针参数范围，并不代表正式支持。派发后保留精确 URI READ 授权用于延迟读取，观察至少 15 秒；退出游戏后用第二条命令回收。两项不能在同一测试运行中开启。
 
 ```sh
 adb -s DEVICE_SERIAL shell am instrument -w -r \

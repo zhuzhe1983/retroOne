@@ -34,6 +34,7 @@ final class Emulators {
       }
     }
     if ("switch".equals(item.platform)) return new Eden(context).status(item, present);
+    if (DolphinImage.supports(item.platform)) return new Dolphin(context).status(item, present);
     if ("fbneo".equals(item.platform)) return new Fbneo(context).status(item, present);
     if (CartridgePolicy.supports(item.platform))
       return new CartridgeAdapter(context).status(item, present);

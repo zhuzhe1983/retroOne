@@ -1,6 +1,6 @@
 # RetroOne Android
 
-原生 Android 客户端：浏览自己的 RetroOne 游戏库，把游戏文件下载到本机，再交给已安装的 PPSSPP、Eden，或完成设置与测试的 RetroArch ARM64（NES / SFC / GB / GBC / GBA / MD / SMS / GG / PCE / 街机）。不会启动服务端云游戏，也不附带商业游戏、模拟器、BIOS、固件或密钥；卡带测试程序在构建时从原创源码生成。
+原生 Android 客户端：浏览自己的 RetroOne 游戏库，把游戏文件下载到本机，再交给已适配且由用户安装的 PPSSPP、Eden、RetroArch ARM64 或 Dolphin。0.2.7 开发版新增独立镜像与 GameCube 入口，逐款验收和格式边界见下文；N64 当前 RetroArch 路线未通过 RK3588 样本验证。客户端不会启动服务端云游戏，也不附带商业游戏、模拟器、BIOS、固件或密钥；卡带测试程序在构建时从原创源码生成。
 
 使用步骤、兼容范围及真机验证见 [Android 使用与开发说明](../docs/android.md)。
 
@@ -190,7 +190,7 @@ adb -s DEVICE_SERIAL shell am instrument -w -r \
 
 ## 0.2.7 独立镜像与 Dolphin 探针
 
-0.2.7 开发版新增五个 RetroArch 入口，真机验收状态见 [使用说明](../docs/android.md#027-开发版独立镜像入口验收中)。测试必须使用自己的镜像，并先保存、退出正在运行的游戏；不以测试结果 `OK` 替代真实画面与操作检查。
+0.2.7 开发版新增五个 RetroArch 入口及正式 GameCube / Dolphin 流程。PS1、NDS、Dreamcast、Saturn 与 GameCube 已有正式入口的短时实玩记录；N64 GLES3 样本未通过，另装 GLES2 核心崩溃，未被客户端采用。独立 AE、Azahar 与 ARMSX2 的验证不算正式客户端适配。详见 [验收进度](../docs/android.md#027-rk3588-验收进度)。测试必须使用自己的镜像，并先保存、退出正在运行的游戏；不以测试结果 `OK` 替代真实画面与操作检查。
 
 下面的纯元数据测试只创建、清理自己的合成文件，不启动模拟器：
 

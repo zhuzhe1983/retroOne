@@ -266,7 +266,15 @@ Display preferences are saved separately for each player and browser/device: use
 
 ## Android 本机版本
 
-原生 Android 客户端已放在 [`android/`](android/README.md)：提供 Apps / Games 双视图、可选默认桌面、玩家切换、收藏、最近游玩和全库排序，支持后台下载与校验、暂停和续传，并通过只读 content URI 调用本机 PPSSPP。新增“已下载”筛选和本地游戏／存档备份管理；PSP 可在退出模拟器后手动双向同步，进度不同时选择使用本机或云端版本，替换前保留备份。Android 自动同步与模拟器玩家存档隔离尚未开放。首版验证 PSP 独立 ISO / CSO；PBP、CHD、多文件游戏和其他模拟器的边界见 [Android 使用说明](docs/android.md)。客户端不包含游戏、固件或模拟器，也不改动现有网页与云端服务。
+原生 Android 客户端已放在 [`android/`](android/README.md)：提供 Apps / Games 双视图、可选默认桌面、玩家切换、收藏、最近游玩、全库排序和“已下载”筛选。支持后台下载与校验、暂停续传、本机文件管理及存档备份。PSP 可在退出模拟器后手动双向同步；进度不同时选择本机或云端版本，替换前保留备份。Android 自动同步与模拟器玩家存档隔离尚未开放。
+
+客户端调用用户安装的模拟器：PSP 使用 PPSSPP，Switch 使用 Eden，经典卡带与街机使用已适配的 RetroArch 核心。卡带支持有界单 ROM ZIP 提取；街机按实际内容核验 ROM 集、克隆集与 NeoGeo BIOS，另有明确标注的精确 MOD 兼容配置。游戏、BIOS、固件、密钥和模拟器均不随客户端分发。
+
+RK3588 真机已从正式入口验证 9 个卡带平台的样本，以及 NeoGeo、FBNeo 和一个明确标注的街机 MOD，详见[逐款实测范围](docs/android.md#rk3588-实测范围)。测试区分实际进入关卡、已验证输入与尚未验证的操作，不代表全库兼容或音频、实体手柄已验收。
+
+**0.2.7 开发版仍在验收。** 新增 PS1、NDS、Dreamcast、Saturn 和 Dolphin / GameCube 入口，已有短时实玩与输入记录；N64 的当前 RetroArch 核心未通过这台 RK3588 的样本验证。GameCube 从后台返回时可能先显示 Dolphin 列表，需按系统返回继续。独立 Mupen64Plus AE、Azahar、ARMSX2 的测试结果与正式客户端支持分开记录。格式、逐款证据和限制见 [0.2.7 验收进度](docs/android.md#027-rk3588-验收进度)。
+
+The native Android client browses your library, manages verified downloads and launches separately installed emulators. PSP supports manual cloud-save conflict resolution. The 0.2.7 development branch has scoped RK3588 gameplay checks for PS1, DS, Dreamcast, Saturn and GameCube; the current RetroArch N64 route has not passed. Emulator installation or a successful file check alone does not imply game compatibility.
 
 ## 文档与开发
 

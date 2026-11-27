@@ -77,6 +77,12 @@ public final class MainActivity extends Activity {
   private String localSort = "downloaded", localSignature = "";
   private LocalContentView localContent;
   private SaveSyncFlow saveSync;
+  private RetroArchFlow retroArchFlow;
+  private EdenFlow edenFlow;
+  private FbneoFlow fbneoFlow;
+  private CartridgeFlow cartridgeFlow;
+  private RuntimeFlow runtimeFlow;
+  private DolphinFlow dolphinFlow;
   private final Set<String> localMetadataRequested = new HashSet<>();
 
   private final class LocalButton {
@@ -114,6 +120,22 @@ public final class MainActivity extends Activity {
   public void onCreate(Bundle state) {
     super.onCreate(state);
     store = RetroApplication.from(this).downloads;
+    retroArchFlow =
+        new RetroArchFlow(
+            this,
+            io,
+            () -> {
+              popupSignature = "";
+              downloadSignature = "";
+              localSignature = "";
+              for (LocalButton binding : localButtons) binding.signature = "";
+              refreshDownloads();
+            });
+    edenFlow = new EdenFlow(this, this::emulatorsChanged);
+    fbneoFlow = new FbneoFlow(this, io, this::emulatorsChanged, retroArchFlow);
+    cartridgeFlow = new CartridgeFlow(this, io, this::emulatorsChanged, retroArchFlow);
+    runtimeFlow = new RuntimeFlow(this, io, this::emulatorsChanged, retroArchFlow);
+    dolphinFlow = new DolphinFlow(this, io, this::emulatorsChanged);
     pspInstalled = !Emulators.installed(this).isEmpty();
     try {
       config = RetroApplication.from(this).credentials.current();
@@ -195,11 +217,23 @@ public final class MainActivity extends Activity {
     pspInstalled = !Emulators.installed(this).isEmpty();
     handler.removeCallbacks(poll);
     handler.post(poll);
+    retroArchFlow.onResume();
+    edenFlow.onResume();
+    fbneoFlow.onResume();
+    cartridgeFlow.onResume();
+    runtimeFlow.onResume();
+    dolphinFlow.onResume();
   }
 
   @Override
   protected void onPause() {
     resumed = false;
+    retroArchFlow.onPause();
+    edenFlow.onPause();
+    fbneoFlow.onPause();
+    cartridgeFlow.onPause();
+    runtimeFlow.onPause();
+    dolphinFlow.onPause();
     handler.removeCallbacks(poll);
     super.onPause();
   }
@@ -1186,9 +1220,21 @@ public final class MainActivity extends Activity {
                   } else {
                     actions.addView(
                         text(
-                            Emulators.installed(this).isEmpty()
-                                ? "下载后安装 PPSSPP 即可启动"
-                                : "PSP · 使用已安装的 PPSSPP",
+                            "switch".equals(game.optString("platform"))
+                                ? "使用 Eden 启动 · 兼容性与速度需逐款确认"
+                                : DolphinImage.supports(game.optString("platform"))
+                                    ? "使用 Dolphin · 首次需确认本款游戏的画面与操作"
+                                : "fbneo".equals(game.optString("platform"))
+                                    ? "使用 RetroArch / FinalBurn Neo · 先检查 ROM 集与核心"
+                                    : RetroArchPolicy.supports(game.optString("platform"))
+                                        ? "NES · 使用 RetroArch ARM64 / FCEUmm（需完成一次启动测试）"
+                                        : CartridgePolicy.supports(game.optString("platform"))
+                                            ? "使用 RetroArch · 需完成当前平台的核心与启动测试"
+                                            : RuntimePolicy.supports(game.optString("platform"))
+                                                ? "使用 RetroArch · 镜像、BIOS 与实际操作需逐款确认"
+                                                : Emulators.installed(this).isEmpty()
+                                                    ? "下载后安装 PPSSPP 即可启动"
+                                                    : "PSP · 使用已安装的 PPSSPP",
                             13,
                             ACCENT));
                   }
@@ -1199,7 +1245,7 @@ public final class MainActivity extends Activity {
                               alert(
                                   (capability.available
                                           ? (reason.isEmpty()
-                                              ? "支持下载和 PPSSPP 启动，具体游戏兼容性由模拟器决定。"
+                                              ? "支持下载和对应模拟器启动；先安装依赖并完成设置，具体游戏兼容性由模拟器决定。"
                                               : reason)
                                           : capability.explanation())
                                       + "\n\n"
@@ -1280,7 +1326,18 @@ public final class MainActivity extends Activity {
       button.setContentDescription(
           (state == LaunchPolicy.State.PLAYABLE ? "游玩 " : state.label + " ") + binding.title);
       button.setTooltipText(
-          state == LaunchPolicy.State.PLAYABLE ? "使用本机 PPSSPP" : "已下载 · " + state.label);
+          state == LaunchPolicy.State.PLAYABLE
+              ? ("fbneo".equals(item.platform)
+                  ? "使用 RetroArch · FinalBurn Neo"
+                  : RetroArchPolicy.supports(item.platform)
+                      ? "使用 RetroArch · FCEUmm"
+                      : CartridgePolicy.supports(item.platform)
+                          ? "使用 RetroArch · "
+                              + CartridgeFlow.coreLabel(CartridgePolicy.spec(item.platform))
+                          : RuntimePolicy.supports(item.platform)
+                              ? "使用 RetroArch · " + RuntimePolicy.spec(item.platform).label
+                              : "使用本机 PPSSPP")
+              : "已下载 · " + state.label);
       if (state == LaunchPolicy.State.PLAYABLE) {
         button.setBackground(shape(ACCENT, 10));
         button.setTextColor(BG);
@@ -1400,7 +1457,11 @@ public final class MainActivity extends Activity {
     items.sort((a, b) -> Integer.compare(downloadPriority(a.state), downloadPriority(b.state)));
     if (items.size() > 6) items = new ArrayList<>(items.subList(0, 6));
     StringBuilder signature = new StringBuilder();
-    for (DownloadStore.Item item : items) signature.append(item.id).append(item.state);
+    for (DownloadStore.Item item : items)
+      signature
+          .append(item.id)
+          .append(item.state)
+          .append(Emulators.status(this, item, pspInstalled));
     signature.append(pspInstalled);
     if (!signature.toString().equals(popupSignature)) {
       popupSignature = signature.toString();
@@ -1613,6 +1674,14 @@ public final class MainActivity extends Activity {
   @Override
   protected void onActivityResult(int request, int result, Intent data) {
     super.onActivityResult(request, result, data);
+    if (request == FbneoFlow.PICK_BIOS) {
+      fbneoFlow.selectedBios(result, data);
+      return;
+    }
+    if (request == RetroArchFlow.PICK_DIRECTORY) {
+      retroArchFlow.selected(result, data);
+      return;
+    }
     if (request == SaveSyncFlow.PICK_DIRECTORY) {
       if (saveSync != null) saveSync.selected(result, data);
       return;
@@ -1679,6 +1748,14 @@ public final class MainActivity extends Activity {
         });
   }
 
+  private void emulatorsChanged() {
+    popupSignature = "";
+    downloadSignature = "";
+    localSignature = "";
+    for (LocalButton binding : localButtons) binding.signature = "";
+    refreshDownloads();
+  }
+
   private void launch(DownloadStore.Item item) {
     if (item == null) {
       alert("本机文件记录不存在，请刷新后重试");
@@ -1691,6 +1768,60 @@ public final class MainActivity extends Activity {
     }
     List<Integer> installed = Emulators.installed(this);
     LaunchPolicy.State support = Emulators.status(this, item, !installed.isEmpty());
+    if (DolphinImage.supports(item.platform)
+        && (support == LaunchPolicy.State.INSTALL_DOLPHIN
+            || support == LaunchPolicy.State.CHECK_DOLPHIN
+            || support == LaunchPolicy.State.OPEN_DOLPHIN
+            || support == LaunchPolicy.State.RETURN_DOLPHIN)) {
+      if (downloadsPopup != null) downloadsPopup.dismiss();
+      dolphinFlow.play(item);
+      return;
+    }
+    if ("switch".equals(item.platform)
+        && (support == LaunchPolicy.State.OPEN_EDEN
+            || support == LaunchPolicy.State.INSTALL_EDEN)) {
+      if (downloadsPopup != null) downloadsPopup.dismiss();
+      edenFlow.play(item);
+      return;
+    }
+    if ("fbneo".equals(item.platform)
+        && (support == LaunchPolicy.State.PLAYABLE
+            || support == LaunchPolicy.State.INSTALL_RETROARCH
+            || support == LaunchPolicy.State.CHECK_FBNEO
+            || support == LaunchPolicy.State.CONFIGURE_NEOGEO
+            || support == LaunchPolicy.State.OPEN_ARCADE_COMPAT
+            || support == LaunchPolicy.State.REVIEW_FBNEO)) {
+      if (downloadsPopup != null) downloadsPopup.dismiss();
+      fbneoFlow.play(item);
+      return;
+    }
+    if (RetroArchPolicy.supports(item.platform)
+        && (support == LaunchPolicy.State.PLAYABLE
+            || support == LaunchPolicy.State.INSTALL_RETROARCH
+            || support == LaunchPolicy.State.CONFIGURE_RETROARCH
+            || support == LaunchPolicy.State.VERIFY_RETROARCH)) {
+      if (downloadsPopup != null) downloadsPopup.dismiss();
+      retroArchFlow.play(item);
+      return;
+    }
+    if (CartridgePolicy.supports(item.platform)
+        && (support == LaunchPolicy.State.PLAYABLE
+            || support == LaunchPolicy.State.INSTALL_RETROARCH
+            || support == LaunchPolicy.State.CONFIGURE_CARTRIDGE
+            || support == LaunchPolicy.State.VERIFY_CARTRIDGE)) {
+      if (downloadsPopup != null) downloadsPopup.dismiss();
+      cartridgeFlow.play(item);
+      return;
+    }
+    if (RuntimePolicy.supports(item.platform)
+        && (support == LaunchPolicy.State.PLAYABLE
+            || support == LaunchPolicy.State.INSTALL_RETROARCH
+            || support == LaunchPolicy.State.CONFIGURE_RUNTIME
+            || support == LaunchPolicy.State.CHECK_RUNTIME)) {
+      if (downloadsPopup != null) downloadsPopup.dismiss();
+      runtimeFlow.play(item);
+      return;
+    }
     if (support != LaunchPolicy.State.PLAYABLE && support != LaunchPolicy.State.INSTALL) {
       String reason =
           support == LaunchPolicy.State.MISSING
@@ -1819,13 +1950,21 @@ public final class MainActivity extends Activity {
     for (int i : installed) emulator.append(Emulators.LABELS[i]).append("  ");
     if (installed.isEmpty()) emulator.append("无可用 PPSSPP");
     form.addView(text(emulator.toString(), 15, ACCENT));
+    form.addView(button("NES · RetroArch 设置", retroArchFlow::show));
+    form.addView(button("经典卡带 · SFC / GB / GBA / MD 等设置", cartridgeFlow::show));
+    form.addView(button("街机 · FinalBurn Neo 设置", fbneoFlow::show));
+    form.addView(button("N64 / NDS / PS1 / Dreamcast / Saturn 设置", runtimeFlow::show));
+    form.addView(button("Switch · Eden 设置", edenFlow::show));
+    form.addView(button("GameCube · Dolphin 设置", dolphinFlow::show));
     form.addView(
         text(
-            "当前接入 PSP 独立 ISO / CSO 的 PPSSPP 启动接口。PBP 存在实测路径兼容问题；CHD"
-                + " 尚未验证可靠直启。其他平台仅提供下载管理。多文件光盘、目录游戏和压缩包不会被自动改造。\n\n"
-                + "本机文件保存在 RetroOne 私有目录，卸载应用会移除这些下载。模拟器独立管理存档；本版没有云存档同步，也不会为不同 RetroOne"
-                + " 玩家隔离同一模拟器的存档。\n\n"
-                + "RetroOne Android 0.2.3 · 自有内容客户端",
+            "当前接入 PSP 独立 ISO / CSO 的 PPSSPP 启动接口。PBP 存在实测路径兼容问题；CHD 尚未验证可靠直启。NES 的 .nes 文件可通过"
+                + " RetroArch ARM64 / FCEUmm 启动，需一次目录授权和测试。FBNeo ZIP 需精确匹配完整 ROM 集；Switch NSP / XCI"
+                + " 可交给已配置的 Eden 启动。GameCube 单文件 ISO / GCM / RVZ 可用 Dolphin 逐款试运行，Wii 尚未开放。"
+                + "SFC、GB/GBC、GBA、MD、SMS、GG、PCE 独立卡带需分别完成核心测试。其他格式仍需单独适配。\n\n"
+                + "下载原件保存在 RetroOne 私有目录，卸载会移除。RetroArch 游戏另有共享启动副本。PSP 支持手动双向云存档同步；其他平台存档由对应模拟器"
+                + " 管理。当前不会为不同 RetroOne 玩家隔离同一模拟器的存档。\n\n"
+                + "RetroOne Android 0.2.7 · 自有内容客户端",
             14,
             MUTED));
   }

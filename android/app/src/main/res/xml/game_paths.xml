@@ -1,3 +1,4 @@
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <files-path name="games" path="games/" />
+    <cache-path name="emulator-probe" path="emulator-probe/" />
 </paths>

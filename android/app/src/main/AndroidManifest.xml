@@ -10,6 +10,9 @@
         <package android:name="org.ppsspp.ppsspp" />
         <package android:name="org.ppsspp.ppssppgold" />
         <package android:name="org.ppsspp.ppsspplegacy" />
+        <package android:name="com.retroarch.aarch64" />
+        <package android:name="dev.eden.eden_emulator" />
+        <package android:name="org.dolphinemu.dolphinemu" />
     </queries>
     <application android:name=".RetroApplication" android:label="RetroOne" android:icon="@drawable/ic_retroone"
         android:theme="@style/AppTheme" android:allowBackup="false" android:dataExtractionRules="@xml/data_extraction_rules" android:supportsRtl="true"
@@ -26,7 +29,7 @@
             </intent-filter>
         </activity>
         <service android:name=".DownloadService" android:exported="false" android:foregroundServiceType="dataSync" />
-        <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.games"
+        <provider android:name=".GamesFileProvider" android:authorities="${applicationId}.games"
             android:exported="false" android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/game_paths" />
         </provider>

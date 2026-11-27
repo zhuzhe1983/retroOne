@@ -21,9 +21,11 @@ final class DownloadStore extends SQLiteOpenHelper {
       READY = "ready",
       CANCELED = "canceled";
   final File root;
+  private final Context context;
 
   DownloadStore(Context context) {
     super(context, "downloads.db", null, 2);
+    this.context = context.getApplicationContext();
     root = new File(context.getFilesDir(), "games");
     if (!root.exists() && !root.mkdirs()) throw new IllegalStateException("无法创建本机游戏目录");
   }
@@ -174,6 +176,8 @@ final class DownloadStore extends SQLiteOpenHelper {
   synchronized void cancel(String id) throws IOException {
     Item item = get(id);
     if (item == null) return;
+    if (id.equals(context.getSharedPreferences("dolphin", Context.MODE_PRIVATE).getString("task", "")))
+      throw new IOException("此文件仍授权给 Dolphin。请先在 Dolphin 保存并退出，再到 GameCube 设置确认退出、回收授权后移除。");
     if (QUEUED.equals(item.state) || RUNNING.equals(item.state) || PREPARING.equals(item.state))
       throw new IOException("请先暂停并等待下载停止");
     // Only our task-owned partial and completed ROM; never emulator saves or shared folders.

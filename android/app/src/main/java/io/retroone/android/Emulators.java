@@ -37,6 +37,8 @@ final class Emulators {
     if ("fbneo".equals(item.platform)) return new Fbneo(context).status(item, present);
     if (CartridgePolicy.supports(item.platform))
       return new CartridgeAdapter(context).status(item, present);
+    if (RuntimePolicy.supports(item.platform))
+      return new RuntimeAdapter(context).status(item, present);
     if (RetroArchPolicy.supports(item.platform)) {
       RetroArch adapter = new RetroArch(context);
       return RetroArchPolicy.assess(

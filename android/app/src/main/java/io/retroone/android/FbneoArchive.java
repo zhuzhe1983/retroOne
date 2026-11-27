@@ -25,9 +25,18 @@ final class FbneoArchive {
 
   /** Bound memory before ZipFile parses the central directory. No archive bytes are rewritten. */
   static int checkLayout(File archive) throws IOException {
+    return checkLayout(archive, MAX_ARCHIVE_BYTES);
+  }
+
+  // The DS cartridge adapter needs room for a 512 MiB payload and ZIP overhead.
+  // Existing arcade callers retain their original 512 MiB bound.
+  static int checkLayout(File archive, long physicalLimit) throws IOException {
+    if (physicalLimit <= 0 || physicalLimit > 576L * 1024 * 1024)
+      throw new IOException("ZIP 物理大小限制无效");
     try (RandomAccessFile file = new RandomAccessFile(archive, "r")) {
       long size = file.length();
-      if (size > MAX_ARCHIVE_BYTES) throw new IOException("ZIP 超过自动校验的 512 MiB 物理大小上限，请手动导入");
+      if (size > physicalLimit)
+        throw new IOException("ZIP 超过自动校验的 " + physicalLimit / (1024 * 1024) + " MiB 物理大小上限，请手动导入");
       if (size < 22 || file.readInt() != 0x504b0304)
         throw new IOException("仅接入标准 ZIP；带前缀、自解压或空归档请手动导入");
       byte[] tail = new byte[(int) Math.min(size, 65557)];

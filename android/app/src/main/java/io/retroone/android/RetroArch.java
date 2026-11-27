@@ -47,17 +47,21 @@ final class RetroArch {
 
   String corePath(String platform) throws PackageManager.NameNotFoundException {
     CartridgePolicy.Spec cartridge = CartridgePolicy.spec(platform);
+    RuntimePolicy.Spec runtime = RuntimePolicy.spec(platform);
     if (!platform.equals("nes")
         && !platform.equals("fbneo")
         && !platform.equals("mame2003plus")
-        && cartridge == null) throw new IllegalArgumentException("Unsupported core");
+        && cartridge == null
+        && runtime == null) throw new IllegalArgumentException("Unsupported core");
     return context.getPackageManager().getApplicationInfo(RetroArchPolicy.PACKAGE, 0).dataDir
         + "/cores/"
         + (platform.equals("mame2003plus")
             ? "mame2003_plus_libretro_android.so"
             : platform.equals("fbneo")
                 ? "fbneo_libretro_android.so"
-                : cartridge != null ? cartridge.core : RetroArchPolicy.CORE);
+                : cartridge != null
+                    ? cartridge.core
+                    : runtime != null ? runtime.core : RetroArchPolicy.CORE);
   }
 
   String externalFilesPath() {
@@ -350,6 +354,22 @@ final class RetroArch {
         hash);
   }
 
+  String stageRuntime(File source, RuntimePolicy.Spec spec, String originalName) throws Exception {
+    if (spec == null || !RuntimePolicy.isRomName(spec, originalName))
+      throw new IOException("镜像格式与平台不符");
+    RuntimePolicy.validateFile(spec, source);
+    String hash;
+    try (InputStream in = new FileInputStream(source)) {
+      hash = digest(in, source.length());
+    }
+    return stageDocument(
+        source,
+        folder(),
+        RuntimePolicy.stagedName(spec, hash, originalName),
+        directoryLabel(),
+        hash);
+  }
+
   private String stageDocument(
       File source, DocumentFile directory, String name, String expectedDirectory, String hash)
       throws Exception {
@@ -427,12 +447,17 @@ final class RetroArch {
       throw new IOException("启动路径必须是已授权目录中的校验副本");
     String relative = path.substring(directoryLabel().length() + 1);
     CartridgePolicy.Spec cartridge = CartridgePolicy.spec(platform);
+    RuntimePolicy.Spec runtime = RuntimePolicy.spec(platform);
     boolean valid =
         (platform.equals("fbneo") || platform.equals("mame2003plus"))
             ? relative.matches("fb-[a-f0-9]{64}/[A-Za-z0-9_-]{1,64}\\.zip")
             : platform.equals("nes")
                 ? relative.matches("ro-[a-f0-9]{64}\\.nes")
-                : cartridge != null && CartridgePolicy.isStagedName(cartridge, relative);
+                : cartridge != null
+                    ? CartridgePolicy.isStagedName(cartridge, relative)
+                    : runtime != null
+                        && relative.startsWith("ro-" + runtime.id + "-")
+                        && RuntimePolicy.validStagedName(relative);
     if (!valid) throw new IOException("启动路径必须是当前平台在已授权目录中的校验副本");
     // Load RetroArch's default global config; save/input paths come from that config.
     return withEnvironment(

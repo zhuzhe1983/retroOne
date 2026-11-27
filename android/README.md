@@ -187,3 +187,41 @@ adb -s DEVICE_SERIAL shell am instrument -w -r \
 ```
 
 合并 KOF97 样本改为 `expectedSet kof97`、`expectedMerged true`。测试复核实际成员、BIOS、失败／取消导入保留旧选择、共享副本复用及连接／下载原件不变，不派发模拟器，也不把内容匹配标成可玩。正式游玩须另测画面、投币、开始与动作。BIOS 私有副本按 SHA-256 命名；共享 bundle 的路径同时包含游戏与 BIOS 摘要，避免更换 BIOS 后污染旧会话，旧副本保留供退出模拟器后清理。所有样本、BIOS 和设备证据仅保留在本地忽略目录，不进入仓库或公开产物。
+
+## 0.2.7 独立镜像与 Dolphin 探针
+
+0.2.7 开发版新增五个 RetroArch 入口，真机验收状态见 [使用说明](../docs/android.md#027-开发版独立镜像入口验收中)。测试必须使用自己的镜像，并先保存、退出正在运行的游戏；不以测试结果 `OK` 替代真实画面与操作检查。
+
+下面的纯元数据测试只创建、清理自己的合成文件，不启动模拟器：
+
+```sh
+adb -s DEVICE_SERIAL shell am instrument -w -r \
+  -e class io.retroone.android.GamesFileProviderTest \
+  io.retroone.android.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+已下载镜像的校验、共享副本复用和 RetroArch Intent 测试，必须给精确的本机下载任务 UUID。省略 `launchRuntime` 时只准备副本；设置为 `true` 才启动。不会自动写入游戏验证结果。
+
+```sh
+adb -s DEVICE_SERIAL shell am instrument -w -r \
+  -e class io.retroone.android.RuntimeDeviceTest \
+  -e runtimeFolder true -e runtimeTaskId TASK_UUID -e launchRuntime true \
+  io.retroone.android.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+Dolphin 使用官方导出的 MainActivity。探针仅接收已完成的 `gamecube/gc/wii` 独立 ISO/GCM/RVZ 下载，不安装、下载或选择任意游戏。派发后保留精确 URI READ 授权用于延迟读取，观察至少 15 秒；退出游戏后用第二条命令回收。两项不能在同一测试运行中开启。
+
+```sh
+adb -s DEVICE_SERIAL shell am instrument -w -r \
+  -e class io.retroone.android.DolphinUriProbeTest \
+  -e dolphinUriProbe true -e dolphinTaskId TASK_UUID \
+  io.retroone.android.test/androidx.test.runner.AndroidJUnitRunner
+
+# 在 Dolphin 保存并退出该游戏后：
+adb -s DEVICE_SERIAL shell am instrument -w -r \
+  -e class io.retroone.android.DolphinUriProbeTest \
+  -e dolphinUriRevoke true -e dolphinExited true -e dolphinTaskId TASK_UUID \
+  io.retroone.android.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+依据：[Dolphin 2609b ContentHandler](https://github.com/dolphin-emu/dolphin/blob/2609b/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/utils/ContentHandler.kt)、[StartupHandler](https://github.com/dolphin-emu/dolphin/blob/2609b/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/utils/StartupHandler.kt)、[CHD 格式](https://github.com/mamedev/mame/blob/master/src/lib/util/chd.h)、[melonDS DS](https://github.com/JesseTG/melonds-ds)。

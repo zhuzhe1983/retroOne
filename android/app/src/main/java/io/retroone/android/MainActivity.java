@@ -81,6 +81,7 @@ public final class MainActivity extends Activity {
   private EdenFlow edenFlow;
   private FbneoFlow fbneoFlow;
   private CartridgeFlow cartridgeFlow;
+  private RuntimeFlow runtimeFlow;
   private final Set<String> localMetadataRequested = new HashSet<>();
 
   private final class LocalButton {
@@ -132,6 +133,7 @@ public final class MainActivity extends Activity {
     edenFlow = new EdenFlow(this, this::emulatorsChanged);
     fbneoFlow = new FbneoFlow(this, io, this::emulatorsChanged, retroArchFlow);
     cartridgeFlow = new CartridgeFlow(this, io, this::emulatorsChanged, retroArchFlow);
+    runtimeFlow = new RuntimeFlow(this, io, this::emulatorsChanged, retroArchFlow);
     pspInstalled = !Emulators.installed(this).isEmpty();
     try {
       config = RetroApplication.from(this).credentials.current();
@@ -217,6 +219,7 @@ public final class MainActivity extends Activity {
     edenFlow.onResume();
     fbneoFlow.onResume();
     cartridgeFlow.onResume();
+    runtimeFlow.onResume();
   }
 
   @Override
@@ -226,6 +229,7 @@ public final class MainActivity extends Activity {
     edenFlow.onPause();
     fbneoFlow.onPause();
     cartridgeFlow.onPause();
+    runtimeFlow.onPause();
     handler.removeCallbacks(poll);
     super.onPause();
   }
@@ -1220,9 +1224,11 @@ public final class MainActivity extends Activity {
                                         ? "NES · 使用 RetroArch ARM64 / FCEUmm（需完成一次启动测试）"
                                         : CartridgePolicy.supports(game.optString("platform"))
                                             ? "使用 RetroArch · 需完成当前平台的核心与启动测试"
-                                            : Emulators.installed(this).isEmpty()
-                                                ? "下载后安装 PPSSPP 即可启动"
-                                                : "PSP · 使用已安装的 PPSSPP",
+                                            : RuntimePolicy.supports(game.optString("platform"))
+                                                ? "使用 RetroArch · 镜像、BIOS 与实际操作需逐款确认"
+                                                : Emulators.installed(this).isEmpty()
+                                                    ? "下载后安装 PPSSPP 即可启动"
+                                                    : "PSP · 使用已安装的 PPSSPP",
                             13,
                             ACCENT));
                   }
@@ -1322,7 +1328,9 @@ public final class MainActivity extends Activity {
                       : CartridgePolicy.supports(item.platform)
                           ? "使用 RetroArch · "
                               + CartridgeFlow.coreLabel(CartridgePolicy.spec(item.platform))
-                          : "使用本机 PPSSPP")
+                          : RuntimePolicy.supports(item.platform)
+                              ? "使用 RetroArch · " + RuntimePolicy.spec(item.platform).label
+                              : "使用本机 PPSSPP")
               : "已下载 · " + state.label);
       if (state == LaunchPolicy.State.PLAYABLE) {
         button.setBackground(shape(ACCENT, 10));
@@ -1790,6 +1798,15 @@ public final class MainActivity extends Activity {
       cartridgeFlow.play(item);
       return;
     }
+    if (RuntimePolicy.supports(item.platform)
+        && (support == LaunchPolicy.State.PLAYABLE
+            || support == LaunchPolicy.State.INSTALL_RETROARCH
+            || support == LaunchPolicy.State.CONFIGURE_RUNTIME
+            || support == LaunchPolicy.State.CHECK_RUNTIME)) {
+      if (downloadsPopup != null) downloadsPopup.dismiss();
+      runtimeFlow.play(item);
+      return;
+    }
     if (support != LaunchPolicy.State.PLAYABLE && support != LaunchPolicy.State.INSTALL) {
       String reason =
           support == LaunchPolicy.State.MISSING
@@ -1921,6 +1938,7 @@ public final class MainActivity extends Activity {
     form.addView(button("NES · RetroArch 设置", retroArchFlow::show));
     form.addView(button("经典卡带 · SFC / GB / GBA / MD 等设置", cartridgeFlow::show));
     form.addView(button("街机 · FinalBurn Neo 设置", fbneoFlow::show));
+    form.addView(button("N64 / NDS / PS1 / Dreamcast / Saturn 设置", runtimeFlow::show));
     form.addView(button("Switch · Eden 设置", edenFlow::show));
     form.addView(
         text(
